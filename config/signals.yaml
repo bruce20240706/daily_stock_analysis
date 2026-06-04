@@ -1,0 +1,21 @@
+# Signal-layer (timing) thresholds, consumed by quantpick/signals/.
+
+trend:
+  ma_fast: 20
+  ma_slow: 60
+  adx_min: 25.0            # below this -> RANGE regime (suppress trend signals)
+
+buy:
+  rsi_overbought: 70.0     # block buys when RSI exceeds this
+  volume_surge_ratio: 1.5  # today volume / 5d-average volume to confirm
+  breakout_lookback: 60    # N-day high used by the breakout trigger
+
+sell:
+  rsi_overbought: 75.0
+  ma_break: 20             # breaking below this MA (with volume) triggers sell
+
+levels:
+  atr_period: 14
+  stop_atr_mult: 2.0       # stop = max(entry - 2*ATR, swing low)
+  target_rr: 2.0           # take-profit reward:risk ratio
+  swing_lookback: 20       # bars used for the recent swing low/high

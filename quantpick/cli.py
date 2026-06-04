@@ -81,13 +81,25 @@ def report(config: str = _CONFIG_OPT) -> None:
 
 
 @app.command()
+def advise(config: str = _CONFIG_OPT) -> None:
+    """Buy signals for screened candidates + sell signals for holdings."""
+    _load(config)
+    from quantpick.portfolio.holdings import load_holdings
+
+    res = load_holdings()
+    n = len(res.value) if res.ok and res.value is not None else 0
+    typer.echo(f"holdings loaded: {n} (set config/holdings.yaml for sell signals)")
+    typer.echo("signal engine is not implemented yet (signals phase).")
+
+
+@app.command()
 def run(
     strategy: str = typer.Option("ma_trend", "--strategy", "-s", help="Strategy name."),
     config: str = _CONFIG_OPT,
 ) -> None:
-    """One-shot pipeline: update -> screen -> (AI) -> report."""
+    """One-shot pipeline: update -> screen -> advise -> (AI) -> report."""
     _load(config)
-    typer.echo("end-to-end run is not implemented yet (phases 1-3).")
+    typer.echo("end-to-end run is not implemented yet (phases 1-3 + signals).")
 
 
 def main() -> None:

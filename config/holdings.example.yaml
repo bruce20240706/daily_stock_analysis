@@ -1,0 +1,7 @@
+# Your holdings / watchlist - sell signals are evaluated against these.
+# Copy this file to config/holdings.yaml (git-ignored) and edit it.
+# `cost_price` is optional; omit it for a pure watchlist entry.
+
+holdings:
+  - { code: "600519.SH", name: "Kweichow Moutai", shares: 100, cost_price: 1600.0 }
+  - { code: "00700.HK", name: "Tencent", shares: 200 }   # watchlist entry, no cost
