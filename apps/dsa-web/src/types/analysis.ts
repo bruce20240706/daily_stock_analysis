@@ -496,6 +496,7 @@ export interface NewsIntelResponse {
 /** History filter parameters */
 export interface HistoryFilters {
   stockCode?: string;
+  reportType?: ReportType;
   startDate?: string;
   endDate?: string;
 }
