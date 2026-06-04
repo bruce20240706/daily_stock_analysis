@@ -1,0 +1,13 @@
+# Available factors (registered in quantpick/factors/). Strategies reference
+# these by name in their `factor_weights`. This file documents each factor's
+# direction and meaning; the engine reads actual weights from strategy files.
+
+technical:
+  momentum_20d:   { direction: higher_is_better, desc: "20-day price return" }
+  trend_adx:      { direction: higher_is_better, desc: "ADX trend strength" }
+  volume_surge:   { direction: higher_is_better, desc: "today volume / 5d average" }
+
+fundamental:
+  value_pe:       { direction: lower_is_better,  desc: "trailing PE (ttm)" }
+  quality_roe:    { direction: higher_is_better, desc: "return on equity" }
+  growth_revenue: { direction: higher_is_better, desc: "YoY revenue growth" }

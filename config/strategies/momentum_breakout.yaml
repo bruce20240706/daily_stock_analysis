@@ -1,0 +1,7 @@
+name: momentum_breakout
+description: "Momentum breakout: volume surge combined with price momentum (A-share)."
+markets: [A]
+factor_weights:
+  volume_surge: 0.5
+  momentum_20d: 0.5
+top_n: 20

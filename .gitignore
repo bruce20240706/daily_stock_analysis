@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets - never commit real keys
+.env
+
+# Local data cache and generated reports (track the dir, ignore the content)
+data_cache/*
+!data_cache/.gitkeep
+reports/*
+!reports/.gitkeep
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store

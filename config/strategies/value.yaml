@@ -1,0 +1,8 @@
+name: value
+description: "Value tilt: cheap, profitable, and growing (A-share)."
+markets: [A]
+factor_weights:
+  value_pe: 0.4          # value_pe is lower_is_better; the scorer flips its sign
+  quality_roe: 0.4
+  growth_revenue: 0.2
+top_n: 30

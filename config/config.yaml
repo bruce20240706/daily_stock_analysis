@@ -1,0 +1,27 @@
+# QuantPick main configuration.
+# All fields are optional; omitted ones fall back to defaults in
+# quantpick/core/config.py. Secrets (API keys) are NEVER stored here - they are
+# read from the environment / .env (see .env.example).
+
+data:
+  sources: [akshare, baostock, adata]   # tried in order, with fallback
+  cache_dir: data_cache
+  history_days: 800
+
+universe:
+  markets: [A]                  # "A" = A-share, "HK" = Hong Kong
+  include_star_market: true     # 科创板 688xxx
+  include_chinext: true         # 创业板 30xxxx / 301xxx
+  include_bse: false            # 北交所
+  min_turnover_amount: 200000000.0   # 2e8 daily turnover floor (CNY)
+  min_market_cap: 0.0
+
+ai:
+  enabled: false                # enable in phase 3; keys come from .env
+  provider: anthropic           # anthropic | openai
+  model: claude-sonnet-4-6
+  max_candidates: 10
+
+strategies_dir: config/strategies
+reports_dir: reports
+log_level: INFO

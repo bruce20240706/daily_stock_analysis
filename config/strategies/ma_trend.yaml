@@ -1,0 +1,8 @@
+name: ma_trend
+description: "Trend-following: strong trend plus positive momentum (A-share)."
+markets: [A]
+factor_weights:
+  trend_adx: 0.5
+  momentum_20d: 0.4
+  volume_surge: 0.1
+top_n: 30
