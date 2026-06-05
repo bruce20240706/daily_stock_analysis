@@ -91,3 +91,24 @@ def test_binance_symbol_and_parse():
     assert norm.iloc[1]["volume"] == 20.0        # base volume
     q = f._parse_ticker(_BINANCE_TICKER, "BTC/USDT")
     assert q.price == 115.0 and q.amount == 2300.0
+
+
+from data_provider.okx_fetcher import OkxFetcher
+
+# OKX /api/v5/market/candles 返回 {"data": [[ts,o,h,l,c,vol,volCcy,volCcyQuote,confirm], ...]}（新→旧）
+_OKX_DATA = [
+    ["1717286400000", "105", "120", "100", "115", "20", "0.18", "2300", "1"],
+    ["1717200000000", "100", "110", "90", "105", "10", "0.1", "1050", "1"],
+]
+_OKX_TICKER = {"last": "115", "open24h": "105", "vol24h": "20", "volCcy24h": "2300", "high24h": "120", "low24h": "100"}
+
+
+def test_okx_symbol_and_parse():
+    f = OkxFetcher()
+    assert f._to_exchange_symbol("BTC/USDT") == "BTC-USDT"
+    df = f._parse_klines(_OKX_DATA)
+    norm = f._normalize_data(df, "BTC/USDT")   # 内部按 date 升序
+    assert norm.iloc[0]["close"] == 105.0 and norm.iloc[1]["close"] == 115.0
+    assert norm.iloc[1]["amount"] == 2300.0    # volCcyQuote
+    q = f._parse_ticker(_OKX_TICKER, "BTC/USDT")
+    assert q.price == 115.0 and round(q.change_pct, 2) == 9.52  # (115-105)/105*100
