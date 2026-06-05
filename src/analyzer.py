@@ -3381,14 +3381,20 @@ class GeminiAnalyzer:
         except (TypeError, ValueError):
             return 'N/A'
 
-    def _format_price(self, value: Optional[float]) -> str:
-        """格式化价格显示（按数量级动态精度，兼容大额股票与极小币种）"""
+    def _format_price(self, value: Optional[float], *, crypto: bool = False) -> str:
+        """格式化价格显示。
+
+        股票（crypto=False）保持原有 2 位小数口径，不改变存量报告输出；
+        crypto（crypto=True）按数量级动态精度，避免极小币种（如 SHIB）被显示为 0.00。
+        """
         if value is None:
             return 'N/A'
         try:
             v = float(value)
         except (TypeError, ValueError):
             return 'N/A'
+        if not crypto:
+            return f"{v:.2f}"
         av = abs(v)
         if av >= 1:
             return f"{v:.2f}"
@@ -3403,6 +3409,7 @@ class GeminiAnalyzer:
         yesterday = context.get('yesterday', {}) or {}
         # crypto 标的按 base/quote 币种展示量/额单位，股票保持默认（股/元）
         vol_unit, amt_currency = _crypto_volume_amount_units(context.get('code', ''))
+        is_crypto = vol_unit is not None  # crypto 时价格用动态精度，股票保持 2 位
 
         prev_close = yesterday.get('close')
         close = today.get('close')
@@ -3424,13 +3431,13 @@ class GeminiAnalyzer:
 
         snapshot = {
             "date": context.get('date', '未知'),
-            "close": self._format_price(close),
-            "open": self._format_price(today.get('open')),
-            "high": self._format_price(high),
-            "low": self._format_price(low),
-            "prev_close": self._format_price(prev_close),
+            "close": self._format_price(close, crypto=is_crypto),
+            "open": self._format_price(today.get('open'), crypto=is_crypto),
+            "high": self._format_price(high, crypto=is_crypto),
+            "low": self._format_price(low, crypto=is_crypto),
+            "prev_close": self._format_price(prev_close, crypto=is_crypto),
             "pct_chg": self._format_percent(today.get('pct_chg')),
-            "change_amount": self._format_price(change_amount),
+            "change_amount": self._format_price(change_amount, crypto=is_crypto),
             "amplitude": self._format_percent(amplitude),
             "volume": self._format_volume(today.get('volume'), unit=vol_unit),
             "amount": self._format_amount(today.get('amount'), currency=amt_currency),
@@ -3438,7 +3445,7 @@ class GeminiAnalyzer:
 
         if realtime:
             snapshot.update({
-                "price": self._format_price(realtime.get('price')),
+                "price": self._format_price(realtime.get('price'), crypto=is_crypto),
                 "volume_ratio": realtime.get('volume_ratio', 'N/A'),
                 "turnover_rate": self._format_percent(realtime.get('turnover_rate')),
                 "source": getattr(realtime.get('source'), 'value', realtime.get('source', 'N/A')),

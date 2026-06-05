@@ -5,8 +5,13 @@ a = GeminiAnalyzer()
 
 
 def test_price_dynamic_precision():
-    assert a._format_price(45000.0) == "45000.00"   # 大额仍 2 位
-    assert a._format_price(0.00000123) not in ("0.00", "N/A")  # 小币不丢精度
+    assert a._format_price(45000.0) == "45000.00"            # 大额仍 2 位
+    # 股票默认（crypto=False）保持 2 位精度，不回归存量报告（如 change_amount=0.35）
+    assert a._format_price(0.35) == "0.35"
+    assert a._format_price(0.00000123) == "0.00"
+    # crypto 小币高精度，不丢有效信息
+    assert a._format_price(0.00000123, crypto=True) not in ("0.00", "N/A")
+    assert a._format_price(45000.0, crypto=True) == "45000.00"
     assert a._format_price(None) == "N/A"
 
 
