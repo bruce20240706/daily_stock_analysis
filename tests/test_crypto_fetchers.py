@@ -112,3 +112,24 @@ def test_okx_symbol_and_parse():
     assert norm.iloc[1]["amount"] == 2300.0    # volCcyQuote
     q = f._parse_ticker(_OKX_TICKER, "BTC/USDT")
     assert q.price == 115.0 and round(q.change_pct, 2) == 9.52  # (115-105)/105*100
+
+
+from data_provider.coinbase_fetcher import CoinbaseFetcher
+
+# Coinbase /products/{id}/candles 返回 [[time, low, high, open, close, volume], ...]（注意列序）
+_CB_CANDLES = [
+    [1717286400, 100, 120, 105, 115, 20],
+    [1717200000, 90, 110, 100, 105, 10],
+]
+_CB_TICKER = {"price": "115", "volume": "20"}
+
+
+def test_coinbase_symbol_parse_amount_none():
+    f = CoinbaseFetcher()
+    assert f._to_exchange_symbol("BTC/USDT") == "BTC-USDT"
+    df = f._parse_klines(_CB_CANDLES)
+    norm = f._normalize_data(df, "BTC/USDT")
+    assert norm.iloc[0]["open"] == 100.0 and norm.iloc[1]["open"] == 105.0  # 升序后
+    assert pd.isna(norm.iloc[0]["amount"])      # 无 quote volume -> None/NaN，不伪造
+    q = f._parse_ticker(_CB_TICKER, "BTC/USDT")
+    assert q.price == 115.0 and q.amount is None
