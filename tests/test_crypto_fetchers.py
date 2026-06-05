@@ -67,3 +67,27 @@ def test_days_to_limit_capping():
     f = _FakeCrypto()
     assert f._days_to_limit(30) >= 30
     assert f._days_to_limit(5000) <= f.MAX_LIMIT
+
+
+from data_provider.binance_fetcher import BinanceFetcher
+
+# Binance /api/v3/klines 真实结构（截断到本测试需要的列）
+_BINANCE_KLINES = [
+    [1717200000000, "100", "110", "90", "105", "10.0", 1717286399999, "1050.0", 5, "6", "630", "0"],
+    [1717286400000, "105", "120", "100", "115", "20.0", 1717372799999, "2300.0", 8, "12", "1380", "0"],
+]
+# Binance /api/v3/ticker/24hr（截断）
+_BINANCE_TICKER = {"lastPrice": "115.0", "priceChangePercent": "9.52",
+                   "volume": "20.0", "quoteVolume": "2300.0", "highPrice": "120.0", "lowPrice": "100.0"}
+
+
+def test_binance_symbol_and_parse():
+    f = BinanceFetcher()
+    assert f._to_exchange_symbol("BTC/USDT") == "BTCUSDT"
+    df = f._parse_klines(_BINANCE_KLINES)
+    norm = f._normalize_data(df, "BTC/USDT")
+    assert list(norm.columns)[:3] == ["code", "date", "open"]
+    assert norm.iloc[1]["amount"] == 2300.0      # quoteAssetVolume
+    assert norm.iloc[1]["volume"] == 20.0        # base volume
+    q = f._parse_ticker(_BINANCE_TICKER, "BTC/USDT")
+    assert q.price == 115.0 and q.amount == 2300.0
