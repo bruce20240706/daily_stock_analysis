@@ -66,6 +66,20 @@ HK_PROFILE = MarketProfile(
     has_sector_rankings=False,
 )
 
+CRYPTO_PROFILE = MarketProfile(
+    region="crypto",
+    mood_index_code="BTC/USDT",
+    news_queries=[
+        "比特币 行情",
+        "以太坊 行情",
+        "crypto market",
+        "加密货币 大盘",
+    ],
+    prompt_index_hint="以 BTC/ETH 等主流币走势衡量加密市场整体情绪与风险偏好",
+    has_market_stats=False,
+    has_sector_rankings=False,
+)
+
 
 def get_profile(region: str) -> MarketProfile:
     """根据 region 返回对应的 MarketProfile"""
@@ -73,4 +87,6 @@ def get_profile(region: str) -> MarketProfile:
         return US_PROFILE
     if region == "hk":
         return HK_PROFILE
+    if region == "crypto":
+        return CRYPTO_PROFILE
     return CN_PROFILE

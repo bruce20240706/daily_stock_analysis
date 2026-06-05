@@ -24,6 +24,10 @@ def detect_market(stock_code: Optional[str]) -> str:
 
     code = stock_code.strip().upper()
 
+    # crypto 现货：BASE/QUOTE（如 BTC/USDT），优先于股票规则
+    if "/" in code:
+        return "crypto"
+
     # HK stocks: HK00700, 00700.HK, or 5-digit pure numbers
     if code.startswith("HK") or code.endswith(".HK"):
         return "hk"
@@ -58,6 +62,10 @@ _MARKET_ROLES = {
         "zh": "美股",
         "en": "US stock",
     },
+    "crypto": {
+        "zh": "数字货币",
+        "en": "Cryptocurrency",
+    },
 }
 
 _MARKET_GUIDELINES = {
@@ -89,6 +97,20 @@ _MARKET_GUIDELINES = {
         "en": (
             "- This analysis covers a **US stock** (listed on NYSE/NASDAQ).\n"
             "- US stocks have no daily price limits (but have circuit breakers), allow T+0 and pre/after-market trading. Consider USD FX, Fed policy, and SEC regulations."
+        ),
+    },
+    "crypto": {
+        "zh": (
+            "- 本次分析对象为 **数字货币现货**（如 BTC/USDT）。\n"
+            "- crypto 为 7×24 连续交易，无涨跌停、无 T+1、无盘前盘后；波动极大、"
+            "受流动性/资金费率/宏观与监管消息影响显著，需关注杠杆与交易所价差风险。\n"
+            "- 不存在市盈率/换手率等传统基本面指标，相关字段缺失属正常，请勿据此编造。"
+        ),
+        "en": (
+            "- This analysis covers a **cryptocurrency spot pair** (e.g. BTC/USDT).\n"
+            "- Crypto trades 24/7 with no price limits, no T+1, no pre/after-market. "
+            "Extremely volatile; watch liquidity, funding rates, macro/regulatory news, leverage and exchange spreads.\n"
+            "- Traditional fundamentals (PE, turnover) do not exist; missing such fields is expected — do not fabricate."
         ),
     },
 }
