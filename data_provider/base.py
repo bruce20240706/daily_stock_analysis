@@ -38,6 +38,25 @@ logger = logging.getLogger(__name__)
 STANDARD_COLUMNS = ['date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg']
 
 
+# 受支持的 crypto 计价币（QUOTE）。法币（CNY/JPY 等）不支持，避免跨汇率换算。
+SUPPORTED_QUOTES = {"USDT", "USDC", "USD", "BUSD", "BTC", "ETH"}
+
+
+def is_crypto_code(code: str) -> bool:
+    """判定是否为受支持的数字货币现货代码（形如 BASE/QUOTE，如 BTC/USDT）。
+
+    规则：含且仅含一个 '/'，BASE 非空，QUOTE 属于 SUPPORTED_QUOTES。
+    A股/港股/美股代码均不含 '/'，因此零冲突。
+    """
+    if not code or "/" not in code:
+        return False
+    parts = code.strip().upper().split("/")
+    if len(parts) != 2:
+        return False
+    base, quote = parts
+    return bool(base) and quote in SUPPORTED_QUOTES
+
+
 def unwrap_exception(exc: Exception) -> Exception:
     """
     Follow chained exceptions and return the deepest non-cyclic cause.
@@ -89,6 +108,9 @@ def normalize_stock_code(stock_code: str) -> str:
     all individual fetchers receive a clean 6-digit code (for A-shares/ETFs).
     """
     code = stock_code.strip()
+    # crypto（BASE/QUOTE）保持原样、仅大写；股票分支逻辑不变
+    if "/" in code:
+        return code.upper()
     upper = code.upper()
 
     # Normalize HK prefix to a canonical 5-digit form (e.g. hk1810 -> HK01810)
