@@ -175,6 +175,8 @@ def _is_hk_market(code: str) -> bool:
     支持 `HK00700` 及纯 5 位数字形式（A 股 ETF/股票常见为 6 位）。
     """
     normalized = (code or "").strip().upper()
+    if "/" in normalized:  # crypto，非港股
+        return False
     if normalized.endswith(".HK"):
         base = normalized[:-3]
         return base.isdigit() and 1 <= len(base) <= 5

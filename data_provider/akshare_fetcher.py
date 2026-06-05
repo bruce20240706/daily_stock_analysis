@@ -130,6 +130,8 @@ def _is_hk_code(stock_code: str) -> bool:
     """
     # 去除可能的 'hk' 前缀并检查是否为纯数字
     code = stock_code.strip().lower()
+    if "/" in code:  # crypto，非港股
+        return False
     if code.endswith('.hk'):
         numeric_part = code[:-3]
         return numeric_part.isdigit() and 1 <= len(numeric_part) <= 5

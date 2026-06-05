@@ -32,3 +32,15 @@ def test_normalize_keeps_crypto(raw, norm):
 def test_normalize_stock_unchanged(code, norm):
     # 回归：股票代码规范化行为不变
     assert normalize_stock_code(code) == norm
+
+
+from data_provider.us_index_mapping import is_us_stock_code
+from data_provider.base import _is_hk_market
+from data_provider.akshare_fetcher import _is_hk_code
+
+
+@pytest.mark.parametrize("code", ["BTC/USDT", "ETH/USDT", "eth/btc"])
+def test_stock_predicates_reject_crypto(code):
+    assert is_us_stock_code(code) is False
+    assert _is_hk_market(code) is False
+    assert _is_hk_code(code) is False
