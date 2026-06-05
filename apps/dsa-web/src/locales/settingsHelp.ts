@@ -335,6 +335,45 @@ const settingsHelpZhCN: SettingsHelpMap = {
       '失败只应影响飞书应用机器人链路，不应拖垮主分析流程。',
     ],
   },
+  'settings.notification.FEISHU_CHAT_ID': {
+    title: '飞书 App Bot 推送目标',
+    summary: '配置飞书应用机器人主动推送的目标 chat_id（群聊模式）或 open_id（私聊模式）。',
+    usage: '需要同时填写 FEISHU_APP_ID 和 FEISHU_APP_SECRET。群聊模式填写 oc_ 开头的 chat_id；私聊模式填写 ou_ 开头的 open_id 并将 FEISHU_RECEIVE_ID_TYPE 设为 open_id。',
+    valueNotes: [
+      '仅凭 FEISHU_APP_ID / FEISHU_APP_SECRET 不会自动启用群 Webhook 推送。',
+      'App Bot 模式与 Webhook 模式互斥：Webhook URL 优先，未配置 Webhook 时才走 App Bot。',
+    ],
+    impact: [
+      '影响飞书 App Bot 通知渠道的送达目标。',
+      '失败时不应拖垮主分析流程，只影响该渠道送达。',
+    ],
+    notes: [
+      'App Bot 需要应用拥有 im:message:send_as_bot 权限。',
+      '私聊需要用户在飞书端主动打开过与应用机器人的对话框。',
+    ],
+  },
+  'settings.notification.FEISHU_RECEIVE_ID_TYPE': {
+    title: '飞书接收方 ID 类型',
+    summary: '指定 FEISHU_CHAT_ID 的类型：chat_id 表示群聊，open_id 表示私聊。',
+    usage: '群聊选择 chat_id；私聊（给指定用户发 P2P 消息）选择 open_id。',
+    valueNotes: [
+      '仅当 FEISHU_CHAT_ID 已填写时生效。',
+      '填错类型会导致消息发送失败；如果收到 invalid receive_id 错误，需要确认该值与前端的实际 ID 类型一致。',
+    ],
+    impact: ['影响飞书 App Bot 消息的路由方式。'],
+    notes: ['大多数场景使用 chat_id 即可；如果值不是 chat_id 或 open_id，运行时会自动回退到 chat_id。'],
+  },
+  'settings.notification.FEISHU_DOMAIN': {
+    title: '飞书 API 域名',
+    summary: '选择飞书 API 的区域：feishu 对应飞书国内版（feishu.cn），lark 对应 Lark 国际版（larksuite.com）。',
+    usage: '国内用户选择 feishu；海外 / Lark 用户选择 lark。',
+    valueNotes: [
+      '仅影响 App Bot 主动推送的 API 调用域名，不影响 Webhook URL。',
+      '选错会导致 API 调用失败（SDK 连错服务器）。',
+    ],
+    impact: ['影响飞书 App Bot 主动推送的 API 连通性。'],
+    notes: ['如果值不是 feishu 或 lark，运行时会自动回退到 feishu。'],
+  },
   'settings.notification.DINGTALK_STREAM_ENABLED': {
     title: '钉钉 Stream 模式',
     summary: '启用钉钉应用机器人长连接模式，不是普通钉钉群机器人 Webhook 开关。',
@@ -1318,6 +1357,45 @@ const settingsHelpEnUS: SettingsHelpMap = {
       'Restart the relevant bot/service process after saving; existing long connections are not rebuilt automatically.',
       'Failures should affect only the Feishu app bot path, not the main analysis flow.',
     ],
+  },
+  'settings.notification.FEISHU_CHAT_ID': {
+    title: 'Feishu App Bot Push Target',
+    summary: 'Configures the target chat_id (group mode) or open_id (P2P mode) for Feishu App Bot notification delivery.',
+    usage: 'FEISHU_APP_ID and FEISHU_APP_SECRET must also be configured. For groups, use a chat_id starting with oc_. For P2P, use an open_id starting with ou_ and set FEISHU_RECEIVE_ID_TYPE to open_id.',
+    valueNotes: [
+      'FEISHU_APP_ID / FEISHU_APP_SECRET alone do not enable group webhook delivery.',
+      'App Bot mode and Webhook mode are mutually exclusive: webhook URL takes priority; App Bot is used only when no webhook URL is configured.',
+    ],
+    impact: [
+      'Affects the target destination for the Feishu App Bot notification channel.',
+      'Delivery failure should not block the main analysis flow.',
+    ],
+    notes: [
+      'The app bot needs the im:message:send_as_bot permission.',
+      'For P2P messages, the target user must have previously opened the conversation with the app bot in Feishu.',
+    ],
+  },
+  'settings.notification.FEISHU_RECEIVE_ID_TYPE': {
+    title: 'Feishu Receive ID Type',
+    summary: 'Specifies the type of FEISHU_CHAT_ID: chat_id for group chat, open_id for P2P private message.',
+    usage: 'Choose chat_id for groups; choose open_id for sending P2P messages to a specific user.',
+    valueNotes: [
+      'Only takes effect when FEISHU_CHAT_ID is also configured.',
+      'If the type does not match the actual ID, sending will fail with an invalid receive_id error.',
+    ],
+    impact: ['Affects the routing of Feishu App Bot messages.'],
+    notes: ['chat_id covers most use cases. If the value is neither chat_id nor open_id, the runtime falls back to chat_id.'],
+  },
+  'settings.notification.FEISHU_DOMAIN': {
+    title: 'Feishu API Domain',
+    summary: 'Selects the Feishu API region: feishu for mainland China (feishu.cn), lark for international (larksuite.com).',
+    usage: 'Mainland China users choose feishu; international / Lark users choose lark.',
+    valueNotes: [
+      'Only affects the API domain used by App Bot notification delivery; does not affect webhook URLs.',
+      'Choosing the wrong domain causes API errors (SDK connects to the wrong server).',
+    ],
+    impact: ['Affects API connectivity for Feishu App Bot notification delivery.'],
+    notes: ['If the value is neither feishu nor lark, the runtime falls back to feishu.'],
   },
   'settings.notification.DINGTALK_STREAM_ENABLED': {
     title: 'DingTalk Stream Mode',

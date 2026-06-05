@@ -1539,6 +1539,81 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": ["not_webhook_delivery", "restart_required"],
     },
+    "FEISHU_CHAT_ID": {
+        "title": "Feishu Chat ID",
+        "description": "Target chat_id (group mode, oc_xxx) or open_id (P2P mode, ou_xxx) for Feishu App Bot notification delivery. Requires FEISHU_APP_ID + FEISHU_APP_SECRET.",
+        "category": "notification",
+        "data_type": "string",
+        "ui_control": "text",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": None,
+        "options": [],
+        "validation": {},
+        "display_order": 18,
+        "help_key": "settings.notification.FEISHU_CHAT_ID",
+        "examples": [
+            "FEISHU_CHAT_ID=oc_xxxxxxxxxxxxx",
+            "FEISHU_CHAT_ID=ou_xxxxxxxxxxxxx",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：飞书通知配置",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#飞书",
+            },
+        ],
+    },
+    "FEISHU_RECEIVE_ID_TYPE": {
+        "title": "Feishu Receive ID Type",
+        "description": "Type of FEISHU_CHAT_ID: 'chat_id' for group chat, 'open_id' for P2P private message.",
+        "category": "notification",
+        "data_type": "string",
+        "ui_control": "select",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "chat_id",
+        "options": [{"label": "chat_id (群聊)", "value": "chat_id"}, {"label": "open_id (私聊)", "value": "open_id"}],
+        "validation": {"enum": ["chat_id", "open_id"]},
+        "display_order": 19,
+        "help_key": "settings.notification.FEISHU_RECEIVE_ID_TYPE",
+        "examples": [
+            "FEISHU_RECEIVE_ID_TYPE=chat_id",
+            "FEISHU_RECEIVE_ID_TYPE=open_id",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：飞书通知配置",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#飞书",
+            },
+        ],
+    },
+    "FEISHU_DOMAIN": {
+        "title": "Feishu Domain",
+        "description": "Feishu API domain: 'feishu' (feishu.cn for mainland China) or 'lark' (larksuite.com for international).",
+        "category": "notification",
+        "data_type": "string",
+        "ui_control": "select",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "feishu",
+        "options": [{"label": "feishu (飞书国内)", "value": "feishu"}, {"label": "lark (国际版)", "value": "lark"}],
+        "validation": {"enum": ["feishu", "lark"]},
+        "display_order": 20,
+        "help_key": "settings.notification.FEISHU_DOMAIN",
+        "examples": [
+            "FEISHU_DOMAIN=feishu",
+            "FEISHU_DOMAIN=lark",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：飞书通知配置",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#飞书",
+            },
+        ],
+    },
     # ------------------------------------------------------------------
     # Notification – Telegram
     # ------------------------------------------------------------------

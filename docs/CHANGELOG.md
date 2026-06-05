@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
 - [改进] #1386 P6 复用市场阶段与 AnalysisContextPack 公开摘要联动告警、持仓手动分析、历史、回测和通知展示，不新增数据库迁移。
 
+- [新功能] 飞书通知新增应用机器人（App Bot）模式，支持通过 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_CHAT_ID 配置，无需额外创建自定义机器人。
 - [文档] 明确 AnalysisContextPack P6 文档、迁移与回滚边界，并同步既有 `SAVE_CONTEXT_SNAPSHOT` 到 `.env.example`、配置注册表、Web 设置帮助和完整指南。
 
 - [修复] 修复含 `/` 的 crypto 代码（如 `BTC/USDT`）无法命中带 `{code}` 路径参数的 API 路由：行情、历史、单股回测表现、持仓分析、按代码删历史共 5 条路由改用 `:path` 转换器，raw 斜杠与 `%2F` 编码均可命中，对存量股票代码完全向后兼容。
