@@ -1633,10 +1633,14 @@ class DataFetcherManager:
                 logger.info(f"[实时行情] {market_label} {stock_code} 无可用数据源")
             return None
         
-        # 获取配置的数据源优先级
+        # 获取配置的数据源优先级（crypto 用专属优先级，避免落到 A股源）
+        if is_crypto_code(stock_code):
+            _priority_str = getattr(config, "crypto_realtime_priority", "binance,okx,coinbase")
+        else:
+            _priority_str = config.realtime_source_priority
         source_priority = [
             source.strip().lower()
-            for source in config.realtime_source_priority.split(',')
+            for source in _priority_str.split(',')
             if source.strip()
         ]
         
@@ -1678,6 +1682,21 @@ class DataFetcherManager:
                     fetcher = self._get_fetcher_by_name("TushareFetcher", capability="realtime_quote")
                     if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
                         quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', raw_stock_code or stock_code)
+
+                elif source == "binance":
+                    fetcher = self._get_fetcher_by_name("BinanceFetcher", capability="realtime_quote")
+                    if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
+                        quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', stock_code)
+
+                elif source == "okx":
+                    fetcher = self._get_fetcher_by_name("OkxFetcher", capability="realtime_quote")
+                    if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
+                        quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', stock_code)
+
+                elif source == "coinbase":
+                    fetcher = self._get_fetcher_by_name("CoinbaseFetcher", capability="realtime_quote")
+                    if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
+                        quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', stock_code)
 
                 provider_name = fetcher.name if fetcher is not None else source
                 

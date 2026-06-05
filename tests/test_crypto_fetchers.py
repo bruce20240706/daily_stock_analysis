@@ -152,3 +152,27 @@ def test_crypto_fetchers_registered():
     mgr = DataFetcherManager()
     names = {f.name for f in mgr._get_fetchers_snapshot()}
     assert {"BinanceFetcher", "OkxFetcher", "CoinbaseFetcher"} <= names
+
+
+def test_realtime_routes_crypto_to_crypto_priority(monkeypatch):
+    mgr = DataFetcherManager()
+    captured = {}
+
+    def fake_get_by_name(name, capability=None):
+        for f in mgr._get_fetchers_snapshot():
+            if f.name == name:
+                return f
+        return None
+
+    monkeypatch.setattr(mgr, "_get_fetcher_by_name", fake_get_by_name)
+
+    def fake_call(fetcher, method, *a, **k):
+        captured["fetcher"] = fetcher.name
+        from data_provider.realtime_types import UnifiedRealtimeQuote, RealtimeSource
+        return UnifiedRealtimeQuote(code="BTC/USDT", name="BTC/USDT",
+                                    source=RealtimeSource.FALLBACK, price=115.0)
+
+    monkeypatch.setattr(mgr, "_call_fetcher_method", fake_call)
+    q = mgr.get_realtime_quote("BTC/USDT")
+    assert q is not None and q.price == 115.0
+    assert captured["fetcher"] in {"BinanceFetcher", "OkxFetcher", "CoinbaseFetcher"}
