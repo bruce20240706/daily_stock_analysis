@@ -2991,8 +2991,8 @@ class GeminiAnalyzer:
 | 指标 | 数值 | 解读 |
 |------|------|------|
 | 当前价格 | {rt.get('price', 'N/A')} 元 | |
-| **量比** | **{rt.get('volume_ratio', 'N/A')}** | {rt.get('volume_ratio_desc', '')} |
-| **换手率** | **{rt.get('turnover_rate', 'N/A')}%** | |
+| **量比** | **{self._na(rt.get('volume_ratio'))}** | {rt.get('volume_ratio_desc', '')} |
+| **换手率** | **{self._na(rt.get('turnover_rate'), suffix='%')}** | |
 | 市盈率(动态) | {rt.get('pe_ratio', 'N/A')} | |
 | 市净率 | {rt.get('pb_ratio', 'N/A')} | |
 | 总市值 | {self._format_amount(rt.get('total_mv'))} | |
@@ -3381,6 +3381,13 @@ class GeminiAnalyzer:
         except (TypeError, ValueError):
             return 'N/A'
 
+    @staticmethod
+    def _na(value: Any, *, suffix: str = "") -> str:
+        """None/缺失值统一显示为 'N/A'，避免渲染出字面 'None'（如 crypto 无量比/换手率）。"""
+        if value is None:
+            return 'N/A'
+        return f"{value}{suffix}"
+
     def _format_price(self, value: Optional[float], *, crypto: bool = False) -> str:
         """格式化价格显示。
 
@@ -3446,7 +3453,7 @@ class GeminiAnalyzer:
         if realtime:
             snapshot.update({
                 "price": self._format_price(realtime.get('price'), crypto=is_crypto),
-                "volume_ratio": realtime.get('volume_ratio', 'N/A'),
+                "volume_ratio": self._na(realtime.get('volume_ratio')),
                 "turnover_rate": self._format_percent(realtime.get('turnover_rate')),
                 "source": getattr(realtime.get('source'), 'value', realtime.get('source', 'N/A')),
             })

@@ -1203,9 +1203,14 @@ class NotificationService(
                         ])
                     # 量能分析
                     if vol_data:
+                        # None（如 crypto 无量比/换手率）统一显示为 N/A，避免渲染出字面 "None"
+                        _vr = vol_data.get('volume_ratio')
+                        _tr = vol_data.get('turnover_rate')
+                        _vr_disp = 'N/A' if _vr is None else _vr
+                        _tr_disp = 'N/A' if _tr is None else f"{_tr}%"
                         report_lines.extend([
-                            f"**{labels['volume_label']}**: {labels['volume_ratio_label']} {vol_data.get('volume_ratio', 'N/A')} ({vol_data.get('volume_status', '')}) | "
-                            f"{labels['turnover_rate_label']} {vol_data.get('turnover_rate', 'N/A')}%",
+                            f"**{labels['volume_label']}**: {labels['volume_ratio_label']} {_vr_disp} ({vol_data.get('volume_status', '')}) | "
+                            f"{labels['turnover_rate_label']} {_tr_disp}",
                             f"💡 *{vol_data.get('volume_meaning', '')}*",
                             "",
                         ])

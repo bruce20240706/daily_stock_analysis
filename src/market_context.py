@@ -104,13 +104,17 @@ _MARKET_GUIDELINES = {
             "- 本次分析对象为 **数字货币现货**（如 BTC/USDT）。\n"
             "- crypto 为 7×24 连续交易，无涨跌停、无 T+1、无盘前盘后；波动极大、"
             "受流动性/资金费率/宏观与监管消息影响显著，需关注杠杆与交易所价差风险。\n"
-            "- 不存在市盈率/换手率等传统基本面指标，相关字段缺失属正常，请勿据此编造。"
+            "- 不存在市盈率/换手率等传统基本面指标，相关字段缺失属正常，请勿据此编造。\n"
+            "- 所有价格、目标位、止损位的计价单位为交易对的计价币（如 BTC/USDT 即 USDT），"
+            "请统一用计价币表述，不要使用“元”/人民币/美元等单位。"
         ),
         "en": (
             "- This analysis covers a **cryptocurrency spot pair** (e.g. BTC/USDT).\n"
             "- Crypto trades 24/7 with no price limits, no T+1, no pre/after-market. "
             "Extremely volatile; watch liquidity, funding rates, macro/regulatory news, leverage and exchange spreads.\n"
-            "- Traditional fundamentals (PE, turnover) do not exist; missing such fields is expected — do not fabricate."
+            "- Traditional fundamentals (PE, turnover) do not exist; missing such fields is expected — do not fabricate.\n"
+            "- All prices, targets and stop-losses are denominated in the pair's quote currency "
+            "(e.g. USDT for BTC/USDT); always state them in that quote currency, never in CNY/yuan/USD symbols."
         ),
     },
 }
