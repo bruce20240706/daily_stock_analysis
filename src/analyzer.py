@@ -156,6 +156,21 @@ def _should_hide_regular_session_ohlc(context: Dict[str, Any]) -> bool:
     )
 
 
+def _crypto_volume_amount_units(code: Any) -> Tuple[Optional[str], Optional[str]]:
+    """返回展示用的成交量/成交额单位。
+
+    crypto 标的（BASE/QUOTE，如 BTC/USDT）返回 (base, quote)，用于量按 base 资产、额按计价币展示；
+    股票（A股/港股/美股）返回 (None, None)，沿用默认的"股/元"口径。
+    """
+    from data_provider import is_crypto_code
+
+    text = str(code or "")
+    if not is_crypto_code(text):
+        return None, None
+    base, quote = text.strip().upper().split("/")
+    return base, quote
+
+
 class _LiteLLMStreamError(RuntimeError):
     """Internal error wrapper that records whether any text was streamed."""
 
@@ -2921,11 +2936,13 @@ class GeminiAnalyzer:
                     f"| 最低价 | {today.get('low', 'N/A')} 元 |",
                 ]
             )
+        # crypto 标的按 base/quote 币种展示量/额单位，股票保持默认（股/元）
+        vol_unit, amt_currency = _crypto_volume_amount_units(code)
         quote_rows.extend(
             [
                 f"| {pct_chg_label} | {today.get('pct_chg', 'N/A')}% |",
-                f"| {volume_label} | {self._format_volume(today.get('volume'))} |",
-                f"| {amount_label} | {self._format_amount(today.get('amount'))} |",
+                f"| {volume_label} | {self._format_volume(today.get('volume'), unit=vol_unit)} |",
+                f"| {amount_label} | {self._format_amount(today.get('amount'), currency=amt_currency)} |",
             ]
         )
         quote_rows_text = "\n".join(quote_rows)
@@ -3320,27 +3337,40 @@ class GeminiAnalyzer:
         
         return prompt
     
-    def _format_volume(self, volume: Optional[float]) -> str:
-        """格式化成交量显示"""
+    def _format_volume(self, volume: Optional[float], unit: Optional[str] = None) -> str:
+        """格式化成交量显示。
+
+        unit 为 None 时按股票口径（亿股/万股/股）；指定时（如 crypto base 资产 "BTC"）按该单位展示，不带"股"。
+        """
         if volume is None:
             return 'N/A'
+        if unit:
+            if volume >= 1e8:
+                return f"{volume / 1e8:.2f} 亿{unit}"
+            if volume >= 1e4:
+                return f"{volume / 1e4:.2f} 万{unit}"
+            return f"{volume:.4f} {unit}"
         if volume >= 1e8:
             return f"{volume / 1e8:.2f} 亿股"
         elif volume >= 1e4:
             return f"{volume / 1e4:.2f} 万股"
         else:
             return f"{volume:.0f} 股"
-    
-    def _format_amount(self, amount: Optional[float]) -> str:
-        """格式化成交额显示"""
+
+    def _format_amount(self, amount: Optional[float], currency: Optional[str] = None) -> str:
+        """格式化成交额显示。
+
+        currency 为 None 时按人民币口径（亿元/万元/元）；指定时（如 crypto 计价币 "USDT"）按该计价币展示。
+        """
         if amount is None:
             return 'N/A'
+        cur = currency or "元"
         if amount >= 1e8:
-            return f"{amount / 1e8:.2f} 亿元"
+            return f"{amount / 1e8:.2f} 亿{cur}"
         elif amount >= 1e4:
-            return f"{amount / 1e4:.2f} 万元"
+            return f"{amount / 1e4:.2f} 万{cur}"
         else:
-            return f"{amount:.0f} 元"
+            return f"{amount:.0f} {cur}"
 
     def _format_percent(self, value: Optional[float]) -> str:
         """格式化百分比显示"""
@@ -3352,19 +3382,27 @@ class GeminiAnalyzer:
             return 'N/A'
 
     def _format_price(self, value: Optional[float]) -> str:
-        """格式化价格显示"""
+        """格式化价格显示（按数量级动态精度，兼容大额股票与极小币种）"""
         if value is None:
             return 'N/A'
         try:
-            return f"{float(value):.2f}"
+            v = float(value)
         except (TypeError, ValueError):
             return 'N/A'
+        av = abs(v)
+        if av >= 1:
+            return f"{v:.2f}"
+        if av >= 0.0001:
+            return f"{v:.6f}"
+        return f"{v:.8f}"
 
     def _build_market_snapshot(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """构建当日行情快照（展示用）"""
         today = context.get('today', {}) or {}
         realtime = context.get('realtime', {}) or {}
         yesterday = context.get('yesterday', {}) or {}
+        # crypto 标的按 base/quote 币种展示量/额单位，股票保持默认（股/元）
+        vol_unit, amt_currency = _crypto_volume_amount_units(context.get('code', ''))
 
         prev_close = yesterday.get('close')
         close = today.get('close')
@@ -3394,8 +3432,8 @@ class GeminiAnalyzer:
             "pct_chg": self._format_percent(today.get('pct_chg')),
             "change_amount": self._format_price(change_amount),
             "amplitude": self._format_percent(amplitude),
-            "volume": self._format_volume(today.get('volume')),
-            "amount": self._format_amount(today.get('amount')),
+            "volume": self._format_volume(today.get('volume'), unit=vol_unit),
+            "amount": self._format_amount(today.get('amount'), currency=amt_currency),
         }
 
         if realtime:
