@@ -286,6 +286,9 @@ def infer_market_phase(
     ``closing_auction`` uses a small per-market near-close heuristic window and
     does not model full exchange auction microstructure.
     """
+    if market == "crypto":
+        # 数字货币 7×24 连续交易：恒为盘中（当日 K 线持续形成）
+        return MarketPhase.INTRADAY
     if market not in MARKET_EXCHANGE or market not in MARKET_TIMEZONE:
         return MarketPhase.UNKNOWN
     if not _XCALS_AVAILABLE:
@@ -467,7 +470,10 @@ def build_market_phase_context(
     market_now = get_market_now(market, current_time=current_time)
     warnings: List[str] = []
 
-    if market not in MARKET_EXCHANGE or market not in MARKET_TIMEZONE:
+    if market == "crypto":
+        # 数字货币 7×24 连续交易：auto 恒为盘中；显式指定 phase 时以显式值为准
+        phase = MarketPhase.INTRADAY if requested_phase == "auto" else MarketPhase(requested_phase)
+    elif market not in MARKET_EXCHANGE or market not in MARKET_TIMEZONE:
         phase = MarketPhase.UNKNOWN
         _add_warning_code(warnings, "unknown_market")
     else:

@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - [新功能] 持仓/成交支持数字货币（crypto）市场：`market` 放行 `crypto`，未显式指定时计价币从交易对 QUOTE 推断（`BTC/USDT` → USDT），无法解析时回退 USDT。
 
+- [改进] 数字货币 7×24 连续交易：盘口阶段恒为“盘中”（市场开放、当日 K 线未完结），修复此前 crypto 分析上下文落到 UNKNOWN、拿不到连续交易语义的问题。
+
 ## [3.20.0] - 2026-06-03
 
 ### 发布亮点
