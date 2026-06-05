@@ -364,6 +364,18 @@ def channel_allows_empty_api_key(protocol: Optional[str], base_url: Optional[str
     return parsed.hostname in {"127.0.0.1", "localhost", "0.0.0.0"}
 
 
+def _is_usable_api_key(key: Optional[str]) -> bool:
+    """API key 必须是非空、纯 ASCII 文本。
+
+    误把中文占位说明（如 '←在此填入你的 key'，含 U+2190 等非 ASCII 字符）填进
+    LLM_*_API_KEY 时，该值会被塞进 HTTP header，litellm 在编码 header 阶段会抛
+    'ascii' codec can't encode character ...，且要多次重试后才暴露。这类值一律
+    视为“未配置”，在配置层提前过滤，避免污染 Router/直连调用。
+    """
+    key = (key or "").strip()
+    return bool(key) and key.isascii()
+
+
 def normalize_llm_channel_model(model: str, protocol: Optional[str], base_url: Optional[str] = None) -> str:
     """Attach a provider prefix when the model omits it."""
     normalized_model = model.strip()
@@ -1905,6 +1917,17 @@ class Config:
                 anspire_keys_raw = os.getenv('ANSPIRE_API_KEYS', '')
                 api_keys = [k.strip() for k in anspire_keys_raw.split(',') if k.strip()]
 
+            # 过滤非法 key：非 ASCII（如误把中文占位说明填进 LLM_{NAME}_API_KEY）塞进
+            # HTTP header 会让 litellm 抛 'ascii' codec can't encode，提前丢弃并告警。
+            _usable_keys = [k for k in api_keys if _is_usable_api_key(k)]
+            if len(_usable_keys) != len(api_keys):
+                _logger.warning(
+                    "LLM channel '%s': 忽略 %d 个非 ASCII API key"
+                    "（疑似把占位说明填进了 LLM_%s_API_KEY，请填真实 key 或留空）",
+                    ch_name, len(api_keys) - len(_usable_keys), ch_upper,
+                )
+            api_keys = _usable_keys
+
             # Models
             models_raw = os.getenv(f'LLM_{ch_upper}_MODELS', '')
             raw_models = [m.strip() for m in models_raw.split(',') if m.strip()]
@@ -2008,7 +2031,7 @@ class Config:
 
         # Gemini keys
         for k in gemini_keys:
-            if k and len(k) >= 8:
+            if _is_usable_api_key(k) and len(k) >= 8:
                 model_list.append({
                     'model_name': '__legacy_gemini__',
                     'litellm_params': {'model': '__legacy_gemini__', 'api_key': k},
@@ -2016,7 +2039,7 @@ class Config:
 
         # Anthropic keys
         for k in anthropic_keys:
-            if k and len(k) >= 8:
+            if _is_usable_api_key(k) and len(k) >= 8:
                 model_list.append({
                     'model_name': '__legacy_anthropic__',
                     'litellm_params': {'model': '__legacy_anthropic__', 'api_key': k},
@@ -2024,7 +2047,7 @@ class Config:
 
         # OpenAI-compatible keys
         for k in openai_keys:
-            if k and len(k) >= 8:
+            if _is_usable_api_key(k) and len(k) >= 8:
                 params: Dict[str, Any] = {'model': '__legacy_openai__', 'api_key': k}
                 if openai_base_url:
                     params['api_base'] = openai_base_url
@@ -2037,7 +2060,7 @@ class Config:
 
         # DeepSeek keys (native litellm provider — auto-resolves api_base)
         for k in (deepseek_keys or []):
-            if k and len(k) >= 8:
+            if _is_usable_api_key(k) and len(k) >= 8:
                 model_list.append({
                     'model_name': '__legacy_deepseek__',
                     'litellm_params': {
@@ -2866,13 +2889,13 @@ def get_api_keys_for_model(model: str, config: Config) -> List[str]:
     """
     provider = _get_litellm_provider(model)
     if provider in {"gemini", "vertex_ai"}:
-        return [k for k in config.gemini_api_keys if k and len(k) >= 8]
+        return [k for k in config.gemini_api_keys if _is_usable_api_key(k) and len(k) >= 8]
     if provider == "anthropic":
-        return [k for k in config.anthropic_api_keys if k and len(k) >= 8]
+        return [k for k in config.anthropic_api_keys if _is_usable_api_key(k) and len(k) >= 8]
     if provider == "deepseek":
-        return [k for k in config.deepseek_api_keys if k and len(k) >= 8]
+        return [k for k in config.deepseek_api_keys if _is_usable_api_key(k) and len(k) >= 8]
     if provider == "openai":
-        return [k for k in config.openai_api_keys if k and len(k) >= 8]
+        return [k for k in config.openai_api_keys if _is_usable_api_key(k) and len(k) >= 8]
     # Other LiteLLM-native providers – API key resolved from env vars
     return []
 

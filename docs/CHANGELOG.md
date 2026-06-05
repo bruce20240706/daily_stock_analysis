@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - [修复] 修复含 `/` 的 crypto 代码（如 `BTC/USDT`）无法命中带 `{code}` 路径参数的 API 路由：行情、历史、单股回测表现、持仓分析、按代码删历史共 5 条路由改用 `:path` 转换器，raw 斜杠与 `%2F` 编码均可命中，对存量股票代码完全向后兼容。
 
+- [修复] 含非 ASCII 字符的 LLM API key（如误把中文占位说明填进 `LLM_*_API_KEY`）一律视为未配置：在 channel 解析、legacy model_list、直连三条路径提前过滤并给出清晰告警，避免该值被塞进 HTTP header 后在 litellm 深处抛 `'ascii' codec can't encode` 并反复重试。
+
 ## [3.20.0] - 2026-06-03
 
 ### 发布亮点
