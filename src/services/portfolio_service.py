@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover - optional dependency path
     yf = None
 
 EPS = 1e-8
-VALID_MARKETS = {"cn", "hk", "us"}
+VALID_MARKETS = {"cn", "hk", "us", "crypto"}
 VALID_COST_METHODS = {"fifo", "avg"}
 VALID_SIDES = {"buy", "sell"}
 VALID_CASH_DIRECTIONS = {"in", "out"}
@@ -190,7 +190,7 @@ class PortfolioService:
             with self.repo.portfolio_write_session() as session:
                 account = self._require_active_account_in_session(session=session, account_id=account_id)
                 market_norm = self._normalize_market(market or account.market)
-                currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
+                currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm, symbol))
                 self._validate_trade_identity(
                     account_id=account_id,
                     trade_uid=trade_uid_norm,
@@ -282,7 +282,7 @@ class PortfolioService:
         with self.repo.portfolio_write_session() as session:
             account = self._require_active_account_in_session(session=session, account_id=account_id)
             market_norm = self._normalize_market(market or account.market)
-            currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
+            currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm, symbol))
             symbol_norm = self._normalize_symbol_for_storage(symbol)
             if not symbol_norm:
                 raise ValueError("symbol is required")
@@ -1584,7 +1584,7 @@ class PortfolioService:
     def _normalize_market(value: str) -> str:
         market = (value or "").strip().lower()
         if market not in VALID_MARKETS:
-            raise ValueError("market must be one of: cn, hk, us")
+            raise ValueError("market must be one of: cn, hk, us, crypto")
         return market
 
     @staticmethod
@@ -1602,9 +1602,16 @@ class PortfolioService:
         return method
 
     @staticmethod
-    def _default_currency_for_market(market: str) -> str:
+    def _default_currency_for_market(market: str, symbol: str = "") -> str:
         if market == "hk":
             return "HKD"
         if market == "us":
             return "USD"
+        if market == "crypto":
+            # crypto 计价币 = 交易对的 QUOTE（BTC/USDT -> USDT）；无法解析时回退 USDT
+            if "/" in (symbol or ""):
+                quote = symbol.split("/", 1)[1].strip().upper()
+                if quote:
+                    return quote
+            return "USDT"
         return "CNY"

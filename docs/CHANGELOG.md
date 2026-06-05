@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - [修复] 含非 ASCII 字符的 LLM API key（如误把中文占位说明填进 `LLM_*_API_KEY`）一律视为未配置：在 channel 解析、legacy model_list、直连三条路径提前过滤并给出清晰告警，避免该值被塞进 HTTP header 后在 litellm 深处抛 `'ascii' codec can't encode` 并反复重试。
 
+- [新功能] 持仓/成交支持数字货币（crypto）市场：`market` 放行 `crypto`，未显式指定时计价币从交易对 QUOTE 推断（`BTC/USDT` → USDT），无法解析时回退 USDT。
+
 ## [3.20.0] - 2026-06-03
 
 ### 发布亮点
