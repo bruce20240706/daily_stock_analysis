@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [文档] 文档化并以端到端测试锁定 crypto 回测支持（沿用现有回测引擎与 crypto 日线数据源，无新增运行时/配置）
 - [新功能] 加密货币大盘复盘新增宏观指标（BTC/ETH 主导率、加密总市值含 24h 变化、恐贪指数；CoinGecko /global + alternative.me，免费无 key，presence-only，默认开，注入复盘 prompt）
 - [新功能] 新增数字货币（crypto）市场支持：A股/港股/美股之外可分析 BTC/USDT 等现货（Binance/OKX/Coinbase 公共行情，只读）。
+- [修复] Web 个股栏和历史卡片在窄布局下不再让市场阶段标签遮挡股票名称。
 - [修复] 问股自由文本追问不再将 TTM、PE、YOY 等金融缩写误识别为新股票代码。
 - [修复] GitHub Actions 每日分析工作流读取 SearXNG 自建实例地址时支持 Variables 优先、Secrets 回退，修复仅配置 Variables 时 URL 不生效的问题。
 - [新功能] Web 大盘复盘历史新增独立集合入口，支持按 `MARKET` / `market_review` 聚合查看与单条记录删除，并避免混入普通个股栏。
