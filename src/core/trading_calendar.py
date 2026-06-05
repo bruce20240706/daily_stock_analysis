@@ -43,6 +43,7 @@ MARKET_TIMEZONE = {
     "cn": "Asia/Shanghai",
     "hk": "Asia/Hong_Kong",
     "us": "America/New_York",
+    "crypto": "UTC",
 }
 
 # P0 market phase baseline (Issue #1386). This is an intentionally small
@@ -117,6 +118,10 @@ def get_market_for_stock(code: str) -> Optional[str]:
         return None
     code = (code or "").strip().upper()
 
+    from data_provider import is_crypto_code
+    if is_crypto_code(code):
+        return "crypto"
+
     from data_provider import is_us_stock_code, is_us_index_code, is_hk_stock_code
 
     if is_us_stock_code(code) or is_us_index_code(code):
@@ -142,6 +147,8 @@ def is_market_open(market: str, check_date: date) -> bool:
     Returns:
         True if trading day (or fail-open), False otherwise
     """
+    if market == "crypto":  # 数字货币 7×24 交易，恒开市
+        return True
     if not _XCALS_AVAILABLE:
         return True
     ex = MARKET_EXCHANGE.get(market)
@@ -511,10 +518,10 @@ def get_open_markets_today() -> Set[str]:
     Get markets that are open today (by each market's local timezone).
 
     Returns:
-        Set of market keys ('cn', 'hk', 'us') that are trading today
+        Set of market keys ('cn', 'hk', 'us', 'crypto') that are trading today
     """
     if not _XCALS_AVAILABLE:
-        return {"cn", "hk", "us"}
+        return set(MARKET_TIMEZONE.keys())
     result: Set[str] = set()
     for mkt, tz_name in MARKET_TIMEZONE.items():
         try:
