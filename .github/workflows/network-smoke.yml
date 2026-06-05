@@ -42,6 +42,12 @@ jobs:
           set -o pipefail
           ./scripts/test.sh quick --no-notify | tee quick-smoke.log
 
+      - name: 🪙 Run crypto smoke (non-blocking)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./scripts/test.sh crypto --dry-run --no-notify | tee crypto-smoke.log
+
       - name: 📤 Upload smoke logs
         if: always()
         uses: actions/upload-artifact@v6
@@ -50,4 +56,5 @@ jobs:
           path: |
             pytest-network.log
             quick-smoke.log
+            crypto-smoke.log
           if-no-files-found: ignore

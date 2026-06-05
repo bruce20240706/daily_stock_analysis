@@ -123,6 +123,14 @@ test_us_stock() {
     success "美股分析测试完成"
 }
 
+# 测试4.5: 数字货币分析
+test_crypto() {
+    header "测试场景: 数字货币分析"
+    info "分析 crypto: BTC/USDT, ETH/USDT（Binance->OKX->Coinbase 公共行情）"
+    python3 main.py --stocks BTC/USDT,ETH/USDT --no-market-review "$@"
+    success "数字货币分析测试完成"
+}
+
 # 测试5: 混合市场
 test_mixed() {
     header "测试场景: 混合市场分析"
@@ -318,6 +326,10 @@ main() {
             shift
             test_us_stock "$@"
             ;;
+        crypto|coin)
+            shift
+            test_crypto "$@"
+            ;;
         mixed|mix)
             shift
             test_mixed "$@"
@@ -367,6 +379,7 @@ main() {
             echo "  etf         - ETF分析"
             echo "  hk-stock    - 港股分析"
             echo "  us-stock    - 美股分析"
+            echo "  crypto      - 数字货币分析（BTC/USDT 等）"
             echo "  mixed       - 混合市场分析"
             echo "  single      - 单股推送模式"
             echo "  dry-run     - 仅获取数据"
