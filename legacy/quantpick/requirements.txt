@@ -1,0 +1,18 @@
+# Core runtime dependencies (for plain-pip users).
+# Recommended instead: `pip install -e ".[dev]"` (uses pyproject.toml).
+pandas>=2.0
+numpy>=1.24
+pandas-ta>=0.3.14b0
+pydantic>=2.5
+pyyaml>=6.0
+typer>=0.12
+rich>=13.0
+pyarrow>=14.0
+akshare>=1.12
+
+# Optional backends (uncomment / install as needed):
+# baostock>=0.8.8        # A-share historical data fallback
+# adata>=2.0             # A-share multi-source resilient fallback
+# anthropic>=0.40        # AI layer: Claude
+# openai>=1.40           # AI layer: OpenAI-compatible (DeepSeek / Qwen / ...)
+# TA-Lib>=0.4.28         # faster C indicators + candlestick patterns
