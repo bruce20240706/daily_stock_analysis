@@ -157,7 +157,7 @@ def get_history_list(
 
 
 @router.delete(
-    "/by-code/{stock_code}",
+    "/by-code/{stock_code:path}",
     response_model=DeleteHistoryResponse,
     responses={
         200: {"description": "删除成功"},

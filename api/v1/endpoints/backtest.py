@@ -180,7 +180,7 @@ def get_overall_performance(
 
 
 @router.get(
-    "/performance/{code}",
+    "/performance/{code:path}",
     response_model=PerformanceMetrics,
     responses={
         200: {"description": "单股回测表现"},

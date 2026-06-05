@@ -460,7 +460,7 @@ def get_snapshot(
 
 
 @router.post(
-    "/positions/{symbol}/analysis",
+    "/positions/{symbol:path}/analysis",
     status_code=202,
     response_model=TaskAccepted,
     responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": DuplicateTaskErrorResponse}, 500: {"model": ErrorResponse}},

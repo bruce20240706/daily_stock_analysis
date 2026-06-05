@@ -397,7 +397,7 @@ def remove_from_watchlist(
 
 
 @router.get(
-    "/{stock_code}/quote",
+    "/{stock_code:path}/quote",
     response_model=StockQuote,
     responses={
         200: {"description": "行情数据"},
@@ -414,8 +414,8 @@ def get_stock_quote(stock_code: str) -> StockQuote:
     获取指定股票的最新行情数据
     
     Args:
-        stock_code: 股票代码（如 600519、00700、AAPL）
-        
+        stock_code: 股票代码（如 600519、00700、AAPL、BTC/USDT；含 '/' 的 crypto 代码可原样或 %2F 编码传入）
+
     Returns:
         StockQuote: 实时行情数据
         
@@ -466,7 +466,7 @@ def get_stock_quote(stock_code: str) -> StockQuote:
 
 
 @router.get(
-    "/{stock_code}/history",
+    "/{stock_code:path}/history",
     response_model=StockHistoryResponse,
     responses={
         200: {"description": "历史行情数据"},
