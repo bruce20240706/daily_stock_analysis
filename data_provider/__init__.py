@@ -40,6 +40,9 @@ from .yfinance_fetcher import YfinanceFetcher
 from .longbridge_fetcher import LongbridgeFetcher
 from .finnhub_fetcher import FinnhubFetcher
 from .alphavantage_fetcher import AlphaVantageFetcher
+from .binance_fetcher import BinanceFetcher
+from .okx_fetcher import OkxFetcher
+from .coinbase_fetcher import CoinbaseFetcher
 from .us_index_mapping import is_us_index_code, is_us_stock_code, get_us_index_yf_symbol, US_INDEX_MAPPING
 
 __all__ = [
@@ -61,4 +64,7 @@ __all__ = [
     'US_INDEX_MAPPING',
     'is_crypto_code',
     'SUPPORTED_QUOTES',
+    'BinanceFetcher',
+    'OkxFetcher',
+    'CoinbaseFetcher',
 ]

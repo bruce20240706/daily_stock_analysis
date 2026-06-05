@@ -106,6 +106,10 @@ class TestFetcherSourceOptimization(unittest.TestCase):
                 "PytdxFetcher",
                 "BaostockFetcher",
                 "YfinanceFetcher",
+                # crypto 数据源为免 Key 公共行情，默认始终注册（priority 50/51/52）
+                "BinanceFetcher",
+                "OkxFetcher",
+                "CoinbaseFetcher",
             ],
         )
         mock_tushare.assert_not_called()

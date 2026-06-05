@@ -597,6 +597,9 @@ class DataFetcherManager:
         "LongbridgeFetcher": {"hk", "us"},
         "FinnhubFetcher": {"us"},
         "AlphaVantageFetcher": {"us"},
+        "BinanceFetcher": {"crypto"},
+        "OkxFetcher": {"crypto"},
+        "CoinbaseFetcher": {"crypto"},
     }
 
     def __init__(self, fetchers: Optional[List[BaseFetcher]] = None):
@@ -719,7 +722,7 @@ class DataFetcherManager:
         market: str,
     ) -> List[BaseFetcher]:
         """Skip built-in daily fetchers that are known not to support a market."""
-        if market not in {"cn", "hk", "us"}:
+        if market not in {"cn", "hk", "us", "crypto"}:
             return fetchers
 
         kept: List[BaseFetcher] = []
@@ -1116,6 +1119,23 @@ class DataFetcherManager:
         else:
             logger.debug("[数据源初始化] 跳过未配置的 AlphaVantageFetcher")
 
+        # crypto 数据源（只读公共行情，免 API Key，默认全量注册）
+        from .binance_fetcher import BinanceFetcher
+        from .okx_fetcher import OkxFetcher
+        from .coinbase_fetcher import CoinbaseFetcher
+        crypto_fetchers: List[BaseFetcher] = [BinanceFetcher(), OkxFetcher(), CoinbaseFetcher()]
+        # 按 CRYPTO_DATA_PRIORITY 调整三者优先级（默认 binance,okx,coinbase）
+        try:
+            priority_str = getattr(config, "crypto_data_priority", "binance,okx,coinbase")
+            order = [s.strip().lower() for s in priority_str.split(",") if s.strip()]
+            name_map = {"binance": "BinanceFetcher", "okx": "OkxFetcher", "coinbase": "CoinbaseFetcher"}
+            for idx, key in enumerate(order):
+                for cf in crypto_fetchers:
+                    if cf.name == name_map.get(key):
+                        cf.priority = 50 + idx
+        except Exception:
+            pass
+
         # 初始化数据源列表
         self._ensure_concurrency_guards()
         with self._fetchers_lock:
@@ -1126,6 +1146,7 @@ class DataFetcherManager:
                 baostock,
                 yfinance,
                 *optional_fetchers,
+                *crypto_fetchers,
             ]
 
             # 按优先级排序（Tushare 如果配置了 Token 且初始化成功，优先级为 0）
@@ -1189,13 +1210,17 @@ class DataFetcherManager:
         is_us_index = is_us_index_code(stock_code)
         is_us = is_us_index or is_us_stock_code(stock_code)
         is_hk = (not is_us) and _is_hk_market(stock_code)
+        # crypto（BASE/QUOTE）：仅保留 crypto fetcher，走下方通用循环（按 priority 即 Binance->OKX->Coinbase）
+        is_crypto = (not is_us) and (not is_hk) and is_crypto_code(stock_code)
         if is_hk:
             fetchers = self._filter_daily_fetchers_for_market(fetchers, "hk")
+        elif is_crypto:
+            fetchers = self._filter_daily_fetchers_for_market(fetchers, "crypto")
         fetchers = self._filter_fetchers_by_capability(fetchers, capability="daily_data")
         total_fetchers = len(fetchers)
 
         if total_fetchers == 0:
-            market_label = "美股指数" if is_us_index else "美股" if is_us else "港股" if is_hk else "A股"
+            market_label = "美股指数" if is_us_index else "美股" if is_us else "港股" if is_hk else "crypto" if is_crypto else "A股"
             error_summary = f"{market_label} {stock_code} 获取失败:\n暂无可用数据源"
             logger.error(f"[数据源终止] {stock_code} 获取失败: {error_summary}")
             raise DataFetchError(error_summary)

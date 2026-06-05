@@ -133,3 +133,22 @@ def test_coinbase_symbol_parse_amount_none():
     assert pd.isna(norm.iloc[0]["amount"])      # 无 quote volume -> None/NaN，不伪造
     q = f._parse_ticker(_CB_TICKER, "BTC/USDT")
     assert q.price == 115.0 and q.amount is None
+
+
+from data_provider.base import DataFetcherManager
+
+
+def test_filter_keeps_only_crypto_fetchers():
+    mgr = DataFetcherManager()
+    fetchers = mgr._get_fetchers_snapshot()
+    kept = mgr._filter_daily_fetchers_for_market(fetchers, "crypto")
+    names = {f.name for f in kept}
+    assert names <= {"BinanceFetcher", "OkxFetcher", "CoinbaseFetcher"}
+    assert "EfinanceFetcher" not in names and "YfinanceFetcher" not in names
+    assert {"BinanceFetcher", "OkxFetcher", "CoinbaseFetcher"} & names
+
+
+def test_crypto_fetchers_registered():
+    mgr = DataFetcherManager()
+    names = {f.name for f in mgr._get_fetchers_snapshot()}
+    assert {"BinanceFetcher", "OkxFetcher", "CoinbaseFetcher"} <= names
