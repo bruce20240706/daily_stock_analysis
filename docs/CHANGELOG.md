@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - [改进] crypto 无量比/换手率时，报告（实时日报与历史视图）统一显示 N/A，不再渲染出字面 “None”。
 
+- [文档] 新增《数字货币分析指南》（`docs/crypto-guide.md`）：crypto 代码格式与计价币 allowlist、数据源优先级与地区受限配置、7×24/UTC、持仓与回测语义、API 用法与已知限制；README 能力总览补充“数字货币”，并在 `docs/INDEX.md` 挂链。
+
+- [chore] 新增 `legacy/NOTICE.md` 标注 `legacy/quantpick` 为已归档早期骨架，不参与当前主系统开发/运行/CI。
+
 ## [3.20.0] - 2026-06-03
 
 ### 发布亮点
