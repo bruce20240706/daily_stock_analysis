@@ -82,6 +82,7 @@ _STOCK_CODE_RE = re.compile(
     r"|HK\d{1,5}"                             # HK prefix format
     r"|\d{5}"                                 # bare 5-digit HK code
     r"|[A-Z]{1,5}(?:\.(?:US|[A-Z]))?"         # US ticker
+    r"|[A-Z0-9]{1,10}/(?:USDT|USDC|USD|BUSD|BTC|ETH)"  # crypto BASE/QUOTE
     r")$",
     re.IGNORECASE,
 )
