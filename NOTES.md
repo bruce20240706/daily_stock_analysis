@@ -67,6 +67,8 @@ LLM_ANTHROPIC_API_KEY=                  # ← 在此填入你的 Claude API Key�
 
 股票代码格式：A股 6 位数字；港股 `hk` + 5 位（如 `hk00700`）；美股直接用 ticker（如 `AAPL`）。
 
+数字货币：`BASE/QUOTE`，如 `BTC/USDT`、`ETH/USDT`（只读行情，无需 API Key）。
+
 ### 3.2 安装依赖
 
 建议使用虚拟环境（`.venv` 已被 gitignore）：

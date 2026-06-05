@@ -910,6 +910,12 @@ class Config:
     # - efinance/akshare_em: 东财全量接口，数据最全但容易被封
     # - tushare: Tushare Pro，需要2000积分，数据全面（付费用户可优先使用）
     realtime_source_priority: str = "tencent,akshare_sina,efinance,akshare_em"
+    # crypto 日线数据源优先级（逗号分隔，默认 binance,okx,coinbase）
+    crypto_data_priority: str = "binance,okx,coinbase"
+    # crypto 实时行情数据源优先级（逗号分隔）
+    crypto_realtime_priority: str = "binance,okx,coinbase"
+    # Binance 公共行情 Base URL（地区受限可切 https://data-api.binance.vision）
+    binance_base_url: str = "https://api.binance.com"
     # 实时行情缓存时间（秒）
     realtime_cache_ttl: int = 600
     # 熔断器冷却时间（秒）
@@ -1735,6 +1741,10 @@ class Config:
             # - efinance/akshare_em: 东财全量接口，数据最全但容易被封
             # - tushare: Tushare Pro，需要2000积分，数据全面
             realtime_source_priority=cls._resolve_realtime_source_priority(),
+            # crypto 数据源优先级与 Binance Base URL（只读公共行情，免 API Key）
+            crypto_data_priority=os.getenv('CRYPTO_DATA_PRIORITY', 'binance,okx,coinbase'),
+            crypto_realtime_priority=os.getenv('CRYPTO_REALTIME_PRIORITY', 'binance,okx,coinbase'),
+            binance_base_url=os.getenv('BINANCE_BASE_URL', 'https://api.binance.com'),
             realtime_cache_ttl=parse_env_int(os.getenv('REALTIME_CACHE_TTL'), 600, field_name='REALTIME_CACHE_TTL', minimum=0),
             circuit_breaker_cooldown=parse_env_int(os.getenv('CIRCUIT_BREAKER_COOLDOWN'), 300, field_name='CIRCUIT_BREAKER_COOLDOWN', minimum=0),
             enable_fundamental_pipeline=os.getenv('ENABLE_FUNDAMENTAL_PIPELINE', 'true').lower() == 'true',
