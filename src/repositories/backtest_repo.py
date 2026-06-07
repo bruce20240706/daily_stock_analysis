@@ -18,6 +18,15 @@ from src.storage import BacktestResult, BacktestSummary, DatabaseManager, Analys
 logger = logging.getLogger(__name__)
 
 MARKET_REVIEW_REPORT_TYPE = "market_review"
+BacktestResultContextRow = Tuple[
+    BacktestResult,
+    Optional[str],
+    Optional[str],
+    Optional[datetime],
+    Optional[str],
+    Optional[str],
+    Optional[str],
+]
 
 
 class BacktestRepository:
@@ -115,7 +124,7 @@ class BacktestRepository:
         days: Optional[int],
         offset: int,
         limit: int,
-    ) -> Tuple[List[Tuple[BacktestResult, Optional[str], Optional[str], Optional[datetime], Optional[str]]], int]:
+    ) -> Tuple[List[BacktestResultContextRow], int]:
         with self.db.get_session() as session:
             conditions = self._build_result_conditions(
                 code=code,
@@ -141,6 +150,8 @@ class BacktestRepository:
                     AnalysisHistory.trend_prediction,
                     AnalysisHistory.created_at,
                     AnalysisHistory.context_snapshot,
+                    AnalysisHistory.raw_result,
+                    AnalysisHistory.report_type,
                 )
                 .join(AnalysisHistory, AnalysisHistory.id == BacktestResult.analysis_history_id)
                 .where(where_clause)
@@ -161,7 +172,7 @@ class BacktestRepository:
         days: Optional[int],
         offset: int,
         limit: int,
-    ) -> List[Tuple[BacktestResult, Optional[str], Optional[str], Optional[datetime], Optional[str]]]:
+    ) -> List[BacktestResultContextRow]:
         """Return result rows plus AnalysisHistory.context_snapshot for dynamic filtering."""
         with self.db.get_session() as session:
             conditions = self._build_result_conditions(
@@ -180,6 +191,8 @@ class BacktestRepository:
                     AnalysisHistory.trend_prediction,
                     AnalysisHistory.created_at,
                     AnalysisHistory.context_snapshot,
+                    AnalysisHistory.raw_result,
+                    AnalysisHistory.report_type,
                 )
                 .join(AnalysisHistory, AnalysisHistory.id == BacktestResult.analysis_history_id)
                 .where(where_clause)

@@ -2,6 +2,7 @@ import type React from 'react';
 import { Badge } from '../common';
 import type { HistoryItem } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
+import { DEFAULT_DECISION_ACTION_LABELS, getDecisionActionLabel } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
 import { getMarketPhaseSummaryLabel } from '../../utils/marketPhase';
 import { truncateStockName } from '../../utils/stockName';
@@ -15,26 +16,6 @@ interface HistoryListItemProps {
   onClick: (recordId: number) => void;
 }
 
-const getOperationBadgeLabel = (advice?: string) => {
-  const normalized = advice?.trim();
-  if (!normalized) {
-    return '情绪';
-  }
-  if (normalized.includes('减仓')) {
-    return '减仓';
-  }
-  if (normalized.includes('卖')) {
-    return '卖出';
-  }
-  if (normalized.includes('观望') || normalized.includes('等待')) {
-    return '观望';
-  }
-  if (normalized.includes('买') || normalized.includes('布局')) {
-    return '买入';
-  }
-  return normalized.split(/[，。；、\s]/)[0] || '建议';
-};
-
 export const HistoryListItem: React.FC<HistoryListItemProps> = ({
   item,
   isViewing,
@@ -45,6 +26,13 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
 }) => {
   const sentimentColor = item.sentimentScore !== undefined ? getSentimentColor(item.sentimentScore) : null;
   const stockName = item.stockName || item.stockCode;
+  const operationLabel = getDecisionActionLabel(
+    item.action,
+    item.actionLabel,
+    item.operationAdvice,
+    '情绪',
+    DEFAULT_DECISION_ACTION_LABELS,
+  );
   const phaseLabel = getMarketPhaseSummaryLabel(item.marketPhaseSummary, 'zh')?.replace('市场阶段: ', '').replace('市场阶段：', '');
 
   return (
@@ -95,7 +83,7 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
                       backgroundColor: `${sentimentColor}10`,
                     }}
                   >
-                    {getOperationBadgeLabel(item.operationAdvice)} {item.sentimentScore}
+                    {operationLabel} {item.sentimentScore}
                   </Badge>
                 )}
               </div>

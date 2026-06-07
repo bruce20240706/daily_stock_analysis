@@ -2,6 +2,7 @@ import type React from 'react';
 import { Badge, Button } from '../common';
 import type { StockBarItem as StockBarItemType } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
+import { DEFAULT_DECISION_ACTION_LABELS, getDecisionActionLabel } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
 import { getMarketPhaseSummaryLabel } from '../../utils/marketPhase';
 import { truncateStockName } from '../../utils/stockName';
@@ -15,16 +16,6 @@ interface StockBarItemProps {
   isMarketReview?: boolean;
 }
 
-const getOperationBadgeLabel = (advice?: string) => {
-  const normalized = advice?.trim();
-  if (!normalized) return null;
-  if (normalized.includes('减仓')) return '减仓';
-  if (normalized.includes('卖')) return '卖出';
-  if (normalized.includes('观望') || normalized.includes('等待')) return '观望';
-  if (normalized.includes('买') || normalized.includes('布局')) return '买入';
-  return normalized.split(/[，。；、\s]/)[0] || '建议';
-};
-
 export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
   item,
   isViewing,
@@ -35,7 +26,13 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
 }) => {
   const sentimentColor = item.sentimentScore !== undefined ? getSentimentColor(item.sentimentScore) : null;
   const stockName = item.stockName || item.stockCode;
-  const operationLabel = getOperationBadgeLabel(item.operationAdvice);
+  const operationLabel = getDecisionActionLabel(
+    item.action,
+    item.actionLabel,
+    item.operationAdvice,
+    null,
+    DEFAULT_DECISION_ACTION_LABELS,
+  );
   const phaseLabel = getMarketPhaseSummaryLabel(item.marketPhaseSummary, 'zh')?.replace('市场阶段: ', '').replace('市场阶段：', '');
 
   return (

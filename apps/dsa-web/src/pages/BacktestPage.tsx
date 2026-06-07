@@ -11,6 +11,7 @@ import type {
   PerformanceMetrics,
   BacktestPhaseFilter,
 } from '../types/backtest';
+import { DEFAULT_DECISION_ACTION_LABELS, getDecisionActionLabel } from '../utils/decisionAction';
 import { getMarketPhaseSummaryLabel } from '../utils/marketPhase';
 
 const BACKTEST_INPUT_CLASS =
@@ -638,7 +639,11 @@ const BacktestPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {results.map((row) => (
+                    {results.map((row) => {
+                      const actionLabel = getDecisionActionLabel(row.action, row.actionLabel, null, null, DEFAULT_DECISION_ACTION_LABELS);
+                      const predictionParts = [actionLabel, row.trendPrediction, row.operationAdvice]
+                        .filter((part): part is string => Boolean(part));
+                      return (
                       <tr
                         key={row.analysisHistoryId}
                         className="backtest-table-row"
@@ -652,14 +657,19 @@ const BacktestPage: React.FC = () => {
                         <td className="backtest-table-cell text-secondary-text">{row.analysisDate || '--'}</td>
                         <td className="backtest-table-cell text-secondary-text">{phaseLabel(row)}</td>
                         <td className="backtest-table-cell max-w-[220px] text-foreground">
-                          {(row.trendPrediction || row.operationAdvice) ? (
+                          {predictionParts.length ? (
                             <Tooltip
-                              content={[row.trendPrediction, row.operationAdvice].filter(Boolean).join(' / ')}
+                              content={predictionParts.join(' / ')}
                               focusable
                             >
                               <div className="flex flex-col gap-1">
-                                <span className="block truncate">{row.trendPrediction || '--'}</span>
-                                <span className="block truncate text-xs text-secondary-text">{row.operationAdvice || '--'}</span>
+                                <span className="block truncate">{actionLabel || row.trendPrediction || '--'}</span>
+                                {actionLabel && row.trendPrediction && (
+                                  <span className="block truncate text-xs text-secondary-text">{row.trendPrediction}</span>
+                                )}
+                                {row.operationAdvice && (
+                                  <span className="block truncate text-xs text-secondary-text">{row.operationAdvice}</span>
+                                )}
                               </div>
                             </Tooltip>
                           ) : (
@@ -710,7 +720,8 @@ const BacktestPage: React.FC = () => {
                         <td className="backtest-table-cell">{outcomeBadge(row.outcome)}</td>
                         <td className="backtest-table-cell">{statusBadge(row.evalStatus)}</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

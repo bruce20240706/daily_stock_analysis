@@ -1079,6 +1079,27 @@ This post-processing update only adjusts advisory wording and stability logic an
 Compatibility check result: decision operability and runtime post-processing paths are changed, while model/provider/API configuration and persistence semantics remain unchanged; the compatibility boundary is now in analysis/pipeline/agent intent inference and stabilization mapping.
 Verification trail: the runtime behavior is implemented in `src/analyzer.py`, `src/core/pipeline.py`, `src/core/backtest_engine.py`, `src/report_language.py`, and `src/agent` decision-path modules (with corresponding tests in `tests/test_backtest_engine.py`, `tests/test_analyzer_news_prompt.py`, `tests/test_decision_stability.py`, and `tests/test_agent_pipeline.py`); it does not add/remove runtime config fields or config-cleanup logic in `src/config.py` or persistence code paths.
 
+### Decision Action Taxonomy (#1390 P0)
+
+Single-stock reports now keep the existing free-text `operation_advice` and add optional `action` / `action_label` fields for structured display in Web history, StockBar, same-stock history, and backtest result rows. `decision_type` remains the legacy `buy|hold|sell` statistics contract; an empty `action` does not rewrite the existing `decision_type` inference chain.
+
+| `action` | Common source text | `decision_type` bridge |
+| --- | --- | --- |
+| `buy` | `strong_buy`, `强烈买入`, `buy`, `买入`, `布局`, `建仓` | `buy` |
+| `add` | `add`, `加仓`, `增持`, `accumulate` | `buy` |
+| `hold` | `hold`, `持有`, `持有观察`, `洗盘观察` | `hold` |
+| `watch` | `watch`, `观望`, `等待`, `wait` | `hold` |
+| `reduce` | `reduce`, `减仓`, `trim` | `sell` |
+| `sell` | `sell`, `卖出`, `清仓`, `strong_sell`, `强烈卖出` | `sell` |
+| `avoid` | `avoid`, `回避`, `规避`, `不建议买入`, `避免买入`, `do not buy` | `hold` |
+| `alert` | `alert`, `风险预警`, `警惕`, `触发告警`, `risk alert` | `hold` |
+
+The `decision_type` bridge in the table only documents compatibility between the eight-state action taxonomy and the legacy three-state statistics contract. #1390 P0 does not automatically write `action` back into the existing `decision_type`. If upstream sends both an explicit `action` and a semantically different `decision_type`, legacy statistics, backtesting, and old report semantics still follow `decision_type` / the existing inference chain; `action/action_label` remains structured display metadata.
+
+Unknown or ambiguous advice is not coerced into `watch` or `hold`; it returns empty `action/action_label`. Web history cards, StockBar, same-stock history drawers, and backtest result rows use `operation_advice` as a display-only fallback when old records do not have `action/action_label`; that fallback affects only the UI label and is not a stable API action or future signal asset. When Web receives both `action` and `action_label`, it first renders the label from `action` in the current UI language; API `action_label` remains report-language display metadata for non-Web clients or compatibility display when `action` is absent. Market review and other non-stock reports do not emit trading `action` values and keep only the `operation_advice` text. `dashboard.phase_decision.immediate_action` belongs to the market-phase guardrail report block and is not used by the #1390 P0 eight-state action derivation. The final market phase still comes from `report.meta.market_phase_summary.phase`.
+
+#1390 P0 does not define or emit future signal-asset fields. More granular plan fields such as `horizon`, `plan_quality`, and `status` are left for a separate follow-up design. This phase does not flatten them into current report summaries, history lists, StockBar rows, or backtest responses; it adds no DB migration, no historical backfill, and no new configuration.
+
 ## Backtesting
 
 The backtesting module automatically validates historical AI analysis records against actual price movements, evaluating the accuracy of analysis recommendations.
