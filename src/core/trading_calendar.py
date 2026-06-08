@@ -556,9 +556,9 @@ def compute_effective_region(
         '': all relevant markets closed, skip market review
         'cn' | 'hk' | 'us' | 'both': effective subset for today
     """
-    if config_region not in ("cn", "hk", "us", "both"):
+    if config_region not in ("cn", "hk", "us", "crypto", "both"):
         config_region = "cn"
-    if config_region in ("cn", "hk", "us"):
+    if config_region in ("cn", "hk", "us", "crypto"):
         return config_region if config_region in open_markets else ""
     # both: return only the markets that are actually open today
     parts = [m for m in ("cn", "hk", "us") if m in open_markets]
