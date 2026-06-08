@@ -1397,6 +1397,8 @@ Market conditions can change quickly. The data above is for reference only and d
 
         # 3. 生成复盘报告
         report = self.generate_market_review(overview, news)
+        # crypto skips MarketLightSnapshot; build_market_review_payload also guards this
+        # via `if self.region == "crypto": light = None` — keep both in sync when changing.
         snapshot = None if self.region == "crypto" else self.build_market_light_snapshot(overview)
         structured_payload = self.build_market_review_payload(
             overview,

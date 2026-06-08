@@ -244,6 +244,38 @@ class MarketReviewLocalizationTestCase(unittest.TestCase):
         self.assertEqual(snapshots["cn"]["score"], 60)
         self.assertEqual(snapshots["us"]["score"], 55)
 
+    def test_run_market_review_omits_none_snapshot_in_multi_market(self) -> None:
+        """crypto 返回 None 快照时，multi-market 不应把 crypto:null 存入 market_light_snapshots。"""
+        notifier = self._make_notifier()
+        cn_analyzer = MagicMock()
+        cn_analyzer.run_daily_review_with_snapshot.return_value = SimpleNamespace(
+            report="CN body",
+            market_light_snapshot={"region": "cn", "trade_date": "2026-06-08", "score": 60},
+            structured_payload={},
+        )
+        crypto_analyzer = MagicMock()
+        crypto_analyzer.run_daily_review_with_snapshot.return_value = SimpleNamespace(
+            report="Crypto body",
+            market_light_snapshot=None,
+            structured_payload={},
+        )
+
+        with patch.object(
+            market_review_module,
+            "get_config",
+            return_value=SimpleNamespace(report_language="zh", market_review_region="cn"),
+        ), patch.object(
+            market_review_module,
+            "MarketAnalyzer",
+            side_effect=[cn_analyzer, crypto_analyzer],
+        ), patch.object(market_review_module, "_persist_market_review_history") as persist_history:
+            run_market_review(notifier, send_notification=False, override_region="cn,crypto")
+
+        snapshots = persist_history.call_args.kwargs["market_light_snapshots"]
+        self.assertIn("cn", snapshots)
+        self.assertNotIn("crypto", snapshots, "None snapshot from crypto must not be persisted")
+        self.assertEqual(snapshots["cn"]["score"], 60)
+
     def test_run_market_review_normalizes_single_region_snapshot_key(self) -> None:
         notifier = self._make_notifier()
         market_analyzer = MagicMock()

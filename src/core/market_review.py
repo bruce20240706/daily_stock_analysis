@@ -140,7 +140,8 @@ def run_market_review(
                 )
                 review_result = mkt_analyzer.run_daily_review_with_snapshot()
                 mkt_report = review_result.report
-                market_light_snapshots[mkt] = review_result.market_light_snapshot
+                if review_result.market_light_snapshot is not None:
+                    market_light_snapshots[mkt] = review_result.market_light_snapshot
                 market_review_payloads[mkt] = _coerce_market_review_payload(
                     review_result,
                     region=mkt,
@@ -161,7 +162,11 @@ def run_market_review(
             )
             review_result = market_analyzer.run_daily_review_with_snapshot()
             review_report = review_result.report
-            market_light_snapshots = {run_region: review_result.market_light_snapshot}
+            market_light_snapshots = (
+                {run_region: review_result.market_light_snapshot}
+                if review_result.market_light_snapshot is not None
+                else {}
+            )
             market_review_payloads = {
                 run_region: _coerce_market_review_payload(
                     review_result,
