@@ -115,10 +115,30 @@ class CryptoNewListingService:
             "_sort": listed_at if listed_at is not None else now_ms,
         }
 
+    _SUPPORTED_QUOTES = {"USDT", "USDC", "USD", "BUSD", "BTC", "ETH"}
+
     def _enrich(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:   # Task 8 实现
-        out = []
+        out: List[Dict[str, Any]] = []
         for it in items:
-            rec = {k: v for k, v in it.items() if k != "_sort" and not (k == "listed_at" and v is None)}
-            rec.pop("quote", None)
+            rec: Dict[str, Any] = {"base": it["base"], "exchanges": it["exchanges"], "pairs": it["pairs"]}
+            if it.get("listed_at") is not None:
+                rec["listed_at"] = it["listed_at"]
+            quote = it.get("quote") or "USDT"
+            if quote not in self._SUPPORTED_QUOTES:
+                quote = "USDT"
+            code = f'{it["base"]}/{quote}'
+            if self.data_manager is not None:
+                try:
+                    q = self.data_manager.get_realtime_quote(code, log_final_failure=False)
+                except Exception as e:
+                    logger.info("[新上新] %s 富化失败: %s", code, e)
+                    q = None
+                if q is not None and getattr(q, "price", None) is not None:
+                    rec["quote_pair"] = code
+                    rec["price"] = float(q.price)
+                    if getattr(q, "change_pct", None) is not None:
+                        rec["change_pct"] = float(q.change_pct)
+                    if getattr(q, "volume", None) is not None:
+                        rec["volume"] = float(q.volume)
             out.append(rec)
         return out
