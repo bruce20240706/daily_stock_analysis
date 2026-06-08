@@ -18,6 +18,15 @@ def test_disabled_returns_empty():
     assert svc.discover(now_ms=1_000) == []
 
 
+def test_enabled_but_empty_sources_returns_empty(caplog):
+    import logging
+    svc = CryptoNewListingService(data_manager=None, repo=None, config=_cfg(sources=""))
+    with caplog.at_level(logging.WARNING, logger="src.services.crypto_new_listing_service"):
+        result = svc.discover(now_ms=1_000)
+    assert result == []
+    assert any("CRYPTO_NEW_LISTING_SOURCES 为空" in m for m in caplog.messages)
+
+
 def test_merge_dedup_by_base(monkeypatch):
     now = 1_000_000_000_000
     day = 86_400_000

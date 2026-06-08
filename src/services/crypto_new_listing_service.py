@@ -30,6 +30,9 @@ class CryptoNewListingService:
         now = now_ms if now_ms is not None else int(time.time() * 1000)
         window = int(getattr(self.config, "crypto_new_listing_window_days", 7))
         sources = [s.strip().lower() for s in (getattr(self.config, "crypto_new_listing_sources", "") or "").split(",") if s.strip()]
+        if not sources:
+            logger.warning("[新上新] 已启用但 CRYPTO_NEW_LISTING_SOURCES 为空，未发现任何源")
+            return []
 
         records: List[NewListing] = []
         if "okx" in sources:
@@ -60,9 +63,16 @@ class CryptoNewListingService:
             natives = sorted([r for r in group if r.listed_at is not None], key=lambda r: r.listed_at)
             if natives:
                 anchor = natives[0].listed_at
-                close = [r for r in group if r.listed_at is None or abs(r.listed_at - anchor) <= COLLISION_MERGE_HOURS * _HOUR_MS]
+                # None-listed_at（Binance 差分项）无时间戳 → 一律并入 anchor（该 base 最早的已知上市）组
+                close = [
+                    r for r in group
+                    if r.listed_at is None
+                    or abs(r.listed_at - anchor) <= COLLISION_MERGE_HOURS * _HOUR_MS
+                ]
                 far = [r for r in group if r.listed_at is not None and abs(r.listed_at - anchor) > COLLISION_MERGE_HOURS * _HOUR_MS]
                 out.append(self._merge(base, close, now_ms))
+                # 已知局限：far 记录之间不再二次聚类，各自成行（当前 OKX+Coinbase 场景足够；
+                # 多源规模化后如需更精细聚类再迭代）。
                 for r in far:
                     out.append(self._merge(base, [r], now_ms))
             else:
