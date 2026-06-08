@@ -52,7 +52,25 @@ class CryptoNewListingService:
         return self._enrich(capped)
 
     def _binance_new(self, now_ms: int) -> List[NewListing]:   # Task 7 实现
-        return []
+        current = nl.fetch_binance_spot_base_assets()
+        if not current:                       # 抓取失败/空：不动基线、不报
+            return []
+        repo = self._repo
+        if repo is None:
+            from src.repositories.crypto_listing_repo import CryptoListingRepository
+            repo = CryptoListingRepository()
+        prior = repo.get_base_assets("binance")
+        repo.save_base_assets("binance", set(current.keys()))
+        if prior is None:
+            logger.info("[新上新-Binance] 首次播种基线 %d 个 base，本次不报新上", len(current))
+            return []
+        new_bases = set(current.keys()) - prior
+        out: List[NewListing] = []
+        for base in sorted(new_bases):
+            symbol, quote = current[base]
+            out.append(NewListing(base=base, quote=quote, symbol=symbol,
+                                  exchange="binance", listed_at=None, source="binance"))
+        return out
 
     def _dedupe_by_base(self, records: List[NewListing], now_ms: int) -> List[Dict[str, Any]]:
         by_base: Dict[str, List[NewListing]] = {}
