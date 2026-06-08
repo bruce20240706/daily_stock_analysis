@@ -32,9 +32,12 @@ _MARKET_REVIEW_MARKETS = (
     ('cn', 'cn_title', 'A 股'),
     ('hk', 'hk_title', '港股'),
     ('us', 'us_title', '美股'),
+    ('crypto', 'crypto_title', '加密货币'),
 )
 _MARKET_REVIEW_REGION_ORDER = tuple(market for market, _, _ in _MARKET_REVIEW_MARKETS)
 _VALID_MARKET_REVIEW_REGIONS = frozenset(_MARKET_REVIEW_REGION_ORDER)
+# MARKET_REVIEW_REGION=both 的固定语义：仅传统三市，crypto 须显式 opt-in（不随 tuple 扩张）
+_BOTH_REVIEW_REGIONS = ('cn', 'hk', 'us')
 
 
 @dataclass
@@ -54,6 +57,7 @@ def _get_market_review_text(language: str) -> dict[str, str]:
             "cn_title": "# A-share Market Recap",
             "us_title": "# US Market Recap",
             "hk_title": "# HK Market Recap",
+            "crypto_title": "# Crypto Market Recap",
             "separator": "> Next market recap follows",
         }
     return {
@@ -62,6 +66,7 @@ def _get_market_review_text(language: str) -> dict[str, str]:
         "cn_title": "# A股大盘复盘",
         "us_title": "# 美股大盘复盘",
         "hk_title": "# 港股大盘复盘",
+        "crypto_title": "# 加密货币大盘复盘",
         "separator": "> 以下为下一市场大盘复盘",
     }
 
@@ -71,7 +76,7 @@ def _resolve_market_review_regions(raw_region: Optional[str]) -> list[str]:
 
     region = str(raw_region or 'cn').strip().lower()
     if region == 'both':
-        return list(_MARKET_REVIEW_REGION_ORDER)
+        return list(_BOTH_REVIEW_REGIONS)
     if ',' in region:
         requested = {
             item.strip().lower()
