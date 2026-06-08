@@ -2162,6 +2162,8 @@ class DataFetcherManager:
 
     def get_main_indices(self, region: str = "cn") -> List[Dict[str, Any]]:
         """获取主要指数实时行情（自动切换数据源）"""
+        if region == "crypto":
+            return self._get_crypto_basket_indices()
         if region == "cn":
             tickflow_fetcher = self._get_tickflow_fetcher()
             if tickflow_fetcher is not None:
@@ -2183,6 +2185,60 @@ class DataFetcherManager:
                 logger.warning(f"[{fetcher.name}] 获取指数行情失败: {e}")
                 continue
         return []
+
+    def _get_crypto_basket_indices(self) -> List[Dict[str, Any]]:
+        """crypto 大盘复盘"篮子"：对配置的主流币逐个取实时行情，映射为指数行情结构。
+
+        复用 get_realtime_quote 的 Binance→OKX→Coinbase fallback。非法代码与取价失败均跳过，
+        不静默塞 0，避免误导。
+        """
+        import os
+        # is_crypto_code 是本模块（base.py）顶部定义的函数，直接调用即可（勿再 import）
+
+        default_symbols = (
+            "BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,DOGE/USDT,"
+            "ADA/USDT,AVAX/USDT,LINK/USDT,TRX/USDT,TON/USDT,DOT/USDT"
+        )
+        raw = os.getenv("CRYPTO_MARKET_REVIEW_SYMBOLS", default_symbols)
+        symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
+
+        rows: List[Dict[str, Any]] = []
+        for code in symbols:
+            if not is_crypto_code(code):
+                logger.warning("[crypto篮子] 跳过非法代码: %s", code)
+                continue
+            try:
+                quote = self.get_realtime_quote(code)
+            except Exception as e:  # 单币失败不影响其余
+                logger.warning("[crypto篮子] %s 取价异常: %s", code, e)
+                quote = None
+            if quote is None or quote.price is None:
+                logger.info("[crypto篮子] %s 无可用行情，跳过", code)
+                continue
+            price = float(quote.price)
+            pct = float(quote.change_pct) if quote.change_pct is not None else 0.0
+            prev_close = price / (1 + pct / 100) if pct != -100 else 0.0
+            change = price - prev_close
+            high = float(quote.high) if quote.high is not None else 0.0
+            low = float(quote.low) if quote.low is not None else 0.0
+            amplitude = ((high - low) / prev_close * 100) if (prev_close and high and low) else 0.0
+            rows.append({
+                "code": code,
+                "name": code,
+                "current": price,
+                "change": change,
+                "change_pct": pct,
+                "open": 0.0,
+                "high": high,
+                "low": low,
+                "prev_close": prev_close,
+                "volume": float(quote.volume) if quote.volume is not None else 0.0,
+                "amount": float(quote.amount) if quote.amount is not None else 0.0,
+                "amplitude": amplitude,
+            })
+        if not rows:
+            logger.warning("[crypto篮子] 未取到任何篮子行情，将依赖新闻进行定性分析")
+        return rows
 
     def get_market_stats(self) -> Dict[str, Any]:
         """获取市场涨跌统计（自动切换数据源）"""
