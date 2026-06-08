@@ -90,6 +90,7 @@ const MARKET_BADGE_CONFIG = {
   INDEX: { label: '指数', className: 'border-purple/25 bg-purple/10 text-purple' },
   ETF: { label: 'ETF', className: 'border-warning/25 bg-warning/10 text-warning' },
   BSE: { label: '北交所', className: 'border-orange-500/25 bg-orange-500/10 text-orange-500' },
+  CRYPTO: { label: '币种', className: 'border-yellow-500/25 bg-yellow-500/10 text-yellow-500' },
 } as const;
 
 function MarketBadge({ market }: { market: string }) {
