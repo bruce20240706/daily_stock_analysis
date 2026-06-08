@@ -771,7 +771,7 @@ class CryptoSymbolSnapshot(Base):
 
     exchange = Column(String(32), primary_key=True)
     base_assets = Column(Text, nullable=False)   # JSON array of base asset strings
-    captured_at = Column(DateTime, default=datetime.now)
+    captured_at = Column(DateTime, nullable=False, default=datetime.now)
 
 
 class _DatabaseManagerMeta(type):

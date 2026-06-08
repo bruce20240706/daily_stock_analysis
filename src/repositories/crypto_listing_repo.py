@@ -26,9 +26,13 @@ class CryptoListingRepository:
             if row is None:
                 return None
             try:
-                return set(json.loads(row.base_assets))
+                data = json.loads(row.base_assets)
             except (TypeError, ValueError):
                 return set()
+            if not isinstance(data, list):
+                logger.warning("crypto 快照损坏（非列表）: exchange=%s", exchange)
+                return set()
+            return set(data)
 
     def save_base_assets(self, exchange: str, bases: Set[str]) -> None:
         payload = json.dumps(sorted(bases))
