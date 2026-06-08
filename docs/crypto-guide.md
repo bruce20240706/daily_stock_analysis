@@ -65,11 +65,66 @@ GET /api/v1/stocks/BTC%2FUSDT/quote        # 等价
 GET /api/v1/stocks/BTC%2FUSDT/history?days=30
 ```
 
-## 8. 已知限制（后续阶段）
+## 8. 大盘复盘（crypto 市场综述）
+
+### 8.1 启用方式
+
+将 `MARKET_REVIEW_REGION` 设为 `crypto`，或以逗号拼接多市场：
+
+```bash
+# 仅 crypto 大盘复盘
+MARKET_REVIEW_REGION=crypto
+
+# A 股 + crypto 双市场复盘
+MARKET_REVIEW_REGION=cn,crypto
+```
+
+> **注意**：`both` 仍等于 `cn+hk+us`，**不含** crypto。crypto 须显式 opt-in。
+
+### 8.2 篮子配置（CRYPTO_MARKET_REVIEW_SYMBOLS）
+
+复盘时使用的主流币篮子由 `CRYPTO_MARKET_REVIEW_SYMBOLS` 决定，默认为 12 只主流现货交易对：
+
+```
+BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,DOGE/USDT,ADA/USDT,AVAX/USDT,LINK/USDT,TRX/USDT,TON/USDT,DOT/USDT
+```
+
+可覆盖为任意 Binance / OKX / Coinbase 支持的交易对，逗号分隔：
+
+```bash
+# 自定义示例：聚焦 BTC/ETH + 新兴赛道
+CRYPTO_MARKET_REVIEW_SYMBOLS=BTC/USDT,ETH/USDT,HYPE/USDT,FIL/USDT,SUI/USDT
+```
+
+### 8.3 报告内容
+
+crypto 大盘复盘包含以下三个部分：
+
+| 部分 | 说明 |
+|------|------|
+| **主流币篮子行情** | 篮子内各币种的实时报价（价格、涨跌幅、成交量等），数据经 Binance → OKX → Coinbase 自动 fallback |
+| **市场叙事** | 由 LLM 综合篮子行情生成的市场综述与趋势分析 |
+| **新币与上新动态** | LLM 基于公开知识生成的近期新币/IEO/IDO 上新动态叙事段 |
+
+### 8.4 不含的内容（及原因）
+
+以下指标在 crypto 大盘复盘中**不存在**，属正常，不代表功能缺陷：
+
+| 缺失项 | 原因 |
+|--------|------|
+| 涨跌家数（breadth） | 无全市场 A 股/港股式统计数据源 |
+| 板块涨跌排名 | 加密市场无标准行业板块分类数据源 |
+| 市场灯（MarketLightSnapshot） | 依赖 A 股 / 港股 / 美股专用接口，crypto 无对应数据 |
+
+### 8.5 结构化新币自动发现（待规划）
+
+当前版本的"新币与上新动态"为 LLM 叙事段，**不**做结构化自动抓取（如实时爬取 Binance 上新公告、CoinGecko 新币列表等）。结构化自动发现为后续迭代，需另立设计方案，不在本次发布范围内。
+
+## 9. 已知限制（后续阶段）
 
 以下为当前**非目标**，留待后续阶段（需另立设计）：
 
-- crypto **大盘复盘**（MarketAnalyzer 当前限 A股/港股/美股）。
+- crypto 结构化新币自动发现（上新公告爬取、CoinGecko 接入等；当前为 LLM 叙事段）。
 - **日内 / 高频实时监控与触发式告警**（WebSocket 行情流）。
 - **合约 / 永续 / 杠杆**（当前仅现货）。
 - crypto 专属大盘指标（BTC 主导率 / 总市值 / 恐贪指数，需引入新数据源）。
