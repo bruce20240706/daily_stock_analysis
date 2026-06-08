@@ -926,6 +926,8 @@ class Config:
     crypto_data_priority: str = "binance,okx,coinbase"
     # crypto 实时行情数据源优先级（逗号分隔）
     crypto_realtime_priority: str = "binance,okx,coinbase"
+    # crypto 大盘复盘篮子符号（逗号分隔交易对，如 BTC/USDT,ETH/USDT）
+    crypto_market_review_symbols: str = "BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,DOGE/USDT,ADA/USDT,AVAX/USDT,LINK/USDT,TRX/USDT,TON/USDT,DOT/USDT"
     # Binance 公共行情 Base URL（地区受限可切 https://data-api.binance.vision）
     binance_base_url: str = "https://api.binance.com"
     # 实时行情缓存时间（秒）
@@ -1756,6 +1758,10 @@ class Config:
             # crypto 数据源优先级与 Binance Base URL（只读公共行情，免 API Key）
             crypto_data_priority=os.getenv('CRYPTO_DATA_PRIORITY', 'binance,okx,coinbase'),
             crypto_realtime_priority=os.getenv('CRYPTO_REALTIME_PRIORITY', 'binance,okx,coinbase'),
+            crypto_market_review_symbols=os.getenv(
+                'CRYPTO_MARKET_REVIEW_SYMBOLS',
+                'BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,DOGE/USDT,ADA/USDT,AVAX/USDT,LINK/USDT,TRX/USDT,TON/USDT,DOT/USDT',
+            ),
             binance_base_url=os.getenv('BINANCE_BASE_URL', 'https://api.binance.com'),
             realtime_cache_ttl=parse_env_int(os.getenv('REALTIME_CACHE_TTL'), 600, field_name='REALTIME_CACHE_TTL', minimum=0),
             circuit_breaker_cooldown=parse_env_int(os.getenv('CIRCUIT_BREAKER_COOLDOWN'), 300, field_name='CIRCUIT_BREAKER_COOLDOWN', minimum=0),
@@ -2274,10 +2280,10 @@ class Config:
         """解析大盘复盘市场区域，非法值记录警告后回退为 cn"""
         import logging
         v = (value or 'cn').strip().lower()
-        if v in ('cn', 'us', 'hk', 'both'):
+        if v in ('cn', 'us', 'hk', 'crypto', 'both'):
             return v
         logging.getLogger(__name__).warning(
-            f"MARKET_REVIEW_REGION 配置值 '{value}' 无效，已回退为默认值 'cn'（合法值：cn / hk / us / both）"
+            f"MARKET_REVIEW_REGION 配置值 '{value}' 无效，已回退为默认值 'cn'（合法值：cn / hk / us / crypto / both）"
         )
         return 'cn'
 
