@@ -15,6 +15,7 @@
 """
 
 import logging
+import os
 import random
 import time
 from threading import BoundedSemaphore, RLock, Thread
@@ -2192,7 +2193,6 @@ class DataFetcherManager:
         复用 get_realtime_quote 的 Binance→OKX→Coinbase fallback。非法代码与取价失败均跳过，
         不静默塞 0，避免误导。
         """
-        import os
         # is_crypto_code 是本模块（base.py）顶部定义的函数，直接调用即可（勿再 import）
 
         default_symbols = (
@@ -2228,7 +2228,7 @@ class DataFetcherManager:
                 "current": price,
                 "change": change,
                 "change_pct": pct,
-                "open": 0.0,
+                "open": float(quote.open_price) if quote.open_price is not None else 0.0,
                 "high": high,
                 "low": low,
                 "prev_close": prev_close,
