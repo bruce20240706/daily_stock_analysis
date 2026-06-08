@@ -215,6 +215,19 @@ describe('MarketReviewReportView', () => {
     expect(screen.queryByText(/上新|New Listings/i)).toBeNull();
   });
 
+  it('us 携带 newListings 也不渲染上新表（region 守卫）', () => {
+    const payload = {
+      version: 1, kind: 'market_review', region: 'us', language: 'zh',
+      title: 'US', date: '2026-06-08',
+      indices: [{ code: 'SPX', name: 'S&P 500', current: 5000, changePct: 0.5 }],
+      newListings: [{ base: 'NEW', exchanges: ['okx'], pairs: ['NEW-USDT'], listedAt: 1733616000000 }],
+      sections: [], markdownReport: '#',
+    };
+    render(<MarketReviewReportView payload={payload as any} reportLanguage="zh" />);
+    expect(screen.queryByText(/上新|New Listings/i)).toBeNull();
+    expect(screen.queryByText('NEW')).toBeNull();
+  });
+
   it('crypto 市场不渲染 breadth 暂无数据占位', () => {
     const cryptoPayload: MarketReviewPayload = {
       version: 1,

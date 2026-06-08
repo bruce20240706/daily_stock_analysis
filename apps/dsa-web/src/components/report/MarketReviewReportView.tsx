@@ -527,7 +527,7 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                     </table>
                   </div>
                 ) : null}
-                {marketData.newListings && marketData.newListings.length > 0 ? (
+                {marketData.region === 'crypto' && marketData.newListings && marketData.newListings.length > 0 ? (
                   <div className="overflow-x-auto">
                     <h4 className="mb-2 text-sm font-semibold text-foreground">{marketReviewText.newListings}</h4>
                     <table className="min-w-full text-sm">
@@ -541,8 +541,8 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-subtle">
-                        {marketData.newListings.map((item) => (
-                          <tr key={item.base}>
+                        {marketData.newListings.map((item, idx) => (
+                          <tr key={`${item.base}-${item.exchanges.join(',')}-${idx}`}>
                             <td className="px-2 py-2 font-medium text-foreground">{item.base}</td>
                             <td className="px-2 py-2 text-secondary-text">{item.exchanges.join(', ')}</td>
                             <td className="px-2 py-2 text-secondary-text">{item.listedAt ? new Date(item.listedAt).toISOString().slice(0, 10) : '—'}</td>
