@@ -475,8 +475,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 "provided news. If none, say so briefly. Do not invent listings or prices."
             )
         return (
-            "\n[加密货币专属] 增加一节《新币与上新动态》，严格依据所给新闻总结近期值得关注的"
-            "新上线/IEO/launchpad/交易所上新项目与风险；若无显著资讯则简要说明。不得编造上新或价格。"
+            "\n[加密货币专属] 增加一节，使用 Markdown 二级标题\"## 新币与上新动态\"，"
+            "严格依据所给新闻总结近期值得关注的新上线/IEO/launchpad/交易所上新项目与风险；"
+            "若无显著资讯则简要说明。不得编造上新或价格。"
         )
 
     def search_market_news(self) -> List[Dict]:
