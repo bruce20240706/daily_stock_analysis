@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - [chore] 新增 `legacy/NOTICE.md` 标注 `legacy/quantpick` 为已归档早期骨架，不参与当前主系统开发/运行/CI。
 
+- [改进] 数字货币行情请求超时/重试可配：新增 `CRYPTO_FETCH_TIMEOUT_SECONDS`、`CRYPTO_FETCH_MAX_RETRIES`，地区受限/弱网时可调大；4xx（如 451）仍不重试以保持快速 fallback，默认值不变（10s、0 次重试）。
+
 ## [3.20.0] - 2026-06-03
 
 ### 发布亮点

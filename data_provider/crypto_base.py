@@ -3,6 +3,7 @@
 子类实现交易所 HTTP 细节；本基类负责统一标准化、pct_chg 计算与异常包装。
 """
 import logging
+import os
 from typing import Optional
 
 import pandas as pd
@@ -49,10 +50,49 @@ class CryptoExchangeBase(BaseFetcher):
         buffer = 5  # 给 MA 计算留首行余量
         return max(1, min(int(days) + buffer, self.MAX_LIMIT))
 
+    def _fetch_timeout(self) -> float:
+        """请求超时秒数，可经 CRYPTO_FETCH_TIMEOUT_SECONDS 覆盖（默认沿用类属性 timeout）。
+
+        地区受限/网络较差时可调大；非法值回退到默认。
+        """
+        raw = os.getenv("CRYPTO_FETCH_TIMEOUT_SECONDS")
+        if raw:
+            try:
+                value = float(raw)
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        return self.timeout
+
+    def _fetch_max_retries(self) -> int:
+        """额外重试次数，可经 CRYPTO_FETCH_MAX_RETRIES 覆盖（默认 0：单次请求，保持快速 fallback）。"""
+        raw = os.getenv("CRYPTO_FETCH_MAX_RETRIES")
+        if raw:
+            try:
+                value = int(raw)
+                if value >= 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        return 0
+
     def _http_get(self, url: str, params: dict) -> object:
-        resp = requests.get(url, params=params, timeout=self.timeout)
-        resp.raise_for_status()
-        return resp.json()
+        timeout = self._fetch_timeout()
+        max_retries = self._fetch_max_retries()
+        for attempt in range(max_retries + 1):
+            try:
+                resp = requests.get(url, params=params, timeout=timeout)
+                resp.raise_for_status()
+                return resp.json()
+            except requests.RequestException as exc:
+                # 4xx（如 451 地区限制）为确定性失败，不重试，立即 fallback 到下一数据源；
+                # 仅对网络/超时/5xx 等瞬时错误按 max_retries 重试。
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status is not None and 400 <= status < 500:
+                    raise
+                if attempt >= max_retries:
+                    raise
 
     def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         if not is_crypto_code(stock_code):
