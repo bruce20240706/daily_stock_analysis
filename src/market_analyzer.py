@@ -129,7 +129,7 @@ class MarketAnalyzer:
         Args:
             search_service: 搜索服务实例
             analyzer: AI分析器实例（用于调用LLM）
-            region: 市场区域 cn=A股 us=美股
+            region: 市场区域 cn=A股 us=美股 hk=港股 crypto=加密货币
         """
         self.config = get_config()
         self.search_service = search_service
@@ -175,8 +175,10 @@ class MarketAnalyzer:
         """Format raw turnover according to market-specific units."""
         if amount_raw == 0.0:
             return "N/A"
-        if self.region in ("us", "hk", "crypto"):
+        if self.region in ("us", "hk"):
             return f"{amount_raw / 1e9:.2f}"
+        if self.region == "crypto":
+            return f"{amount_raw:,.0f}"
         if amount_raw > 1e6:
             return f"{amount_raw / 1e8:.0f}"
         return f"{amount_raw:.0f}"
