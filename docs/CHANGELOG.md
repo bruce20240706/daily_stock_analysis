@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - [改进] 数字货币行情请求超时/重试可配：新增 `CRYPTO_FETCH_TIMEOUT_SECONDS`、`CRYPTO_FETCH_MAX_RETRIES`，地区受限/弱网时可调大；4xx（如 451）仍不重试以保持快速 fallback，默认值不变（10s、0 次重试）。
 
-- [改进] Web 自选/搜索建议列表补齐 `CRYPTO` 市场徽标（”币种”），避免后续接入 crypto 建议项时命中未知市场抛错。
+- [改进] Web 自选/搜索建议列表补齐 `CRYPTO` 市场徽标（“币种”），避免后续接入 crypto 建议项时命中未知市场抛错。
 
 - [新功能] 大盘复盘支持数字货币（crypto）：MARKET_REVIEW_REGION=crypto 产出主流币篮子行情 + 市场叙事 + 新币/上新资讯；篮子经 CRYPTO_MARKET_REVIEW_SYMBOLS 可配置（默认 BTC/USDT 等 12 只）；crypto 须显式 opt-in（both 仍为 cn+hk+us），无 breadth/板块/市场灯（无对应数据源）。
 
