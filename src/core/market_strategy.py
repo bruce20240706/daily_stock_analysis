@@ -163,10 +163,46 @@ HK_BLUEPRINT = MarketStrategyBlueprint(
 )
 
 
+CRYPTO_BLUEPRINT = MarketStrategyBlueprint(
+    region="crypto",
+    title="加密货币市场三段式复盘策略",
+    positioning="以 BTC/ETH 等主流币走势衡量加密市场整体风险偏好，7×24 连续交易、无涨跌停、价格以交易对计价币（如 USDT）计。",
+    principles=[
+        "先看 BTC/ETH 主导方向，再看主流币篮子分化，最后看资金与情绪轮动。",
+        "结论必须映射到仓位、节奏与风险控制动作；高波动市场尤重风控。",
+        "判断使用当日行情与近期新闻，不臆测未验证信息；价格用计价币表述，不写'元'。",
+    ],
+    dimensions=[
+        StrategyDimension(
+            name="趋势结构",
+            objective="判断加密市场处于上升、震荡还是防守阶段。",
+            checkpoints=["BTC/ETH 是否同向", "主流币篮子是否普涨/普跌", "关键价位是否被突破（计价币）"],
+        ),
+        StrategyDimension(
+            name="资金情绪",
+            objective="识别短线风险偏好与情绪温度。",
+            checkpoints=["主流币与山寨币的强弱分化", "成交活跃度变化", "市场叙事是否过热或恐慌"],
+        ),
+        StrategyDimension(
+            name="主线与上新",
+            objective="提炼可交易主线与新上项目机会及风险。",
+            checkpoints=["近期新上线/IEO/launchpad 项目动态", "板块叙事（L1/L2/AI/MEME 等）轮动", "新币上线初期高波动与流动性风险"],
+        ),
+    ],
+    action_framework=[
+        "进攻：BTC/ETH 共振上行 + 篮子普涨 + 主线/新叙事强化。",
+        "均衡：主流币分化或缩量震荡，控制仓位并等待确认。",
+        "防守：BTC/ETH 转弱 + 普跌扩散，优先风控与降杠杆。",
+    ],
+)
+
+
 def get_market_strategy_blueprint(region: str) -> MarketStrategyBlueprint:
     """Return strategy blueprint by market region."""
     if region == "us":
         return US_BLUEPRINT
     if region == "hk":
         return HK_BLUEPRINT
+    if region == "crypto":
+        return CRYPTO_BLUEPRINT
     return CN_BLUEPRINT
