@@ -101,7 +101,7 @@ class MarketLightReviewResult:
 
     overview: MarketOverview
     report: str
-    market_light_snapshot: Dict[str, Any]
+    market_light_snapshot: Optional[Dict[str, Any]]
     structured_payload: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -539,7 +539,10 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         language = self._get_review_language()
         sections = self._split_report_sections(report)
         title = self._extract_report_title(report) or self._get_review_title(overview.date).lstrip("# ").strip()
-        light = market_light_snapshot or self.build_market_light_snapshot(overview)
+        if self.region == "crypto":
+            light = None
+        else:
+            light = market_light_snapshot or self.build_market_light_snapshot(overview)
         breadth_dimensions = None
         if isinstance(light, dict):
             dimensions = light.get("dimensions")
@@ -568,7 +571,6 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             "generated_at": datetime.now().isoformat(),
             "date": overview.date,
             "market_scope": self._get_market_scope_name(language),
-            "market_light": light,
             "indices": [idx.to_dict() for idx in overview.indices],
             "sectors": {
                 "top": list(overview.top_sectors or []),
@@ -589,6 +591,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 "total_amount": overview.total_amount,
                 "turnover_unit": self._get_turnover_unit_label(),
             }
+
+        if light is not None:
+            payload["market_light"] = light
 
         return payload
 
@@ -1392,7 +1397,7 @@ Market conditions can change quickly. The data above is for reference only and d
 
         # 3. 生成复盘报告
         report = self.generate_market_review(overview, news)
-        snapshot = self.build_market_light_snapshot(overview)
+        snapshot = None if self.region == "crypto" else self.build_market_light_snapshot(overview)
         structured_payload = self.build_market_review_payload(
             overview,
             news,
