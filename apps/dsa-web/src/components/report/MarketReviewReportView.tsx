@@ -6,6 +6,7 @@ import type {
   AnalysisReport,
   MarketReviewPayload,
   MarketReviewPayloadSection,
+  NewListing,
   ReportLanguage,
 } from '../../types/analysis';
 import { markdownToPlainText } from '../../utils/markdown';
@@ -44,6 +45,7 @@ type StructuredMarketData = {
   region?: string;
   breadth?: MarketReviewPayload['breadth'];
   indices: NonNullable<MarketReviewPayload['indices']>;
+  newListings?: NewListing[];
 };
 
 const isMarketReviewPayload = (value: unknown): value is MarketReviewPayload =>
@@ -183,6 +185,7 @@ const getStructuredMarketData = (payload?: MarketReviewPayload | null): Structur
         region,
         breadth: marketPayload.breadth,
         indices: marketPayload.indices || [],
+        newListings: marketPayload.newListings,
       }));
   }
 
@@ -196,6 +199,7 @@ const getStructuredMarketData = (payload?: MarketReviewPayload | null): Structur
     region: payload.region,
     breadth: payload.breadth,
     indices: payload.indices || [],
+    newListings: payload.newListings,
   }];
 };
 
@@ -217,6 +221,10 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   last: string;
   change: string;
   highLow: string;
+  newListings: string;
+  coin: string;
+  exchanges: string;
+  listedAt: string;
 }> = {
   zh: {
     reviewSummary: '复盘摘要',
@@ -236,6 +244,10 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     last: '最新',
     change: '涨跌幅',
     highLow: '高/低',
+    newListings: '新币与上新行情',
+    coin: '币种',
+    exchanges: '交易所',
+    listedAt: '上市时间',
   },
   en: {
     reviewSummary: 'Review Summary',
@@ -255,6 +267,10 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     last: 'Last',
     change: 'Change',
     highLow: 'High/Low',
+    newListings: 'New Listings',
+    coin: 'Coin',
+    exchanges: 'Exchanges',
+    listedAt: 'Listed',
   },
 };
 
@@ -505,6 +521,33 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                             <td className="px-2 py-2 text-secondary-text">{index.current ?? '-'}</td>
                             <td className="px-2 py-2 text-secondary-text">{index.changePct !== undefined ? `${index.changePct}%` : '-'}</td>
                             <td className="px-2 py-2 text-secondary-text">{index.high ?? '-'} / {index.low ?? '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+                {marketData.newListings && marketData.newListings.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <h4 className="mb-2 text-sm font-semibold text-foreground">{marketReviewText.newListings}</h4>
+                    <table className="min-w-full text-sm">
+                      <thead className="text-left text-xs uppercase text-muted-text">
+                        <tr>
+                          <th className="px-2 py-2">{marketReviewText.coin}</th>
+                          <th className="px-2 py-2">{marketReviewText.exchanges}</th>
+                          <th className="px-2 py-2">{marketReviewText.listedAt}</th>
+                          <th className="px-2 py-2">{marketReviewText.last}</th>
+                          <th className="px-2 py-2">{marketReviewText.change}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-subtle">
+                        {marketData.newListings.map((item) => (
+                          <tr key={item.base}>
+                            <td className="px-2 py-2 font-medium text-foreground">{item.base}</td>
+                            <td className="px-2 py-2 text-secondary-text">{item.exchanges.join(', ')}</td>
+                            <td className="px-2 py-2 text-secondary-text">{item.listedAt ? new Date(item.listedAt).toISOString().slice(0, 10) : '—'}</td>
+                            <td className="px-2 py-2 text-secondary-text">{item.price ?? '-'}</td>
+                            <td className="px-2 py-2 text-secondary-text">{item.changePct !== undefined ? `${item.changePct}%` : '-'}</td>
                           </tr>
                         ))}
                       </tbody>

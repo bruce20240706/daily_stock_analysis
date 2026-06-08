@@ -175,6 +175,46 @@ describe('MarketReviewReportView', () => {
     expect(screen.queryByText('Decliners')).not.toBeInTheDocument();
   });
 
+  it('crypto 渲染上新行情表，listedAt 缺失显示 —', () => {
+    const payload = {
+      version: 1, kind: 'market_review', region: 'crypto', language: 'zh',
+      title: '加密货币大盘复盘', date: '2026-06-08',
+      indices: [{ code: 'BTC/USDT', name: 'BTC/USDT', current: 64000, changePct: 1.0 }],
+      newListings: [
+        { base: 'NEW', exchanges: ['okx'], pairs: ['NEW-USDT'], listedAt: 1733616000000, price: 1.5, changePct: 5.0 },
+        { base: 'NOQ', exchanges: ['binance'], pairs: ['NOQ-USDT'] },
+      ],
+      sections: [{ key: 'full_review', title: 'Review', markdown: '## 一、概览\n内容' }],
+      markdownReport: '# 加密货币大盘复盘',
+    };
+    render(
+      <MarketReviewReportView
+        payload={payload as any}
+        content="# 加密货币大盘复盘"
+        reportLanguage="zh"
+      />,
+    );
+    expect(screen.getByText('NEW')).toBeInTheDocument();
+    expect(screen.getByText('NOQ')).toBeInTheDocument();
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);  // NOQ 无 listedAt → —
+  });
+
+  it('非 crypto 或无 newListings 不渲染上新表', () => {
+    const payload = {
+      version: 1, kind: 'market_review', region: 'us', language: 'zh',
+      title: 'US', date: '2026-06-08', indices: [],
+      sections: [], markdownReport: '#',
+    };
+    render(
+      <MarketReviewReportView
+        payload={payload as any}
+        content="#"
+        reportLanguage="zh"
+      />,
+    );
+    expect(screen.queryByText(/上新|New Listings/i)).toBeNull();
+  });
+
   it('crypto 市场不渲染 breadth 暂无数据占位', () => {
     const cryptoPayload: MarketReviewPayload = {
       version: 1,

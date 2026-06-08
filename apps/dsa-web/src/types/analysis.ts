@@ -155,6 +155,17 @@ export interface MarketReviewBreadth {
   turnoverUnit?: string;
 }
 
+export interface NewListing {
+  base: string;
+  exchanges: string[];
+  pairs: string[];
+  listedAt?: number;
+  quotePair?: string;
+  price?: number;
+  changePct?: number;
+  volume?: number;
+}
+
 export interface MarketReviewPayload {
   version?: number;
   kind?: 'market_review' | string;
@@ -173,6 +184,7 @@ export interface MarketReviewPayload {
   sections?: MarketReviewPayloadSection[];
   markets?: Record<string, MarketReviewPayload>;
   markdownReport?: string;
+  newListings?: NewListing[];
 }
 
 export type AnalysisContextPackBlockStatus =
