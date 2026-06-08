@@ -26,6 +26,7 @@ class NewListing:
     source: str
 
 
+# 与 CryptoExchangeBase._fetch_timeout 同义；保持本模块零跨层依赖，故就地复制而非 import。
 def _fetch_timeout() -> float:
     raw = os.getenv("CRYPTO_FETCH_TIMEOUT_SECONDS")
     if raw:
@@ -50,7 +51,7 @@ def _fetch_max_retries() -> int:
     return 0
 
 
-def _http_get_json(url: str, params: Optional[dict] = None, headers: Optional[dict] = None):
+def _http_get_json(url: str, params: Optional[dict] = None, headers: Optional[dict] = None) -> object:
     """GET JSON，复用 CRYPTO_FETCH_* 超时/重试语义（4xx 不重试）。失败抛 requests 异常。"""
     timeout = _fetch_timeout()
     max_retries = _fetch_max_retries()
@@ -76,7 +77,8 @@ def fetch_okx_instruments(window_days: int, now_ms: int) -> List[NewListing]:
         logger.warning("[新上新-OKX] 抓取失败: %s", e)
         return out
     lo = now_ms - window_days * _DAY_MS
-    for it in (data or {}).get("data", []) or []:
+    items = (data.get("data") or []) if isinstance(data, dict) else []
+    for it in items:
         if it.get("state") != "live":
             continue
         try:

@@ -15,6 +15,12 @@ def test_okx_parses_listtime_within_window(monkeypatch):
     bases = {r.base for r in out}
     assert bases == {"NEW"}
     assert out[0].exchange == "okx" and out[0].listed_at == now - 2 * day
+    assert out[0].source == "okx"
+
+
+def test_okx_non_dict_response_returns_empty(monkeypatch):
+    monkeypatch.setattr(nl, "_http_get_json", lambda *a, **k: ["unexpected", "list"])
+    assert nl.fetch_okx_instruments(7, 1_000_000_000_000) == []
 
 
 def test_okx_fetch_error_returns_empty(monkeypatch):
