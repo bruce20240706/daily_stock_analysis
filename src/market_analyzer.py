@@ -480,6 +480,18 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             "若无显著资讯则简要说明。不得编造上新或价格。"
         )
 
+    def _get_crypto_new_listings(self) -> List[Dict[str, Any]]:
+        """crypto 结构化新上线发现；非 crypto 返回 []，任何失败优雅降级为 []。"""
+        if self.region != "crypto":
+            return []
+        try:
+            from src.services.crypto_new_listing_service import CryptoNewListingService
+            service = CryptoNewListingService(data_manager=self.data_manager)
+            return service.discover()
+        except Exception as e:
+            logger.warning("[新上新] 发现失败，跳过: %s", e)
+            return []
+
     def search_market_news(self) -> List[Dict]:
         """
         搜索市场新闻
@@ -562,6 +574,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         news: List,
         report: str,
         market_light_snapshot: Optional[Dict[str, Any]] = None,
+        new_listings: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Build the structured market-review contract consumed by API, Web, and notifications."""
         language = self._get_review_language()
@@ -622,6 +635,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         if light is not None:
             payload["market_light"] = light
+
+        if new_listings:
+            payload["new_listings"] = new_listings
 
         return payload
 
@@ -1430,11 +1446,13 @@ Market conditions can change quickly. The data above is for reference only and d
         # crypto skips MarketLightSnapshot; build_market_review_payload also guards this
         # via `if self.region == "crypto": light = None` — keep both in sync when changing.
         snapshot = None if self.region == "crypto" else self.build_market_light_snapshot(overview)
+        new_listings = self._get_crypto_new_listings()
         structured_payload = self.build_market_review_payload(
             overview,
             news,
             report,
             snapshot,
+            new_listings=new_listings,
         )
 
         logger.info("========== 大盘复盘分析完成 ==========")

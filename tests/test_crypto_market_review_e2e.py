@@ -15,6 +15,7 @@ def test_crypto_review_end_to_end_offline(monkeypatch):
         MarketIndex(code="ETH/USDT", name="ETH/USDT", current=3180.0, change_pct=1.4, high=3250.0, low=3100.0),
     ]
     monkeypatch.setattr(a, "_get_main_indices", lambda: basket)
+    monkeypatch.setattr(a, "_get_crypto_new_listings", lambda: [])
 
     result = a.run_daily_review_with_snapshot()
     payload = result.structured_payload
