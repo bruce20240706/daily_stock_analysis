@@ -928,6 +928,12 @@ class Config:
     crypto_realtime_priority: str = "binance,okx,coinbase"
     # crypto 大盘复盘篮子符号（逗号分隔交易对，如 BTC/USDT,ETH/USDT）
     crypto_market_review_symbols: str = "BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,DOGE/USDT,ADA/USDT,AVAX/USDT,LINK/USDT,TRX/USDT,TON/USDT,DOT/USDT"
+    # crypto 新币上新发现开关与参数
+    # crypto_new_listing_sources：binance 需要持久化 DB，CI 临时环境无 binance 输出，默认不含
+    crypto_new_listing_enabled: bool = True
+    crypto_new_listing_window_days: int = 7
+    crypto_new_listing_sources: str = "okx,coinbase"
+    crypto_new_listing_max: int = 20
     # Binance 公共行情 Base URL（地区受限可切 https://data-api.binance.vision）
     binance_base_url: str = "https://api.binance.com"
     # 实时行情缓存时间（秒）
@@ -1762,6 +1768,11 @@ class Config:
                 'CRYPTO_MARKET_REVIEW_SYMBOLS',
                 'BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,DOGE/USDT,ADA/USDT,AVAX/USDT,LINK/USDT,TRX/USDT,TON/USDT,DOT/USDT',
             ),
+            # crypto 新币上新
+            crypto_new_listing_enabled=os.getenv('CRYPTO_NEW_LISTING_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on'),
+            crypto_new_listing_window_days=parse_env_int(os.getenv('CRYPTO_NEW_LISTING_WINDOW_DAYS'), 7, field_name='CRYPTO_NEW_LISTING_WINDOW_DAYS', minimum=1),
+            crypto_new_listing_sources=os.getenv('CRYPTO_NEW_LISTING_SOURCES', 'okx,coinbase'),
+            crypto_new_listing_max=parse_env_int(os.getenv('CRYPTO_NEW_LISTING_MAX'), 20, field_name='CRYPTO_NEW_LISTING_MAX', minimum=1),
             binance_base_url=os.getenv('BINANCE_BASE_URL', 'https://api.binance.com'),
             realtime_cache_ttl=parse_env_int(os.getenv('REALTIME_CACHE_TTL'), 600, field_name='REALTIME_CACHE_TTL', minimum=0),
             circuit_breaker_cooldown=parse_env_int(os.getenv('CIRCUIT_BREAKER_COOLDOWN'), 300, field_name='CIRCUIT_BREAKER_COOLDOWN', minimum=0),
