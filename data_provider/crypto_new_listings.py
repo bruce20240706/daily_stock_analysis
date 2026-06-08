@@ -102,7 +102,7 @@ COINBASE_PRODUCTS_URL = "https://api.coinbase.com/api/v3/brokerage/market/produc
 _COINBASE_UA = {"User-Agent": "dsa-market-review/1.0"}
 
 
-def _iso_to_ms(value: str) -> Optional[int]:
+def _iso_to_ms(value: Optional[str]) -> Optional[int]:
     if not value:
         return None
     try:
@@ -132,7 +132,7 @@ def fetch_coinbase_products(window_days: int, now_ms: int) -> List[NewListing]:
             continue
         base = (p.get("base_currency_id") or "").upper()
         quote = (p.get("quote_currency_id") or "").upper()
-        if not base or base in seen_base:
+        if not base or not quote or base in seen_base:
             continue
         seen_base.add(base)
         out.append(NewListing(base=base, quote=quote,
