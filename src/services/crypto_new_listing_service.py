@@ -59,8 +59,12 @@ class CryptoNewListingService:
         if repo is None:
             from src.repositories.crypto_listing_repo import CryptoListingRepository
             repo = CryptoListingRepository()
-        prior = repo.get_base_assets("binance")
-        repo.save_base_assets("binance", set(current.keys()))
+        try:
+            prior = repo.get_base_assets("binance")
+            repo.save_base_assets("binance", set(current.keys()))
+        except Exception as e:
+            logger.warning("[新上新-Binance] 快照读写失败，跳过差分: %s", e)
+            return []
         if prior is None:
             logger.info("[新上新-Binance] 首次播种基线 %d 个 base，本次不报新上", len(current))
             return []

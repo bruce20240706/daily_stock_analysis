@@ -7,8 +7,10 @@ class _FakeRepo:
     def __init__(self, prior=None):
         self._prior = prior
         self.saved = None
+
     def get_base_assets(self, exchange):
         return self._prior
+
     def save_base_assets(self, exchange, bases):
         self.saved = set(bases)
 
@@ -44,3 +46,12 @@ def test_binance_fetch_empty_no_crash_no_save(monkeypatch):
     svc = CryptoNewListingService(data_manager=None, repo=repo, config=_cfg())
     assert svc.discover(now_ms=1_000) == []
     assert repo.saved is None
+
+
+def test_binance_existing_base_new_pair_not_reported(monkeypatch):
+    # AAA already in prior; fetch returns AAA with a different representative pair → no new base
+    monkeypatch.setattr(nl, "fetch_binance_spot_base_assets", lambda: {"AAA": ("AAAFDUSD", "FDUSD")})
+    repo = _FakeRepo(prior={"AAA"})
+    svc = CryptoNewListingService(data_manager=None, repo=repo, config=_cfg())
+    assert svc.discover(now_ms=1_000) == []     # AAA 仍是已知 base，新增计价对不报
+    assert repo.saved == {"AAA"}
