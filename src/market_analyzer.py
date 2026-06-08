@@ -453,10 +453,36 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     #     except Exception as e:
     #         logger.warning(f"[大盘] 获取北向资金失败: {e}")
     
+    def _get_crypto_new_coin_queries(self) -> List[str]:
+        """crypto 专用新币/上新检索词；非 crypto 返回空。"""
+        if self.region != "crypto":
+            return []
+        return [
+            "加密货币 新币 上线",
+            "IEO launchpad new listing",
+            "Binance OKX 上新 公告",
+            "crypto new token launch",
+        ]
+
+    def _get_crypto_addendum_prompt(self, review_language: str | None = None) -> str:
+        """crypto 专用 prompt 附加段：要求 LLM 基于新闻产出"新币与上新动态"小节；非 crypto 返回空。"""
+        if self.region != "crypto":
+            return ""
+        if (review_language or self._get_review_language()) == "en":
+            return (
+                "\n[Crypto-specific] Add a section '## New Listings & IEO' summarizing notable "
+                "recent token launches / IEO / launchpad / exchange listings strictly from the "
+                "provided news. If none, say so briefly. Do not invent listings or prices."
+            )
+        return (
+            "\n[加密货币专属] 增加一节《新币与上新动态》，严格依据所给新闻总结近期值得关注的"
+            "新上线/IEO/launchpad/交易所上新项目与风险；若无显著资讯则简要说明。不得编造上新或价格。"
+        )
+
     def search_market_news(self) -> List[Dict]:
         """
         搜索市场新闻
-        
+
         Returns:
             新闻列表
         """
@@ -467,12 +493,13 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         all_news = []
 
         # 按 region 使用不同的新闻搜索词
-        search_queries = self.profile.news_queries
+        search_queries = list(self.profile.news_queries) + self._get_crypto_new_coin_queries()
         review_language = self._get_review_language()
         market_names = {
             "cn": "大盘" if review_language == "zh" else "A-share market",
             "us": "美股市场" if review_language == "zh" else "US market",
             "hk": "港股市场" if review_language == "zh" else "HK market",
+            "crypto": "加密货币市场" if review_language == "zh" else "crypto market",
         }
         
         try:
@@ -1174,6 +1201,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 {data_no_indices_hint}
 
 {self._get_strategy_prompt_block()}
+{self._get_crypto_addendum_prompt(review_language)}
 
 ---
 
@@ -1238,6 +1266,7 @@ Output the report content directly, no extra commentary.
 {data_no_indices_hint}
 
 {self._get_strategy_prompt_block()}
+{self._get_crypto_addendum_prompt(review_language)}
 
 ---
 
