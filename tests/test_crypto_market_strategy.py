@@ -8,6 +8,12 @@ def test_crypto_blueprint_routed():
 
 def test_crypto_blueprint_not_cn_content():
     bp = get_market_strategy_blueprint("crypto")
-    joined = bp.title + " " + " ".join(bp.principles)
-    assert "涨停" not in joined
-    assert "国企指数" not in joined
+    all_text = " ".join([
+        bp.title, bp.positioning,
+        *bp.principles,
+        *[f"{d.name} {d.objective} {' '.join(d.checkpoints)}" for d in bp.dimensions],
+        *bp.action_framework,
+    ])
+    assert "涨跌停结构" not in all_text
+    assert "国企指数" not in all_text
+    assert "上证" not in all_text
