@@ -259,6 +259,21 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响新闻上下文数量、时效性和报告长度。'],
     notes: ['窗口过长可能引入陈旧信息，过短可能遗漏慢发酵事件。'],
   },
+  'settings.data_source.crypto_new_listing': {
+    title: '数字货币新币上新发现',
+    summary: '扫描交易所获取近期上新的数字货币交易对，用于发现潜在新机会。',
+    usage: 'CRYPTO_NEW_LISTING_ENABLED 开启或关闭该功能；CRYPTO_NEW_LISTING_WINDOW_DAYS 设定回看天数（新上线的交易对纳入范围）；CRYPTO_NEW_LISTING_SOURCES 填写交易所列表（逗号分隔，支持 okx、coinbase、binance）；CRYPTO_NEW_LISTING_MAX 限制每次发现返回的最大结果数。',
+    valueNotes: [
+      'binance 发现依赖持久化 DB 卷存储历史快照，CI 等无状态环境中 binance 不会产生输出，默认排除 binance（默认值 okx,coinbase）。',
+      '回看窗口越大，返回的新上线交易对越多，但也可能引入上线较久的结果。',
+      'CRYPTO_NEW_LISTING_MAX 设为较小值可避免单次返回过多结果占用分析上下文。',
+    ],
+    impact: ['影响每日运行中的新币发现范围、覆盖交易所和结果数量。'],
+    notes: [
+      'binance 需要配合持久化存储；非必要不添加 binance 到 CI 或无状态部署。',
+      '关闭该功能不影响常规个股分析和大盘复盘。',
+    ],
+  },
   'settings.notification.FEISHU_WEBHOOK_URL': {
     title: '飞书群机器人 Webhook',
     summary: '配置飞书自定义群机器人，用于把分析报告推送到指定飞书群。',
@@ -1203,6 +1218,21 @@ const settingsHelpEnUS: SettingsHelpMap = {
     valueNotes: ['The effective window is constrained by both values.'],
     impact: ['Affects news context size, freshness, and report length.'],
     notes: ['Too wide can include stale news; too narrow can miss slow-moving events.'],
+  },
+  'settings.data_source.crypto_new_listing': {
+    title: 'Crypto New Listing Discovery',
+    summary: 'Scans configured exchanges for recently listed crypto trading pairs to surface potential new opportunities.',
+    usage: 'CRYPTO_NEW_LISTING_ENABLED toggles the feature. CRYPTO_NEW_LISTING_WINDOW_DAYS sets the look-back window (pairs listed within this many days are included). CRYPTO_NEW_LISTING_SOURCES is a comma-separated list of exchanges (okx, coinbase, binance). CRYPTO_NEW_LISTING_MAX caps the number of results returned per run.',
+    valueNotes: [
+      'Binance discovery requires a persistent DB volume for historical snapshots; it produces no output in ephemeral CI environments, so binance is excluded from the default value (okx,coinbase).',
+      'A larger window returns more recently listed pairs but may include pairs that are no longer truly new.',
+      'Set CRYPTO_NEW_LISTING_MAX to a smaller value to avoid flooding the analysis context with too many results.',
+    ],
+    impact: ['Affects the scope, exchange coverage, and result count of new-listing discovery in each daily run.'],
+    notes: [
+      'Binance requires persistent storage; avoid adding it to CI or stateless deployments unless a volume is configured.',
+      'Disabling this feature does not affect regular stock analysis or market review.',
+    ],
   },
   'settings.notification.FEISHU_WEBHOOK_URL': {
     title: 'Feishu Webhook URL',
