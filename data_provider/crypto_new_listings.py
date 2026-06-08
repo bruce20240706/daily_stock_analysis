@@ -7,7 +7,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -138,4 +138,31 @@ def fetch_coinbase_products(window_days: int, now_ms: int) -> List[NewListing]:
         out.append(NewListing(base=base, quote=quote,
                               symbol=p.get("product_id") or f"{base}-{quote}",
                               exchange="coinbase", listed_at=ms, source="coinbase"))
+    return out
+
+
+BINANCE_EXCHANGEINFO_URL = "https://data-api.binance.vision/api/v3/exchangeInfo"  # .vision 避 451
+
+
+def fetch_binance_spot_base_assets() -> Dict[str, Tuple[str, str]]:
+    """当前 Binance spot 在交易的 baseAsset → (代表 symbol, quote)，代表对优先 *USDT。
+
+    纯抓取——不做差分、不碰 DB（差分在 src 服务层）。失败返回 {}。
+    """
+    out: Dict[str, Tuple[str, str]] = {}
+    try:
+        data = _http_get_json(BINANCE_EXCHANGEINFO_URL)
+    except Exception as e:
+        logger.warning("[新上新-Binance] exchangeInfo 抓取失败: %s", e)
+        return out
+    symbols = (data.get("symbols") or []) if isinstance(data, dict) else []
+    for s in symbols:
+        if s.get("status") != "TRADING" or not s.get("isSpotTradingAllowed"):
+            continue
+        base = (s.get("baseAsset") or "").upper()
+        quote = (s.get("quoteAsset") or "").upper()
+        if not base or not quote:
+            continue
+        if base not in out or quote == "USDT":   # 代表对优先 USDT
+            out[base] = (s.get("symbol") or f"{base}{quote}", quote)
     return out
