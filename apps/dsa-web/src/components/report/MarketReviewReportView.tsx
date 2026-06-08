@@ -41,6 +41,7 @@ type MarketReviewSection = {
 type StructuredMarketData = {
   id: string;
   title?: string;
+  region?: string;
   breadth?: MarketReviewPayload['breadth'];
   indices: NonNullable<MarketReviewPayload['indices']>;
 };
@@ -179,6 +180,7 @@ const getStructuredMarketData = (payload?: MarketReviewPayload | null): Structur
       .map(([region, marketPayload]) => ({
         id: region,
         title: marketPayload.title || region.toUpperCase(),
+        region,
         breadth: marketPayload.breadth,
         indices: marketPayload.indices || [],
       }));
@@ -191,6 +193,7 @@ const getStructuredMarketData = (payload?: MarketReviewPayload | null): Structur
   return [{
     id: payload.region || 'market',
     title: payload.title,
+    region: payload.region,
     breadth: payload.breadth,
     indices: payload.indices || [],
   }];
@@ -481,9 +484,9 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                       </p>
                     </div>
                   </div>
-                ) : (
+                ) : (marketData.region === 'crypto' ? null : (
                   <p className="text-sm text-secondary-text">{marketReviewText.noBreadthData}</p>
-                )}
+                ))}
                 {marketData.indices.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-sm">

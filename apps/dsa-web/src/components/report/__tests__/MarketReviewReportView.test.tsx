@@ -174,4 +174,41 @@ describe('MarketReviewReportView', () => {
     expect(screen.queryByText('Advancers')).not.toBeInTheDocument();
     expect(screen.queryByText('Decliners')).not.toBeInTheDocument();
   });
+
+  it('crypto 市场不渲染 breadth 暂无数据占位', () => {
+    const cryptoPayload: MarketReviewPayload = {
+      version: 1,
+      kind: 'market_review',
+      region: 'crypto',
+      language: 'zh',
+      title: '数字货币市场',
+      rootTitle: '大盘复盘',
+      indices: [
+        {
+          code: 'BTCUSDT',
+          name: 'BTC/USDT',
+          current: 67800,
+          changePct: 2.1,
+          high: 68500,
+          low: 66200,
+        },
+      ],
+      sections: [],
+    };
+
+    render(
+      <MarketReviewReportView
+        payload={cryptoPayload}
+        content="# 大盘复盘"
+        reportLanguage="zh"
+      />,
+    );
+
+    expect(screen.getByText('结构化大盘数据')).toBeInTheDocument();
+    expect(screen.queryByText('暂无数据')).not.toBeInTheDocument();
+    expect(screen.queryByText('No data')).not.toBeInTheDocument();
+    expect(screen.getByText('BTC/USDT')).toBeInTheDocument();
+    expect(screen.queryByText('上涨家数')).not.toBeInTheDocument();
+    expect(screen.queryByText('涨停/跌停')).not.toBeInTheDocument();
+  });
 });
