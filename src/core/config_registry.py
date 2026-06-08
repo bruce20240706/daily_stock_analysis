@@ -2876,7 +2876,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "MARKET_REVIEW_REGION": {
         "title": "Market Review Region",
-        "description": "Market region for review: cn (A-shares), hk (Hong Kong), us (US stocks), or both (all markets).",
+        "description": "Market region for review: cn (A-shares), hk (Hong Kong), us (US stocks), crypto (crypto assets), or both (cn+hk+us, excludes crypto).",
         "category": "system",
         "data_type": "string",
         "ui_control": "select",
@@ -2884,8 +2884,8 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "is_required": False,
         "is_editable": True,
         "default_value": "cn",
-        "options": ["cn", "hk", "us", "both"],
-        "validation": {"enum": ["cn", "hk", "us", "both"]},
+        "options": ["cn", "hk", "us", "crypto", "both"],
+        "validation": {"enum": ["cn", "hk", "us", "crypto", "both"]},
         "display_order": 47,
         "help_key": "settings.system.market_review",
         "examples": [

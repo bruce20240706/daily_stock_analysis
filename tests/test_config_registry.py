@@ -643,6 +643,15 @@ class TestMarketReviewFieldsRegistered(unittest.TestCase):
         field_keys = {f["key"] for f in system_cat["fields"]}
         self.assertIn("MARKET_REVIEW_COLOR_SCHEME", field_keys)
 
+    def test_market_review_region_enum_includes_crypto(self):
+        """crypto 必须出现在 MARKET_REVIEW_REGION 的 options 和 validation.enum 中，
+        否则 system_config_service 的 invalid_enum 校验会拒绝该值。"""
+        field = get_field_definition("MARKET_REVIEW_REGION")
+        self.assertIn("crypto", field["options"])
+        self.assertIn("crypto", field["validation"]["enum"])
+        # both 保持 cn+hk+us 语义，crypto 是独立选项
+        self.assertIn("both", field["validation"]["enum"])
+
 
 if __name__ == "__main__":
     unittest.main()
