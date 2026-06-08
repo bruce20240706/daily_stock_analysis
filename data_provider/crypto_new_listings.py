@@ -6,6 +6,7 @@
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import requests
@@ -94,4 +95,47 @@ def fetch_okx_instruments(window_days: int, now_ms: int) -> List[NewListing]:
         out.append(NewListing(base=base, quote=quote,
                               symbol=it.get("instId") or f"{base}-{quote}",
                               exchange="okx", listed_at=lt_ms, source="okx"))
+    return out
+
+
+COINBASE_PRODUCTS_URL = "https://api.coinbase.com/api/v3/brokerage/market/products"
+_COINBASE_UA = {"User-Agent": "dsa-market-review/1.0"}
+
+
+def _iso_to_ms(value: str) -> Optional[int]:
+    if not value:
+        return None
+    try:
+        s = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_coinbase_products(window_days: int, now_ms: int) -> List[NewListing]:
+    """Coinbase Advanced Trade products：new_at 落在窗口内，按 base_currency_id 去重。"""
+    out: List[NewListing] = []
+    try:
+        data = _http_get_json(COINBASE_PRODUCTS_URL, headers=_COINBASE_UA)
+    except Exception as e:
+        logger.warning("[新上新-Coinbase] 抓取失败: %s", e)
+        return out
+    products = (data.get("products") or []) if isinstance(data, dict) else []
+    lo = now_ms - window_days * _DAY_MS
+    seen_base = set()
+    for p in products:
+        ms = _iso_to_ms(p.get("new_at"))
+        if ms is None or not (lo < ms <= now_ms):
+            continue
+        base = (p.get("base_currency_id") or "").upper()
+        quote = (p.get("quote_currency_id") or "").upper()
+        if not base or base in seen_base:
+            continue
+        seen_base.add(base)
+        out.append(NewListing(base=base, quote=quote,
+                              symbol=p.get("product_id") or f"{base}-{quote}",
+                              exchange="coinbase", listed_at=ms, source="coinbase"))
     return out
