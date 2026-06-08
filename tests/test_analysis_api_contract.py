@@ -278,6 +278,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             send_notification=False,
             override_region="cn,us",
             return_structured=True,
+            trigger_source="api",
         )
 
     def test_market_review_runtime_initializes_analyzer_for_litellm_provider(self) -> None:
@@ -330,6 +331,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             send_notification=False,
             override_region="cn",
             return_structured=True,
+            trigger_source="api",
         )
 
     def test_get_analysis_status_returns_market_review_report_from_queue(self) -> None:
