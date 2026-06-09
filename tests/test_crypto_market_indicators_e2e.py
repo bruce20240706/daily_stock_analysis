@@ -6,6 +6,7 @@ from src.config import Config
 from src.market_analyzer import MarketAnalyzer, MarketOverview
 
 
+# 重置 Config 单例，确保每个用例的 CRYPTO_MARKET_INDICATORS_ENABLED monkeypatch 被 get_config() 重新读取
 @pytest.fixture(autouse=True)
 def reset_config_singleton():
     """每个测试前后重置配置单例，确保 monkeypatched 环境变量生效。"""
@@ -32,6 +33,20 @@ def test_crypto_review_payload_contains_market_indicators(monkeypatch):
     assert mi["btc_dominance"] == 56.07
     assert mi["total_market_cap_usd"] == 2241017397766.0
     assert mi["fear_greed"]["classification"] == "Extreme Fear"
+    assert mi["fear_greed"]["value"] == 10
+
+
+def test_crypto_review_payload_omits_when_feature_disabled(monkeypatch):
+    monkeypatch.setenv("CRYPTO_MARKET_INDICATORS_ENABLED", "false")
+    # 即使两源有数据，禁用开关也应让 collect() 返回 {} → payload 不含 market_indicators
+    monkeypatch.setattr(cmi, "fetch_global_market", lambda: {"btc_dominance": 56.07})
+    monkeypatch.setattr(cmi, "fetch_fear_greed", lambda: {"value": 10, "classification": "Extreme Fear", "timestamp": 1})
+    a = MarketAnalyzer(region="crypto")
+    indicators = a._get_crypto_market_indicators()
+    ov = MarketOverview(date="2026-06-09")
+    payload = a.build_market_review_payload(ov, news=[], report="# 加密货币大盘复盘", market_indicators=indicators)
+    assert indicators == {}
+    assert "market_indicators" not in payload
 
 
 def test_crypto_review_payload_omits_when_both_sources_empty(monkeypatch):
