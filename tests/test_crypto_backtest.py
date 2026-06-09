@@ -133,7 +133,7 @@ class CryptoBacktestTestCase(unittest.TestCase):
         # 补数已持久化到 StockDaily
         with self.db.get_session() as session:
             saved = session.query(StockDaily).filter(StockDaily.code == CRYPTO_CODE).count()
-        self.assertGreaterEqual(saved, 4)
+        self.assertEqual(saved, 4)  # 4 行 df UPSERT 进空表 → 恰好 4 行（紧锁，防重复持久化回归）
         # 结果完成
         self.assertEqual(stats["completed"], 1)
         self.assertEqual(self._result().eval_status, "completed")
