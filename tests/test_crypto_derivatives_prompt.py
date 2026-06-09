@@ -17,6 +17,8 @@ def test_prompt_includes_contract_block_when_present():
     assert "合约市场指标" in prompt
     assert "62669.5" in prompt          # mark price
     assert "0.0100%" in prompt          # funding_rate 0.0001 → *100 = 0.0100%
+    assert "张" in prompt                       # OI 单位
+    assert "1,793,545,573" in prompt            # open_interest_usd 千分位
 
 
 def test_prompt_omits_contract_block_when_absent():

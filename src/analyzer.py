@@ -3009,7 +3009,7 @@ class GeminiAnalyzer:
                 rows.append(f"| 资金费率 | {fr * 100:.4f}% | 正=多头付费 / 负=空头付费（约 8h 结算） |")
             mp = contracts.get("mark_price")
             if mp is not None:
-                rows.append(f"| 标记价 | {mp} | 永续标记价（与现货价对比看基差） |")
+                rows.append(f"| 标记价 | {self._format_price(mp, crypto=True)} | 永续标记价（与现货价对比看基差） |")
             oi = contracts.get("open_interest")
             oi_usd = contracts.get("open_interest_usd")
             if oi is not None or oi_usd is not None:
@@ -3024,7 +3024,8 @@ class GeminiAnalyzer:
 | 指标 | 数值 | 含义 |
 |------|------|------|
 {rows_text}
-[加密货币专属] 结合资金费率与持仓判断杠杆情绪与挤压风险，不得编造数据。
+
+> [加密货币专属] 结合资金费率与持仓判断杠杆情绪与挤压风险，不得编造数据。
 """
 
         # 添加财报与分红（价值投资口径）
