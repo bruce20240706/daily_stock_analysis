@@ -492,6 +492,17 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             logger.warning("[新上新] 发现失败，跳过: %s", e)
             return []
 
+    def _get_crypto_market_indicators(self) -> Dict[str, Any]:
+        """crypto 大盘宏观指标；非 crypto 返回 {}，任何失败优雅降级为 {}。"""
+        if self.region != "crypto":
+            return {}
+        try:
+            from src.services.crypto_market_indicator_service import CryptoMarketIndicatorService
+            return CryptoMarketIndicatorService().collect()
+        except Exception as e:
+            logger.warning("[大盘指标] 收集失败，跳过: %s", e)
+            return {}
+
     def search_market_news(self) -> List[Dict]:
         """
         搜索市场新闻
@@ -575,6 +586,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         report: str,
         market_light_snapshot: Optional[Dict[str, Any]] = None,
         new_listings: Optional[List[Dict[str, Any]]] = None,
+        market_indicators: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Build the structured market-review contract consumed by API, Web, and notifications."""
         language = self._get_review_language()
@@ -638,6 +650,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         if new_listings:
             payload["new_listings"] = new_listings
+
+        if market_indicators:
+            payload["market_indicators"] = market_indicators
 
         return payload
 
