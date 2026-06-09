@@ -113,5 +113,31 @@ class CryptoBacktestTestCase(unittest.TestCase):
         self.assertAlmostEqual(r.simulated_return_pct, 10.0)
 
 
+    def test_crypto_backtest_autofill_routes_crypto_klines(self) -> None:
+        """无 StockDaily 时，_try_fill_daily_data 经 get_daily_data 路由 crypto code 并持久化。"""
+        self._seed_analysis()  # 仅 AnalysisHistory，无 StockDaily
+        df = pd.DataFrame([
+            {"date": "2024-01-01", "open": 60000.0, "high": 60500.0, "low": 59500.0, "close": 60000.0, "volume": 100.0, "amount": 6_000_000.0, "pct_chg": 0.0},
+            {"date": "2024-01-02", "open": 60000.0, "high": 67000.0, "low": 60000.0, "close": 65000.0, "volume": 120.0, "amount": 7_000_000.0, "pct_chg": 8.33},
+            {"date": "2024-01-03", "open": 65000.0, "high": 66000.0, "low": 64000.0, "close": 65500.0, "volume": 110.0, "amount": 7_000_000.0, "pct_chg": 0.77},
+            {"date": "2024-01-04", "open": 65500.0, "high": 66500.0, "low": 64500.0, "close": 66000.0, "volume": 115.0, "amount": 7_000_000.0, "pct_chg": 0.76},
+        ])
+        service = BacktestService(self.db)
+        with patch("data_provider.base.DataFetcherManager.get_daily_data", return_value=(df, "binance")) as mocked:
+            stats = service.run_backtest(code=CRYPTO_CODE, force=False, eval_window_days=3, min_age_days=0, limit=10)
+
+        # get_daily_data 被以 crypto code 调用
+        self.assertTrue(mocked.called)
+        called_code = mocked.call_args.kwargs.get("stock_code") or (mocked.call_args.args[0] if mocked.call_args.args else None)
+        self.assertEqual(called_code, CRYPTO_CODE)
+        # 补数已持久化到 StockDaily
+        with self.db.get_session() as session:
+            saved = session.query(StockDaily).filter(StockDaily.code == CRYPTO_CODE).count()
+        self.assertGreaterEqual(saved, 4)
+        # 结果完成
+        self.assertEqual(stats["completed"], 1)
+        self.assertEqual(self._result().eval_status, "completed")
+
+
 if __name__ == "__main__":
     unittest.main()
