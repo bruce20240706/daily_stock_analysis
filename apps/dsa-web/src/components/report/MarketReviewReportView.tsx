@@ -523,41 +523,44 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                   <p className="text-sm text-secondary-text">{marketReviewText.noBreadthData}</p>
                 ))}
                 {marketData.region === 'crypto' && marketData.marketIndicators ? (
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {marketData.marketIndicators.btcDominance !== undefined ? (
-                      <div className="rounded-lg border border-subtle p-3">
-                        <p className="label-uppercase">{marketReviewText.btcDominance}</p>
-                        <p className="mt-1 font-semibold text-foreground">{marketData.marketIndicators.btcDominance}%</p>
-                      </div>
-                    ) : null}
-                    {marketData.marketIndicators.ethDominance !== undefined ? (
-                      <div className="rounded-lg border border-subtle p-3">
-                        <p className="label-uppercase">{marketReviewText.ethDominance}</p>
-                        <p className="mt-1 font-semibold text-foreground">{marketData.marketIndicators.ethDominance}%</p>
-                      </div>
-                    ) : null}
-                    {marketData.marketIndicators.totalMarketCapUsd !== undefined ? (
-                      <div className="rounded-lg border border-subtle p-3">
-                        <p className="label-uppercase">{marketReviewText.totalMarketCap}</p>
-                        <p className="mt-1 font-semibold text-foreground">
-                          ${marketData.marketIndicators.totalMarketCapUsd.toLocaleString()}
-                          {marketData.marketIndicators.marketCapChange24hPct !== undefined
-                            ? ` (${marketData.marketIndicators.marketCapChange24hPct}%)`
-                            : ''}
-                        </p>
-                      </div>
-                    ) : null}
-                    {marketData.marketIndicators.fearGreed && marketData.marketIndicators.fearGreed.value !== undefined ? (
-                      <div className="rounded-lg border border-subtle p-3">
-                        <p className="label-uppercase">{marketReviewText.fearGreed}</p>
-                        <p className="mt-1 font-semibold text-foreground">
-                          {marketData.marketIndicators.fearGreed.value}
-                          {marketData.marketIndicators.fearGreed.classification
-                            ? ` (${marketData.marketIndicators.fearGreed.classification})`
-                            : ''}
-                        </p>
-                      </div>
-                    ) : null}
+                  <div>
+                    <h4 className="mb-2 text-sm font-semibold text-foreground">{marketReviewText.marketIndicators}</h4>
+                    <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+                      {marketData.marketIndicators.btcDominance !== undefined ? (
+                        <div className="rounded-lg border border-subtle p-3">
+                          <p className="label-uppercase">{marketReviewText.btcDominance}</p>
+                          <p className="mt-1 font-semibold text-foreground">{marketData.marketIndicators.btcDominance}%</p>
+                        </div>
+                      ) : null}
+                      {marketData.marketIndicators.ethDominance !== undefined ? (
+                        <div className="rounded-lg border border-subtle p-3">
+                          <p className="label-uppercase">{marketReviewText.ethDominance}</p>
+                          <p className="mt-1 font-semibold text-foreground">{marketData.marketIndicators.ethDominance}%</p>
+                        </div>
+                      ) : null}
+                      {marketData.marketIndicators.totalMarketCapUsd !== undefined ? (
+                        <div className="rounded-lg border border-subtle p-3">
+                          <p className="label-uppercase">{marketReviewText.totalMarketCap}</p>
+                          <p className="mt-1 font-semibold text-foreground">
+                            ${marketData.marketIndicators.totalMarketCapUsd.toLocaleString()}
+                            {marketData.marketIndicators.marketCapChange24hPct !== undefined
+                              ? ` (${marketData.marketIndicators.marketCapChange24hPct}%)`
+                              : ''}
+                          </p>
+                        </div>
+                      ) : null}
+                      {marketData.marketIndicators.fearGreed && marketData.marketIndicators.fearGreed.value !== undefined ? (
+                        <div className="rounded-lg border border-subtle p-3">
+                          <p className="label-uppercase">{marketReviewText.fearGreed}</p>
+                          <p className="mt-1 font-semibold text-foreground">
+                            {marketData.marketIndicators.fearGreed.value}
+                            {marketData.marketIndicators.fearGreed.classification
+                              ? ` (${marketData.marketIndicators.fearGreed.classification})`
+                              : ''}
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 ) : null}
                 {marketData.indices.length > 0 ? (

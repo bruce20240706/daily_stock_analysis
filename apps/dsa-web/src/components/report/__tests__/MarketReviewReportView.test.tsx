@@ -274,13 +274,14 @@ describe('MarketReviewReportView crypto market indicators', () => {
 
   it('renders indicators for crypto when present', () => {
     const payload = { ...base, marketIndicators: {
-      btcDominance: 56.07, totalMarketCapUsd: 2241017397766,
+      btcDominance: 56.07, ethDominance: 8.98, totalMarketCapUsd: 2241017397766,
       marketCapChange24hPct: -0.64,
       fearGreed: { value: 10, classification: 'Extreme Fear', timestamp: 1 },
     } };
     render(<MarketReviewReportView payload={payload as never} reportLanguage="zh" />);
-    expect(screen.getByText(/56\.07/)).toBeInTheDocument();
-    expect(screen.getByText(/Extreme Fear/)).toBeInTheDocument();
+    expect(screen.getByText('56.07%')).toBeInTheDocument();
+    expect(screen.getByText('8.98%')).toBeInTheDocument();
+    expect(screen.getByText('10 (Extreme Fear)')).toBeInTheDocument();
   });
 
   it('does not render indicators when absent', () => {

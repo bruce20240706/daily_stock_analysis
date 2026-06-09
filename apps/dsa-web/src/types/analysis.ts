@@ -177,7 +177,7 @@ export interface MarketIndicators {
   ethDominance?: number;
   totalMarketCapUsd?: number;
   marketCapChange24hPct?: number;
-  totalVolumeUsd?: number;
+  totalVolumeUsd?: number; // 随 payload 携带，当前指标条未渲染（presence-only，留作扩展）
   fearGreed?: CryptoFearGreed;
 }
 
