@@ -52,8 +52,13 @@ python main.py --stocks 600519,hk00700,AAPL,BTC/USDT   # 与股票混合分析
 
 ## 6. 回测（Backtest）
 
-- 回测 forward-return 直接按日期序取后续 K 线行数，不假设交易日历，**crypto 天然兼容**。
-- 语义提示：`eval_window_days` 对 crypto 指**自然日**（每日均有 K 线），对股票指**交易日**。因此同样的窗口天数，crypto 标的覆盖的 K 线根数通常多于股票（周末/节假日 crypto 仍有数据）。
+crypto symbol 走与股票**相同**的回测流程，无需独立配置或日历：
+
+- 回测对象是历史 `AnalysisHistory` 分析记录；crypto 分析记录（code 含 `/`，如 `BTC/USDT`）自动纳入回测候选（无市场过滤）。
+- 回测 forward-return 直接按日期序取后续 K 线行数，不假设交易日历，**crypto 天然兼容**；历史日线来自既有 crypto K 线抓取器（Binance/OKX/Coinbase，`interval=1d`），缺数据时由回测自动补取并存入 `StockDaily`。
+- 回测引擎对 `AnalysisHistory` 的 `operation_advice` / `stop_loss` / `take_profit`，在分析日之后的前向日线上评估方向正确性、止盈/止损命中与收益，与股票完全一致。
+- 语义提示：`eval_window_days` 对 crypto 指**自然日**（每日均有 K 线），对股票指**交易日**；同样窗口天数下 crypto 覆盖的 K 线根数通常多于股票（周末/节假日 crypto 仍有数据）。`first_hit_trading_days` 对 crypto 即「命中所需日历日数」（= 交易日数）。
+- 失败降级与股票一致：取不到起始/前向数据时记 `insufficient_data`，不影响其余回测。
 
 ## 7. API 用法
 
@@ -184,16 +189,6 @@ crypto 大盘复盘包含以下三个部分：
 - 指标值同时注入复盘 prompt（"## 加密市场宏观指标"事实块），供 LLM 叙事引用市场情绪与结构。
 - 指标条与复盘 prompt 展示 BTC/ETH 主导率、加密总市值（含 24h 变化）与恐贪指数；总成交额（`total_volume_usd`）随 payload 提供，暂未在指标条单独展示。
 - 仅 crypto 大盘复盘触发；A股/港股/美股不受影响。
-
-## 回测
-
-crypto symbol 走与股票**相同**的回测流程，无需独立配置或日历：
-
-- 回测对象是历史 `AnalysisHistory` 分析记录；crypto 分析记录（code 含 `/`，如 `BTC/USDT`）自动纳入回测候选（无市场过滤）。
-- 历史日线来自既有 crypto K 线抓取器（Binance/OKX/Coinbase，`interval=1d`），缺数据时由回测自动补取并存入 `StockDaily`。
-- 回测引擎对 `AnalysisHistory` 的 `operation_advice` / `stop_loss` / `take_profit`，在分析日之后的前向日线上评估方向正确性、止盈/止损命中与收益，与股票完全一致。
-- crypto 为 7×24，每个日历日皆交易日，故 `first_hit_trading_days` 即「命中所需日历日数」（对 crypto 等于交易日数）。
-- 失败降级与股票一致：取不到起始/前向数据时记 `insufficient_data`，不影响其余回测。
 
 ## 9. 已知限制（后续阶段）
 
