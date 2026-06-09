@@ -4,6 +4,7 @@ import { BarChart3, Clipboard, FileText, Gauge, Layers, ShieldAlert, TrendingUp,
 import { historyApi } from '../../api/history';
 import type {
   AnalysisReport,
+  MarketIndicators,
   MarketReviewPayload,
   MarketReviewPayloadSection,
   NewListing,
@@ -46,6 +47,7 @@ type StructuredMarketData = {
   breadth?: MarketReviewPayload['breadth'];
   indices: NonNullable<MarketReviewPayload['indices']>;
   newListings?: NewListing[];
+  marketIndicators?: MarketIndicators;
 };
 
 const isMarketReviewPayload = (value: unknown): value is MarketReviewPayload =>
@@ -186,6 +188,7 @@ const getStructuredMarketData = (payload?: MarketReviewPayload | null): Structur
         breadth: marketPayload.breadth,
         indices: marketPayload.indices || [],
         newListings: marketPayload.newListings,
+        marketIndicators: marketPayload.marketIndicators,
       }));
   }
 
@@ -200,6 +203,7 @@ const getStructuredMarketData = (payload?: MarketReviewPayload | null): Structur
     breadth: payload.breadth,
     indices: payload.indices || [],
     newListings: payload.newListings,
+    marketIndicators: payload.marketIndicators,
   }];
 };
 
@@ -225,6 +229,11 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   coin: string;
   exchanges: string;
   listedAt: string;
+  marketIndicators: string;
+  btcDominance: string;
+  ethDominance: string;
+  totalMarketCap: string;
+  fearGreed: string;
 }> = {
   zh: {
     reviewSummary: '复盘摘要',
@@ -248,6 +257,11 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     coin: '币种',
     exchanges: '交易所',
     listedAt: '上市时间',
+    marketIndicators: '加密市场指标',
+    btcDominance: 'BTC 主导率',
+    ethDominance: 'ETH 主导率',
+    totalMarketCap: '加密总市值',
+    fearGreed: '恐贪指数',
   },
   en: {
     reviewSummary: 'Review Summary',
@@ -271,6 +285,11 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     coin: 'Coin',
     exchanges: 'Exchanges',
     listedAt: 'Listed',
+    marketIndicators: 'Market Indicators',
+    btcDominance: 'BTC Dominance',
+    ethDominance: 'ETH Dominance',
+    totalMarketCap: 'Total Market Cap',
+    fearGreed: 'Fear & Greed',
   },
 };
 
@@ -503,6 +522,44 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                 ) : (marketData.region === 'crypto' ? null : (
                   <p className="text-sm text-secondary-text">{marketReviewText.noBreadthData}</p>
                 ))}
+                {marketData.region === 'crypto' && marketData.marketIndicators ? (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {marketData.marketIndicators.btcDominance !== undefined ? (
+                      <div className="rounded-lg border border-subtle p-3">
+                        <p className="label-uppercase">{marketReviewText.btcDominance}</p>
+                        <p className="mt-1 font-semibold text-foreground">{marketData.marketIndicators.btcDominance}%</p>
+                      </div>
+                    ) : null}
+                    {marketData.marketIndicators.ethDominance !== undefined ? (
+                      <div className="rounded-lg border border-subtle p-3">
+                        <p className="label-uppercase">{marketReviewText.ethDominance}</p>
+                        <p className="mt-1 font-semibold text-foreground">{marketData.marketIndicators.ethDominance}%</p>
+                      </div>
+                    ) : null}
+                    {marketData.marketIndicators.totalMarketCapUsd !== undefined ? (
+                      <div className="rounded-lg border border-subtle p-3">
+                        <p className="label-uppercase">{marketReviewText.totalMarketCap}</p>
+                        <p className="mt-1 font-semibold text-foreground">
+                          ${marketData.marketIndicators.totalMarketCapUsd.toLocaleString()}
+                          {marketData.marketIndicators.marketCapChange24hPct !== undefined
+                            ? ` (${marketData.marketIndicators.marketCapChange24hPct}%)`
+                            : ''}
+                        </p>
+                      </div>
+                    ) : null}
+                    {marketData.marketIndicators.fearGreed && marketData.marketIndicators.fearGreed.value !== undefined ? (
+                      <div className="rounded-lg border border-subtle p-3">
+                        <p className="label-uppercase">{marketReviewText.fearGreed}</p>
+                        <p className="mt-1 font-semibold text-foreground">
+                          {marketData.marketIndicators.fearGreed.value}
+                          {marketData.marketIndicators.fearGreed.classification
+                            ? ` (${marketData.marketIndicators.fearGreed.classification})`
+                            : ''}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {marketData.indices.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-sm">

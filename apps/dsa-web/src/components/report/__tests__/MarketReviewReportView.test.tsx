@@ -265,3 +265,26 @@ describe('MarketReviewReportView', () => {
     expect(screen.queryByText('涨停/跌停')).not.toBeInTheDocument();
   });
 });
+
+describe('MarketReviewReportView crypto market indicators', () => {
+  const base = {
+    version: 1, kind: 'market_review', region: 'crypto', title: '加密货币大盘复盘',
+    indices: [{ code: 'BTC/USDT', name: 'BTC/USDT', current: 60000, changePct: 1.2, high: 61000, low: 59000 }],
+  };
+
+  it('renders indicators for crypto when present', () => {
+    const payload = { ...base, marketIndicators: {
+      btcDominance: 56.07, totalMarketCapUsd: 2241017397766,
+      marketCapChange24hPct: -0.64,
+      fearGreed: { value: 10, classification: 'Extreme Fear', timestamp: 1 },
+    } };
+    render(<MarketReviewReportView payload={payload as never} reportLanguage="zh" />);
+    expect(screen.getByText(/56\.07/)).toBeInTheDocument();
+    expect(screen.getByText(/Extreme Fear/)).toBeInTheDocument();
+  });
+
+  it('does not render indicators when absent', () => {
+    render(<MarketReviewReportView payload={base as never} reportLanguage="zh" />);
+    expect(screen.queryByText(/Extreme Fear/)).not.toBeInTheDocument();
+  });
+});

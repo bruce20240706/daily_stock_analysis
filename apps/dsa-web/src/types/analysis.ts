@@ -166,6 +166,21 @@ export interface NewListing {
   volume?: number;
 }
 
+export interface CryptoFearGreed {
+  value?: number;
+  classification?: string;
+  timestamp?: number;
+}
+
+export interface MarketIndicators {
+  btcDominance?: number;
+  ethDominance?: number;
+  totalMarketCapUsd?: number;
+  marketCapChange24hPct?: number;
+  totalVolumeUsd?: number;
+  fearGreed?: CryptoFearGreed;
+}
+
 export interface MarketReviewPayload {
   version?: number;
   kind?: 'market_review' | string;
@@ -185,6 +200,7 @@ export interface MarketReviewPayload {
   markets?: Record<string, MarketReviewPayload>;
   markdownReport?: string;
   newListings?: NewListing[];
+  marketIndicators?: MarketIndicators;
 }
 
 export type AnalysisContextPackBlockStatus =
