@@ -139,5 +139,14 @@ class CryptoBacktestTestCase(unittest.TestCase):
         self.assertEqual(self._result().eval_status, "completed")
 
 
+    def test_crypto_backtest_insufficient_when_no_data(self) -> None:
+        """无 StockDaily 且补数返回空 → 优雅降级为 insufficient_data（非崩溃）。"""
+        self._seed_analysis()  # 仅 AnalysisHistory
+        service = BacktestService(self.db)
+        with patch("data_provider.base.DataFetcherManager.get_daily_data", return_value=(pd.DataFrame(), "")):
+            service.run_backtest(code=CRYPTO_CODE, force=False, eval_window_days=3, min_age_days=0, limit=10)
+        self.assertEqual(self._result().eval_status, "insufficient_data")
+
+
 if __name__ == "__main__":
     unittest.main()
