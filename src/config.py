@@ -935,6 +935,7 @@ class Config:
     crypto_new_listing_sources: str = "okx,coinbase"
     crypto_new_listing_max: int = 20
     crypto_market_indicators_enabled: bool = True
+    crypto_derivatives_enabled: bool = True
     # Binance 公共行情 Base URL（地区受限可切 https://data-api.binance.vision）
     binance_base_url: str = "https://api.binance.com"
     # 实时行情缓存时间（秒）
@@ -1775,6 +1776,7 @@ class Config:
             crypto_new_listing_sources=os.getenv('CRYPTO_NEW_LISTING_SOURCES', 'okx,coinbase'),
             crypto_new_listing_max=parse_env_int(os.getenv('CRYPTO_NEW_LISTING_MAX'), 20, field_name='CRYPTO_NEW_LISTING_MAX', minimum=1),
             crypto_market_indicators_enabled=os.getenv('CRYPTO_MARKET_INDICATORS_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on'),
+            crypto_derivatives_enabled=os.getenv('CRYPTO_DERIVATIVES_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on'),
             binance_base_url=os.getenv('BINANCE_BASE_URL', 'https://api.binance.com'),
             realtime_cache_ttl=parse_env_int(os.getenv('REALTIME_CACHE_TTL'), 600, field_name='REALTIME_CACHE_TTL', minimum=0),
             circuit_breaker_cooldown=parse_env_int(os.getenv('CIRCUIT_BREAKER_COOLDOWN'), 300, field_name='CIRCUIT_BREAKER_COOLDOWN', minimum=0),

@@ -287,6 +287,19 @@ const settingsHelpZhCN: SettingsHelpMap = {
       '仅加密货币（crypto）大盘复盘触发；A股/港股/美股不受影响。',
     ],
   },
+  'settings.data_source.crypto_derivatives': {
+    title: '加密永续合约指标',
+    summary: '分析加密现货标的时，注入对应永续合约的资金费率、标记价、未平仓量（来自 OKX 公开 API），供 LLM 判断杠杆情绪。',
+    usage: 'CRYPTO_DERIVATIVES_ENABLED 开启或关闭（默认开启）。',
+    valueNotes: [
+      '数据源为 OKX 永续公开接口（funding-rate / mark-price / open-interest），免费、无需 API Key，三路并发拉取。',
+      '每分析一个加密标的会额外拉取一次；任一指标失败自动省略，不影响分析其余部分。',
+    ],
+    impact: ['影响加密现货分析 prompt 中是否包含「合约市场指标」块。'],
+    notes: [
+      '仅加密标的（code 含 /）触发；A股/港股/美股不受影响。仅 USDT/USDC 计价存在对应线性永续。',
+    ],
+  },
   'settings.notification.FEISHU_WEBHOOK_URL': {
     title: '飞书群机器人 Webhook',
     summary: '配置飞书自定义群机器人，用于把分析报告推送到指定飞书群。',
@@ -1258,6 +1271,19 @@ const settingsHelpEnUS: SettingsHelpMap = {
     impact: ['Affects the macro indicators shown in the crypto market review and the macro context injected into the review prompt.'],
     notes: [
       'Only the crypto market review triggers this; A-share / HK / US reviews are unaffected.',
+    ],
+  },
+  'settings.data_source.crypto_derivatives': {
+    title: 'Crypto Derivatives (Perpetual) Metrics',
+    summary: 'Injects the matching perpetual funding rate, mark price, and open interest (from OKX public APIs) into the crypto spot analysis prompt for leverage-sentiment context.',
+    usage: 'CRYPTO_DERIVATIVES_ENABLED toggles the feature (enabled by default).',
+    valueNotes: [
+      'Source is OKX perpetual public endpoints (funding-rate / mark-price / open-interest); free, no API key, fetched concurrently.',
+      'Adds one fetch per analyzed crypto symbol; any failed metric is omitted without affecting the rest of the analysis.',
+    ],
+    impact: ['Affects whether the crypto spot analysis prompt includes a "contract market metrics" block.'],
+    notes: [
+      'Only crypto symbols (code containing /) trigger this; A-share / HK / US are unaffected. Only USDT/USDC-quoted pairs have a matching linear perpetual.',
     ],
   },
   'settings.notification.FEISHU_WEBHOOK_URL': {
