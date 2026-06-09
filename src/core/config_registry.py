@@ -3856,6 +3856,32 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "CRYPTO_MARKET_INDICATORS_ENABLED": {
+        "title": "Crypto Market Indicators",
+        "description": "Enable crypto macro market indicators (BTC/ETH dominance, total market cap, fear & greed). When enabled, the daily crypto market review fetches these from free public APIs.",
+        "category": "data_source",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "true",
+        "options": [],
+        "validation": {},
+        "display_order": 76,
+        "help_key": "settings.data_source.crypto_market_indicators",
+        "examples": [
+            "CRYPTO_MARKET_INDICATORS_ENABLED=true",
+            "CRYPTO_MARKET_INDICATORS_ENABLED=false",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：环境变量完整列表",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#环境变量完整列表",
+            },
+        ],
+        "warning_codes": [],
+    },
 }
 
 _DOC_FULL_GUIDE_ENV = [

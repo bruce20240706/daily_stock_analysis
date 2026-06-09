@@ -274,6 +274,19 @@ const settingsHelpZhCN: SettingsHelpMap = {
       '关闭该功能不影响常规个股分析和大盘复盘。',
     ],
   },
+  'settings.data_source.crypto_market_indicators': {
+    title: '加密市场宏观指标',
+    summary: '在加密货币大盘复盘中展示 BTC/ETH 主导率、加密总市值（含 24h 变化）与恐贪指数，来自免费公开 API。',
+    usage: 'CRYPTO_MARKET_INDICATORS_ENABLED 开启或关闭该功能（默认开启）。',
+    valueNotes: [
+      '数据源为 CoinGecko /global（主导率、总市值）与 alternative.me（恐贪指数），均免费、无需 API Key。',
+      '任一数据源失败时对应指标自动省略，不影响复盘其余部分。',
+    ],
+    impact: ['影响加密货币大盘复盘中宏观指标的展示，以及注入复盘 prompt 的宏观背景。'],
+    notes: [
+      '仅加密货币（crypto）大盘复盘触发；A股/港股/美股不受影响。',
+    ],
+  },
   'settings.notification.FEISHU_WEBHOOK_URL': {
     title: '飞书群机器人 Webhook',
     summary: '配置飞书自定义群机器人，用于把分析报告推送到指定飞书群。',
@@ -1232,6 +1245,19 @@ const settingsHelpEnUS: SettingsHelpMap = {
     notes: [
       'Binance requires persistent storage; avoid adding it to CI or stateless deployments unless a volume is configured.',
       'Disabling this feature does not affect regular stock analysis or market review.',
+    ],
+  },
+  'settings.data_source.crypto_market_indicators': {
+    title: 'Crypto Market Indicators',
+    summary: 'Shows BTC/ETH dominance, total market cap (with 24h change), and the Fear & Greed index in the crypto market review, sourced from free public APIs.',
+    usage: 'CRYPTO_MARKET_INDICATORS_ENABLED toggles the feature (enabled by default).',
+    valueNotes: [
+      'Sources are CoinGecko /global (dominance, market cap) and alternative.me (fear & greed); both are free and require no API key.',
+      'If a source fails, the corresponding indicator is omitted without affecting the rest of the review.',
+    ],
+    impact: ['Affects the macro indicators shown in the crypto market review and the macro context injected into the review prompt.'],
+    notes: [
+      'Only the crypto market review triggers this; A-share / HK / US reviews are unaffected.',
     ],
   },
   'settings.notification.FEISHU_WEBHOOK_URL': {
