@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [文档] 文档化并以端到端测试锁定 crypto 回测支持（沿用现有回测引擎与 crypto 日线数据源，无新增运行时/配置）
 - [新功能] 加密货币大盘复盘新增宏观指标（BTC/ETH 主导率、加密总市值含 24h 变化、恐贪指数；CoinGecko /global + alternative.me，免费无 key，presence-only，默认开，注入复盘 prompt）
 - [新功能] 新增数字货币（crypto）市场支持：A股/港股/美股之外可分析 BTC/USDT 等现货（Binance/OKX/Coinbase 公共行情，只读）。
 - [修复] Web/桌面端左侧导航选中态改用 border 实现，避免蓝色竖条指示器溢出侧栏边界；侧栏展开宽度 116px → 136px，新增 rail 紧凑模式。

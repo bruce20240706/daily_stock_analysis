@@ -185,6 +185,16 @@ crypto 大盘复盘包含以下三个部分：
 - 指标条与复盘 prompt 展示 BTC/ETH 主导率、加密总市值（含 24h 变化）与恐贪指数；总成交额（`total_volume_usd`）随 payload 提供，暂未在指标条单独展示。
 - 仅 crypto 大盘复盘触发；A股/港股/美股不受影响。
 
+## 回测
+
+crypto symbol 走与股票**相同**的回测流程，无需独立配置或日历：
+
+- 回测对象是历史 `AnalysisHistory` 分析记录；crypto 分析记录（code 含 `/`，如 `BTC/USDT`）自动纳入回测候选（无市场过滤）。
+- 历史日线来自既有 crypto K 线抓取器（Binance/OKX/Coinbase，`interval=1d`），缺数据时由回测自动补取并存入 `StockDaily`。
+- 回测引擎对 `AnalysisHistory` 的 `operation_advice` / `stop_loss` / `take_profit`，在分析日之后的前向日线上评估方向正确性、止盈/止损命中与收益，与股票完全一致。
+- crypto 为 7×24，每个日历日皆交易日，故 `first_hit_trading_days` 即「命中所需日历日数」（对 crypto 等于交易日数）。
+- 失败降级与股票一致：取不到起始/前向数据时记 `insufficient_data`，不影响其余回测。
+
 ## 9. 已知限制（后续阶段）
 
 以下为当前**非目标**，留待后续阶段（需另立设计）：
