@@ -96,3 +96,37 @@ def fetch_global_market() -> dict:
         if vol is not None:
             out["total_volume_usd"] = vol
     return out
+
+
+FNG_URL = "https://api.alternative.me/fng/"
+
+
+def _to_int(value) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_fear_greed() -> dict:
+    """alternative.me /fng → 情绪；失败/空/字段缺失 → {}。
+
+    注意：API 的 value / timestamp 为字符串，需 int() 解析；classification 原样取字符串。
+    """
+    try:
+        data = _http_get_json(FNG_URL, params={"limit": 1})
+    except Exception as e:
+        logger.warning("[大盘指标-fng] 抓取失败: %s", e)
+        return {}
+    items = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items:
+        return {}
+    first = items[0]
+    if not isinstance(first, dict):
+        return {}
+    value = _to_int(first.get("value"))
+    classification = first.get("value_classification")
+    timestamp = _to_int(first.get("timestamp"))
+    if value is None or not classification or timestamp is None:
+        return {}
+    return {"value": value, "classification": str(classification), "timestamp": timestamp}
