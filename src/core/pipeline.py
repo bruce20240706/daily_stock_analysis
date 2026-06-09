@@ -571,7 +571,7 @@ class StockAnalysisPipeline:
             llm_started_at = time.monotonic()
             try:
                 # 注入加密货币永续合约指标（仅 crypto 且已启用时生效，其余为 no-op）
-                attach_crypto_contracts(enhanced_context, get_config())
+                attach_crypto_contracts(enhanced_context, self.config)
                 result = self.analyzer.analyze(
                     enhanced_context,
                     news_context=news_context,
