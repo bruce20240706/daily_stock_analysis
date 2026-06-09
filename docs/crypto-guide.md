@@ -190,6 +190,22 @@ crypto 大盘复盘包含以下三个部分：
 - 指标条与复盘 prompt 展示 BTC/ETH 主导率、加密总市值（含 24h 变化）与恐贪指数；总成交额（`total_volume_usd`）随 payload 提供，暂未在指标条单独展示。
 - 仅 crypto 大盘复盘触发；A股/港股/美股不受影响。
 
+## 加密永续合约指标
+
+`CRYPTO_DERIVATIVES_ENABLED=true`（默认开启）时，分析加密**现货**标的会并发拉取对应 **OKX 永续**（`BASE-QUOTE-SWAP`，仅 USDT/USDC 线性永续）的合约指标，注入分析 prompt 的「合约市场指标」块：
+
+| 指标 | 来源 | 含义 |
+|---|---|---|
+| 资金费率 | OKX `/public/funding-rate` | 正=多头付费 / 负=空头付费（约 8h 结算） |
+| 标记价 | OKX `/public/mark-price` | 与现货价对比看基差 |
+| 未平仓量(OI / USD) | OKX `/public/open-interest` | 持仓规模与杠杆活跃度 |
+
+- 免费、无需 API Key；三路并发；超时/重试复用 `CRYPTO_FETCH_TIMEOUT_SECONDS` / `CRYPTO_FETCH_MAX_RETRIES`。
+- **presence-only**：任一指标失败即省略；全失败 / 非 USDT(USDC) 计价 / 禁用 → 不注入，分析照常。
+- 每分析一个加密标的额外拉取一次；仅注入 LLM 分析 prompt（不改报告 schema/API/Web）。
+- 仅加密标的触发；A股/港股/美股不受影响。
+- 后续子项目（未做）：Binance fapi 备援（本环境 451）、结构化 surfacing、独立 perp 符号、perp klines/回测。
+
 ## 9. 已知限制（后续阶段）
 
 以下为当前**非目标**，留待后续阶段（需另立设计）：
