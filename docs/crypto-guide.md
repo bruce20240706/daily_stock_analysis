@@ -168,12 +168,27 @@ crypto 大盘复盘包含以下三个部分：
 
 结构化表格提供**事实依据**，叙事段提供**市场上下文**；两者结合可更完整地理解近期上新动态。
 
+## 加密市场宏观指标
+
+加密货币大盘复盘在 `CRYPTO_MARKET_INDICATORS_ENABLED=true`（默认开启）时，额外抓取并展示宏观指标：
+
+| 指标 | 来源 | payload 字段 |
+|---|---|---|
+| BTC / ETH 主导率 | CoinGecko `/global` | `btc_dominance` / `eth_dominance` |
+| 加密总市值（含 24h 变化） | CoinGecko `/global` | `total_market_cap_usd` / `market_cap_change_24h_pct` |
+| 总成交额（24h） | CoinGecko `/global` | `total_volume_usd` |
+| 恐贪指数 | alternative.me `/fng` | `fear_greed: {value, classification, timestamp}` |
+
+- 两源均免费、无需 API Key；超时/重试复用 `CRYPTO_FETCH_TIMEOUT_SECONDS` / `CRYPTO_FETCH_MAX_RETRIES`。
+- **presence-only**：任一源或字段失败即省略，不塞 0、不编造；两源全失败时 payload 不含 `market_indicators`。
+- 指标值同时注入复盘 prompt（"## 加密市场宏观指标"事实块），供 LLM 叙事引用市场情绪与结构。
+- 仅 crypto 大盘复盘触发；A股/港股/美股不受影响。
+
 ## 9. 已知限制（后续阶段）
 
 以下为当前**非目标**，留待后续阶段（需另立设计）：
 
 - **日内 / 高频实时监控与触发式告警**（WebSocket 行情流）。
 - **合约 / 永续 / 杠杆**（当前仅现货）。
-- crypto 专属大盘指标（BTC 主导率 / 总市值 / 恐贪指数，需引入新数据源）。
 - 以 AICoin 等聚合站为数据源（当前三所现货已覆盖主流交易量）。
 - 结构化新币上新的同名 ticker 碰撞消歧（当前按 base asset 去重，跨项目同名不做区分）。
