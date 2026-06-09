@@ -49,7 +49,7 @@ class CryptoBacktestTestCase(unittest.TestCase):
                     analysis_summary="crypto backtest lock test",
                     stop_loss=57000.0,
                     take_profit=66000.0,
-                    created_at=datetime(2024, 1, 1, 0, 0, 0),
+                    created_at=datetime(analysis_date.year, analysis_date.month, analysis_date.day),
                     context_snapshot=json.dumps(
                         {
                             "enhanced_context": {"date": analysis_date.isoformat()},
@@ -89,6 +89,8 @@ class CryptoBacktestTestCase(unittest.TestCase):
         stats = service.run_backtest(code=CRYPTO_CODE, force=False, eval_window_days=3, min_age_days=0, limit=10)
 
         self.assertEqual(stats["completed"], 1)
+        self.assertEqual(stats["saved"], 1)
+        self.assertEqual(stats["processed"], 1)
         r = self._result()
         self.assertEqual(r.eval_status, "completed")
         self.assertEqual(r.code, CRYPTO_CODE)
@@ -103,6 +105,12 @@ class CryptoBacktestTestCase(unittest.TestCase):
         self.assertEqual(r.first_hit_trading_days, 1)
         self.assertEqual(r.outcome, "win")
         self.assertTrue(r.direction_correct)
+
+        # 模拟执行：买入入场 start_price，止盈出场 take_profit
+        self.assertAlmostEqual(r.simulated_entry_price, 60000.0)
+        self.assertAlmostEqual(r.simulated_exit_price, 66000.0)
+        self.assertEqual(r.simulated_exit_reason, "take_profit")
+        self.assertAlmostEqual(r.simulated_return_pct, 10.0)
 
 
 if __name__ == "__main__":
