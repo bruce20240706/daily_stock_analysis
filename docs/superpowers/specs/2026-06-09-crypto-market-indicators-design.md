@@ -86,7 +86,7 @@ class CryptoMarketIndicatorService:
 ### 2.5 Web（`apps/dsa-web`）
 
 - `src/types/analysis.ts`：新增 `MarketIndicators` 接口（camelCase：`btcDominance` / `ethDominance` / `totalMarketCapUsd` / `marketCapChange24hPct` / `totalVolumeUsd` / `fearGreed: {value, classification, timestamp}`）+ `marketIndicators?` 挂到 `MarketReviewPayload`。
-- `src/components/.../MarketReviewReportView.tsx`：crypto 复盘顶部新增「市场指标」条/卡片；守卫 `region === 'crypto' && marketIndicators`；逐字段 presence-only（缺省显示 `—`）；恐贪值附 `classification` 文案。
+- `src/components/.../MarketReviewReportView.tsx`：crypto 复盘顶部新增「市场指标」条/卡片；守卫 `region === 'crypto' && marketIndicators`；逐字段 presence-only（缺省则省略该项）；恐贪值附 `classification` 文案。
 - i18n：标签键（主导率 / 总市值 / 24h 变化 / 恐贪指数）zh + en。
 - payload snake_case 由 `camelcase-keys {deep:true}` 自动转 camelCase（`market_cap_change_24h_pct → marketCapChange24hPct`、`fear_greed → fearGreed`）。
 
@@ -141,7 +141,7 @@ payload  = build_market_review_payload(overview, news, report, snapshot,
 | payload | `build_market_review_payload` 含 `market_indicators`（有值）/ 省略（空）、`version` 不变 |
 | prompt | crypto + 有 indicators → 含事实块；无 indicators → 不含；非 crypto → 不含 |
 | e2e | crypto 复盘 payload 含 `market_indicators`（presence-only，mock 两源） |
-| Web vitest | 渲染守卫：crypto + present → 渲染；非 crypto / 缺省 → 不渲染；逐字段缺省显示 `—` |
+| Web vitest | 渲染守卫：crypto + present → 渲染；非 crypto / 缺省 → 不渲染；逐字段缺省则省略该项 |
 
 离线测试一律 mock 网络；真实可达性走 `network-smoke`（已手测两源 200）。
 

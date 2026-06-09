@@ -170,7 +170,7 @@ crypto 大盘复盘包含以下三个部分：
 
 ## 加密市场宏观指标
 
-加密货币大盘复盘在 `CRYPTO_MARKET_INDICATORS_ENABLED=true`（默认开启）时，额外抓取并展示宏观指标：
+加密货币大盘复盘在 `CRYPTO_MARKET_INDICATORS_ENABLED=true`（默认开启）时，额外抓取以下宏观指标并写入复盘 payload：
 
 | 指标 | 来源 | payload 字段 |
 |---|---|---|
@@ -182,6 +182,7 @@ crypto 大盘复盘包含以下三个部分：
 - 两源均免费、无需 API Key；超时/重试复用 `CRYPTO_FETCH_TIMEOUT_SECONDS` / `CRYPTO_FETCH_MAX_RETRIES`。
 - **presence-only**：任一源或字段失败即省略，不塞 0、不编造；两源全失败时 payload 不含 `market_indicators`。
 - 指标值同时注入复盘 prompt（"## 加密市场宏观指标"事实块），供 LLM 叙事引用市场情绪与结构。
+- 指标条与复盘 prompt 展示 BTC/ETH 主导率、加密总市值（含 24h 变化）与恐贪指数；总成交额（`total_volume_usd`）随 payload 提供，暂未在指标条单独展示。
 - 仅 crypto 大盘复盘触发；A股/港股/美股不受影响。
 
 ## 9. 已知限制（后续阶段）
