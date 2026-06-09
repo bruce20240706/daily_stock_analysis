@@ -22,3 +22,9 @@ def test_fetch_fear_greed_fetch_error_returns_empty(monkeypatch):
         raise RuntimeError("down")
     monkeypatch.setattr(cmi, "_http_get_json", boom)
     assert cmi.fetch_fear_greed() == {}
+
+
+def test_fetch_fear_greed_value_zero_is_valid(monkeypatch):
+    sample = {"data": [{"value": "0", "value_classification": "Extreme Fear", "timestamp": "1780963200"}]}
+    monkeypatch.setattr(cmi, "_http_get_json", lambda *a, **k: sample)
+    assert cmi.fetch_fear_greed() == {"value": 0, "classification": "Extreme Fear", "timestamp": 1780963200}

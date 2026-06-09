@@ -127,6 +127,7 @@ def fetch_fear_greed() -> dict:
     value = _to_int(first.get("value"))
     classification = first.get("value_classification")
     timestamp = _to_int(first.get("timestamp"))
+    # value=0（Extreme Fear）是合法值，故用 is None 判空；classification 空串视为缺失
     if value is None or not classification or timestamp is None:
         return {}
     return {"value": value, "classification": str(classification), "timestamp": timestamp}
