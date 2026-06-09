@@ -144,7 +144,10 @@ class CryptoBacktestTestCase(unittest.TestCase):
         self._seed_analysis()  # 仅 AnalysisHistory
         service = BacktestService(self.db)
         with patch("data_provider.base.DataFetcherManager.get_daily_data", return_value=(pd.DataFrame(), "")):
-            service.run_backtest(code=CRYPTO_CODE, force=False, eval_window_days=3, min_age_days=0, limit=10)
+            stats = service.run_backtest(code=CRYPTO_CODE, force=False, eval_window_days=3, min_age_days=0, limit=10)
+        # 同时锁定计数分支（与 DB eval_status 并行的写路径）与持久化状态
+        self.assertEqual(stats["insufficient"], 1)
+        self.assertEqual(stats["saved"], 1)
         self.assertEqual(self._result().eval_status, "insufficient_data")
 
 
