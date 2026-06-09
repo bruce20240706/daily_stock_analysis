@@ -3000,6 +3000,33 @@ class GeminiAnalyzer:
 | 60日涨跌幅 | {rt.get('change_60d', 'N/A')}% | 中期表现 |
 """
 
+        # crypto 永续合约指标（presence-only；仅当 pipeline 注入 context['crypto_contracts'] 时渲染）
+        contracts = context.get("crypto_contracts") if isinstance(context, dict) else None
+        if isinstance(contracts, dict) and contracts:
+            rows = []
+            fr = contracts.get("funding_rate")
+            if fr is not None:
+                rows.append(f"| 资金费率 | {fr * 100:.4f}% | 正=多头付费 / 负=空头付费（约 8h 结算） |")
+            mp = contracts.get("mark_price")
+            if mp is not None:
+                rows.append(f"| 标记价 | {mp} | 永续标记价（与现货价对比看基差） |")
+            oi = contracts.get("open_interest")
+            oi_usd = contracts.get("open_interest_usd")
+            if oi is not None or oi_usd is not None:
+                oi_txt = f"{oi} 张" if oi is not None else ""
+                usd_txt = f"${oi_usd:,.0f}" if oi_usd is not None else ""
+                joined = " / ".join([t for t in (oi_txt, usd_txt) if t])
+                rows.append(f"| 未平仓量(OI) | {joined} | 持仓规模与杠杆活跃度 |")
+            if rows:
+                rows_text = "\n".join(rows)
+                prompt += f"""
+### 合约市场指标（永续，来源 OKX）
+| 指标 | 数值 | 含义 |
+|------|------|------|
+{rows_text}
+[加密货币专属] 结合资金费率与持仓判断杠杆情绪与挤压风险，不得编造数据。
+"""
+
         # 添加财报与分红（价值投资口径）
         fundamental_context = context.get("fundamental_context") if isinstance(context, dict) else None
         earnings_block = (
