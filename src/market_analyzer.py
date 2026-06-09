@@ -480,6 +480,45 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             "若无显著资讯则简要说明。不得编造上新或价格。"
         )
 
+    def _get_crypto_indicators_prompt_block(self, indicators: Optional[Dict[str, Any]], review_language: str | None = None) -> str:
+        """crypto 宏观指标事实块（注入 prompt 供 LLM 引用）；非 crypto 或无数据返回空。"""
+        if self.region != "crypto" or not indicators:
+            return ""
+        lang = review_language or self._get_review_language()
+        btc = indicators.get("btc_dominance")
+        eth = indicators.get("eth_dominance")
+        tmc = indicators.get("total_market_cap_usd")
+        chg = indicators.get("market_cap_change_24h_pct")
+        fng = indicators.get("fear_greed") if isinstance(indicators.get("fear_greed"), dict) else None
+        parts: List[str] = []
+        if lang == "en":
+            if btc is not None:
+                parts.append(f"- BTC dominance: {btc:.2f}%")
+            if eth is not None:
+                parts.append(f"- ETH dominance: {eth:.2f}%")
+            if tmc is not None:
+                chg_txt = f" ({chg:+.2f}% 24h)" if chg is not None else ""
+                parts.append(f"- Total market cap: ${tmc:,.0f}{chg_txt}")
+            if fng:
+                parts.append(f"- Fear & Greed: {fng.get('value')} ({fng.get('classification')})")
+            if not parts:
+                return ""
+            return ("\n## Crypto Macro Indicators\n" + "\n".join(parts)
+                    + "\n[Crypto] Comment on market sentiment and structure using the indicators above; do not invent data.")
+        if btc is not None:
+            parts.append(f"- BTC 主导率：{btc:.2f}%")
+        if eth is not None:
+            parts.append(f"- ETH 主导率：{eth:.2f}%")
+        if tmc is not None:
+            chg_txt = f"（24h {chg:+.2f}%）" if chg is not None else ""
+            parts.append(f"- 加密总市值：${tmc:,.0f}{chg_txt}")
+        if fng:
+            parts.append(f"- 恐贪指数：{fng.get('value')}（{fng.get('classification')}）")
+        if not parts:
+            return ""
+        return ("\n## 加密市场宏观指标\n" + "\n".join(parts)
+                + "\n[加密货币专属] 结合上述宏观指标点评市场情绪与结构，不得编造数据。")
+
     def _get_crypto_new_listings(self) -> List[Dict[str, Any]]:
         """crypto 结构化新上线发现；非 crypto 返回 []，任何失败优雅降级为 []。"""
         if self.region != "crypto":
@@ -549,14 +588,15 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         
         return all_news
     
-    def generate_market_review(self, overview: MarketOverview, news: List) -> str:
+    def generate_market_review(self, overview: MarketOverview, news: List, indicators: Optional[Dict[str, Any]] = None) -> str:
         """
         使用大模型生成大盘复盘报告
-        
+
         Args:
             overview: 市场概览数据
             news: 市场新闻列表 (SearchResult 对象列表)
-            
+            indicators: crypto 大盘宏观指标（可选，注入 prompt）
+
         Returns:
             大盘复盘报告文本
         """
@@ -565,7 +605,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             return self._generate_template_review(overview, news)
 
         # 构建 Prompt
-        prompt = self._build_review_prompt(overview, news)
+        prompt = self._build_review_prompt(overview, news, indicators)
 
         logger.info("[大盘] 调用大模型生成复盘报告...")
         # Use the public generate_text() entry point - never access private analyzer attributes.
@@ -1123,7 +1163,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         label = str(scores["temperature_label"])
         return score, label
 
-    def _build_review_prompt(self, overview: MarketOverview, news: List) -> str:
+    def _build_review_prompt(self, overview: MarketOverview, news: List, indicators: Optional[Dict[str, Any]] = None) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
 
@@ -1233,6 +1273,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 {data_no_indices_hint}
 
 {self._get_strategy_prompt_block()}
+{self._get_crypto_indicators_prompt_block(indicators, review_language)}
 {self._get_crypto_addendum_prompt(review_language)}
 
 ---
@@ -1298,6 +1339,7 @@ Output the report content directly, no extra commentary.
 {data_no_indices_hint}
 
 {self._get_strategy_prompt_block()}
+{self._get_crypto_indicators_prompt_block(indicators, review_language)}
 {self._get_crypto_addendum_prompt(review_language)}
 
 ---
@@ -1456,8 +1498,11 @@ Market conditions can change quickly. The data above is for reference only and d
         # 2. 搜索市场新闻
         news = self.search_market_news()
 
+        # crypto 大盘宏观指标（需在报告生成前取，以注入 prompt）
+        indicators = self._get_crypto_market_indicators()
+
         # 3. 生成复盘报告
-        report = self.generate_market_review(overview, news)
+        report = self.generate_market_review(overview, news, indicators)
         # crypto skips MarketLightSnapshot; build_market_review_payload also guards this
         # via `if self.region == "crypto": light = None` — keep both in sync when changing.
         snapshot = None if self.region == "crypto" else self.build_market_light_snapshot(overview)
@@ -1468,6 +1513,7 @@ Market conditions can change quickly. The data above is for reference only and d
             report,
             snapshot,
             new_listings=new_listings,
+            market_indicators=indicators,
         )
 
         logger.info("========== 大盘复盘分析完成 ==========")
