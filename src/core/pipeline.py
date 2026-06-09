@@ -48,6 +48,7 @@ from src.analysis_context_pack_overview import render_analysis_context_pack_over
 from src.market_phase_summary import MARKET_PHASE_SUMMARY_KEY, render_market_phase_summary
 from src.phase_decision_guardrail import apply_phase_decision_guardrails
 from src.services.social_sentiment_service import SocialSentimentService
+from src.services.crypto_derivatives_service import attach_crypto_contracts
 from src.services.analysis_context_builder import (
     AnalysisContextBuilder,
     PipelineAnalysisArtifacts,
@@ -569,6 +570,8 @@ class StockAnalysisPipeline:
             self._emit_progress(64, f"{stock_name}：正在请求 LLM 生成报告")
             llm_started_at = time.monotonic()
             try:
+                # 注入加密货币永续合约指标（仅 crypto 且已启用时生效，其余为 no-op）
+                attach_crypto_contracts(enhanced_context, get_config())
                 result = self.analyzer.analyze(
                     enhanced_context,
                     news_context=news_context,
