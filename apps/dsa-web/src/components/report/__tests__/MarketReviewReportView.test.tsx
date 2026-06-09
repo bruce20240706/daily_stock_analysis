@@ -189,7 +189,7 @@ describe('MarketReviewReportView', () => {
     };
     render(
       <MarketReviewReportView
-        payload={payload as any}
+        payload={payload as never}
         content="# 加密货币大盘复盘"
         reportLanguage="zh"
       />,
@@ -207,7 +207,7 @@ describe('MarketReviewReportView', () => {
     };
     render(
       <MarketReviewReportView
-        payload={payload as any}
+        payload={payload as never}
         content="#"
         reportLanguage="zh"
       />,
@@ -223,7 +223,7 @@ describe('MarketReviewReportView', () => {
       newListings: [{ base: 'NEW', exchanges: ['okx'], pairs: ['NEW-USDT'], listedAt: 1733616000000 }],
       sections: [], markdownReport: '#',
     };
-    render(<MarketReviewReportView payload={payload as any} reportLanguage="zh" />);
+    render(<MarketReviewReportView payload={payload as never} reportLanguage="zh" />);
     expect(screen.queryByText(/上新|New Listings/i)).toBeNull();
     expect(screen.queryByText('NEW')).toBeNull();
   });
