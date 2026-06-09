@@ -30,3 +30,13 @@ def test_review_prompt_includes_indicators_block():
     ov = MarketOverview(date="2026-06-09")
     prompt = a._build_review_prompt(ov, [], IND)
     assert "加密市场宏观指标" in prompt
+
+
+def test_indicators_prompt_block_en_contains_values():
+    a = MarketAnalyzer(region="crypto")
+    block = a._get_crypto_indicators_prompt_block(IND, "en")
+    assert "## Crypto Macro Indicators" in block
+    assert "BTC dominance: 56.07%" in block
+    assert "Fear & Greed: 10 (Extreme Fear)" in block
+    assert "-0.64% 24h" in block
+    assert "do not invent data" in block
