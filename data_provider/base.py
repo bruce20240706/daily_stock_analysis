@@ -630,6 +630,7 @@ class DataFetcherManager:
         "BinanceFetcher": {"crypto"},
         "OkxFetcher": {"crypto"},
         "CoinbaseFetcher": {"crypto"},
+        "OkxPerpetualFetcher": {"crypto_perp"},
     }
 
     def __init__(self, fetchers: Optional[List[BaseFetcher]] = None):
@@ -752,7 +753,7 @@ class DataFetcherManager:
         market: str,
     ) -> List[BaseFetcher]:
         """Skip built-in daily fetchers that are known not to support a market."""
-        if market not in {"cn", "hk", "us", "crypto"}:
+        if market not in {"cn", "hk", "us", "crypto", "crypto_perp"}:
             return fetchers
 
         kept: List[BaseFetcher] = []
@@ -1153,7 +1154,8 @@ class DataFetcherManager:
         from .binance_fetcher import BinanceFetcher
         from .okx_fetcher import OkxFetcher
         from .coinbase_fetcher import CoinbaseFetcher
-        crypto_fetchers: List[BaseFetcher] = [BinanceFetcher(), OkxFetcher(), CoinbaseFetcher()]
+        from .okx_perpetual_fetcher import OkxPerpetualFetcher
+        crypto_fetchers: List[BaseFetcher] = [BinanceFetcher(), OkxFetcher(), CoinbaseFetcher(), OkxPerpetualFetcher()]
         # 按 CRYPTO_DATA_PRIORITY 调整三者优先级（默认 binance,okx,coinbase）
         try:
             priority_str = getattr(config, "crypto_data_priority", "binance,okx,coinbase")
@@ -1240,10 +1242,14 @@ class DataFetcherManager:
         is_us_index = is_us_index_code(stock_code)
         is_us = is_us_index or is_us_stock_code(stock_code)
         is_hk = (not is_us) and _is_hk_market(stock_code)
+        # perp（BASE/QUOTE-PERP）：仅保留 crypto_perp fetcher（OkxPerpetualFetcher），与现货池 disjoint
+        is_perp = (not is_us) and (not is_hk) and is_perp_code(stock_code)
         # crypto（BASE/QUOTE）：仅保留 crypto fetcher，走下方通用循环（按 priority 即 Binance->OKX->Coinbase）
-        is_crypto = (not is_us) and (not is_hk) and is_crypto_code(stock_code)
+        is_crypto = (not is_us) and (not is_hk) and (not is_perp) and is_crypto_code(stock_code)
         if is_hk:
             fetchers = self._filter_daily_fetchers_for_market(fetchers, "hk")
+        elif is_perp:
+            fetchers = self._filter_daily_fetchers_for_market(fetchers, "crypto_perp")
         elif is_crypto:
             fetchers = self._filter_daily_fetchers_for_market(fetchers, "crypto")
         fetchers = self._filter_fetchers_by_capability(fetchers, capability="daily_data")
