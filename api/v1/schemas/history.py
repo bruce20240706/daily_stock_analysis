@@ -255,6 +255,7 @@ class ReportDetails(BaseModel):
     dividend_metrics: Optional[Any] = Field(None, description="结构化分红指标（含 TTM 口径）")
     belong_boards: Optional[Any] = Field(None, description="关联板块列表")
     sector_rankings: Optional[Any] = Field(None, description="板块涨跌榜（结构 {top, bottom}）")
+    crypto_contracts: Optional[Any] = Field(None, description="加密永续合约指标（presence-only：资金费率/标记价/未平仓量/来源）")
 
 
 class AnalysisReport(BaseModel):

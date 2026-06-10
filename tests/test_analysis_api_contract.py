@@ -1069,6 +1069,49 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         self.assertEqual(report.details.sector_rankings["top"][0]["name"], "白酒")
         self.assertEqual(report.details.sector_rankings["top"][0]["change_pct"], 2.5)
 
+    def test_build_analysis_report_surfaces_crypto_contracts(self) -> None:
+        if _build_analysis_report is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        report = _build_analysis_report(
+            report_data={"meta": {}, "summary": {}, "strategy": {}, "details": {}},
+            query_id="q1",
+            stock_code="BTC/USDT",
+            stock_name="BTC/USDT",
+            context_snapshot={
+                "enhanced_context": {
+                    "crypto_contracts": {
+                        "funding_rate": 0.0000059888,
+                        "mark_price": 62669.5,
+                        "open_interest": 2861888.58,
+                        "open_interest_usd": 1793545573.08,
+                        "source": "okx",
+                    }
+                }
+            },
+            fallback_fundamental_payload=None,
+        )
+
+        self.assertIsNotNone(report.details)
+        self.assertEqual(report.details.crypto_contracts["funding_rate"], 0.0000059888)
+        self.assertEqual(report.details.crypto_contracts["mark_price"], 62669.5)
+        self.assertEqual(report.details.crypto_contracts["source"], "okx")
+
+    def test_build_analysis_report_omits_crypto_contracts_when_absent(self) -> None:
+        if _build_analysis_report is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        report = _build_analysis_report(
+            report_data={"meta": {}, "summary": {}, "strategy": {}, "details": {}},
+            query_id="q1",
+            stock_code="600519",
+            stock_name="贵州茅台",
+            context_snapshot={"enhanced_context": {"code": "600519"}},
+            fallback_fundamental_payload=None,
+        )
+
+        self.assertIsNone(report.details.crypto_contracts)
+
     def test_build_analysis_report_exposes_overview_but_sanitizes_snapshot(self) -> None:
         if _build_analysis_report is None:
             self.skipTest("analysis endpoint helpers unavailable in this environment")
