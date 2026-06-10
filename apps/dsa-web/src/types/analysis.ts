@@ -181,6 +181,18 @@ export interface MarketIndicators {
   fearGreed?: CryptoFearGreed;
 }
 
+export interface PerpSentimentCoin {
+  symbol: string;
+  fundingRate?: number;
+  openInterestUsd?: number;
+}
+
+export interface PerpSentiment {
+  avgFundingRate?: number;
+  totalOpenInterestUsd?: number;
+  coins?: PerpSentimentCoin[];
+}
+
 export interface CryptoContracts {
   fundingRate?: number;       // 比率（非百分比），展示时 *100
   markPrice?: number;
@@ -209,6 +221,7 @@ export interface MarketReviewPayload {
   markdownReport?: string;
   newListings?: NewListing[];
   marketIndicators?: MarketIndicators;
+  perpSentiment?: PerpSentiment;
 }
 
 export type AnalysisContextPackBlockStatus =
