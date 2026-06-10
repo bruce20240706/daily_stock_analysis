@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, select
@@ -72,6 +72,8 @@ class BacktestService:
 
         results_to_save: List[BacktestResult] = []
 
+        from data_provider.base import is_perp_code
+
         for analysis in candidates:
             processed += 1
             touched_codes.add(analysis.code)
@@ -128,6 +130,16 @@ class BacktestService:
                         eval_window_days=int(eval_window_days),
                     )
 
+                is_perp = is_perp_code(analysis.code)
+                funding_cost_pct = 0.0
+                # 仅在 forward_bars 足量（不会落 insufficient_data）时才发起 OKX 资金费抓取，避免对将被丢弃的行做无谓网络 I/O
+                if is_perp and len(forward_bars) >= int(eval_window_days) and getattr(config, "crypto_derivatives_enabled", True):
+                    funding_cost_pct = self._compute_perp_funding_cost_pct(
+                        code=analysis.code,
+                        start_date=start_daily.date,
+                        eval_window_days=int(eval_window_days),
+                    )
+
                 evaluation = BacktestEngine.evaluate_single(
                     operation_advice=analysis.operation_advice,
                     analysis_date=start_daily.date,
@@ -136,6 +148,8 @@ class BacktestService:
                     stop_loss=analysis.stop_loss,
                     take_profit=analysis.take_profit,
                     config=eval_config,
+                    is_perp=is_perp,
+                    funding_cost_pct=funding_cost_pct,
                 )
 
                 status = evaluation.get("eval_status")
@@ -213,6 +227,26 @@ class BacktestService:
             "insufficient": insufficient,
             "errors": errors,
         }
+
+    def _compute_perp_funding_cost_pct(self, *, code: str, start_date: date, eval_window_days: int) -> float:
+        """perp 标的真实持有窗口 [入场=start_date 收盘, 出场=末 bar 收盘) 的资金费成本(百分比, 多头视角)。
+        窗口半开、≈ eval_window_days×3 个 8h 结算；非 perp/禁用/异常 → 0.0。
+        注：窗口按日历日推算，假定 OKX 24/7 日线无内部缺口（缺口期口径退化为近似）。"""
+        try:
+            from data_provider.base import parse_perp_code
+            import data_provider.crypto_derivatives as cd
+            base, quote = parse_perp_code(code)
+            # 持有区间对齐真实持仓：OKX 1D candle 收盘对齐次日 00:00 UTC。
+            midnight = datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc)
+            start_dt = midnight + timedelta(days=1)                    # 入场 = start_date 收盘
+            end_dt = midnight + timedelta(days=eval_window_days + 1)   # 出场 = 末 bar 收盘
+            start_ms = int(start_dt.timestamp() * 1000)
+            end_ms = int(end_dt.timestamp() * 1000)
+            rates = cd.fetch_funding_rate_history(base, quote, start_ms, end_ms)
+            return sum(rates) * 100.0
+        except Exception as exc:
+            logger.warning(f"perp 资金费抓取失败({code}): {exc}")
+            return 0.0
 
     def get_recent_evaluations(
         self,
