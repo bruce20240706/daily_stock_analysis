@@ -181,6 +181,14 @@ export interface MarketIndicators {
   fearGreed?: CryptoFearGreed;
 }
 
+export interface CryptoContracts {
+  fundingRate?: number;       // 比率（非百分比），展示时 *100
+  markPrice?: number;
+  openInterest?: number;      // 张
+  openInterestUsd?: number;
+  source?: string;            // 'okx'
+}
+
 export interface MarketReviewPayload {
   version?: number;
   kind?: 'market_review' | string;
@@ -274,6 +282,7 @@ export interface ReportDetails {
   dividendMetrics?: Record<string, unknown>;
   belongBoards?: RelatedBoard[];
   sectorRankings?: SectorRankings;
+  cryptoContracts?: CryptoContracts;
 }
 
 /** Full analysis report */
