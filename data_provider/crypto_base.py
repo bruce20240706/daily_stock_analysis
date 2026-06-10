@@ -9,7 +9,7 @@ from typing import Optional
 import pandas as pd
 import requests
 
-from .base import BaseFetcher, STANDARD_COLUMNS, DataFetchError, is_crypto_code
+from .base import BaseFetcher, STANDARD_COLUMNS, DataFetchError, is_crypto_code, is_perp_code
 from .realtime_types import UnifiedRealtimeQuote
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ class CryptoExchangeBase(BaseFetcher):
                     raise
 
     def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-        if not is_crypto_code(stock_code):
+        if not (is_crypto_code(stock_code) or is_perp_code(stock_code)):
             raise DataFetchError(f"{self.name} 仅支持 crypto 现货代码（BASE/QUOTE），收到 {stock_code}")
         symbol = self._to_exchange_symbol(stock_code)
         days = self._infer_days(start_date, end_date)
@@ -130,7 +130,7 @@ class CryptoExchangeBase(BaseFetcher):
         return df[[c for c in keep if c in df.columns]]
 
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
-        if not is_crypto_code(stock_code):
+        if not (is_crypto_code(stock_code) or is_perp_code(stock_code)):
             return None
         try:
             symbol = self._to_exchange_symbol(stock_code)
