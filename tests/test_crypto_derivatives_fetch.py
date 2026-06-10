@@ -3,7 +3,7 @@ import data_provider.crypto_derivatives as cd
 
 def _fake_okx(url, params=None, headers=None):
     if "funding-rate" in url:
-        return {"code": "0", "data": [{"instId": "BTC-USDT-SWAP", "fundingRate": "0.0000059888", "nextFundingTime": "1781049600000"}]}
+        return {"code": "0", "data": [{"instId": "BTC-USDT-SWAP", "fundingRate": "0.0000059888"}]}
     if "mark-price" in url:
         return {"code": "0", "data": [{"instId": "BTC-USDT-SWAP", "markPx": "62669.5"}]}
     if "open-interest" in url:
@@ -15,7 +15,7 @@ def test_fetch_perp_metrics_parses_all(monkeypatch):
     monkeypatch.setattr(cd, "_http_get_json", _fake_okx)
     out = cd.fetch_perp_metrics("BTC", "USDT")
     assert abs(out["funding_rate"] - 0.0000059888) < 1e-12
-    assert out["next_funding_time"] == 1781049600000
+    assert "next_funding_time" not in out
     assert out["mark_price"] == 62669.5
     assert out["open_interest"] == 2861888.58
     assert out["open_interest_usd"] == 1793545573.08

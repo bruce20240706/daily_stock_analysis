@@ -66,13 +66,6 @@ def _to_float(value) -> Optional[float]:
         return None
 
 
-def _to_int(value) -> Optional[int]:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def _okx_first(url: str, params: dict) -> dict:
     """GET OKX 公共接口，返回 data[0] dict；失败/空 → {}（不抛，供并发各路独立降级）。"""
     try:
@@ -102,9 +95,6 @@ def fetch_perp_metrics(base: str, quote: str) -> dict:
     fr_v = _to_float(fr.get("fundingRate"))
     if fr_v is not None:
         out["funding_rate"] = fr_v
-    nft = _to_int(fr.get("nextFundingTime"))
-    if nft is not None:
-        out["next_funding_time"] = nft
     mp_v = _to_float(mp.get("markPx"))
     if mp_v is not None:
         out["mark_price"] = mp_v
