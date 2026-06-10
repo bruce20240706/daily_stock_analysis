@@ -7,6 +7,7 @@ import { ReportDetails } from './ReportDetails';
 import { ReportDiagnostics } from './ReportDiagnostics';
 import { AnalysisContextSummary } from './AnalysisContextSummary';
 import { MarketReviewReportView } from './MarketReviewReportView';
+import { ReportCryptoMetrics } from './ReportCryptoMetrics';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 
 interface ReportSummaryProps {
@@ -67,6 +68,9 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
 
       {/* 策略点位区 */}
       <ReportStrategy strategy={strategy} language={reportLanguage} />
+
+      {/* 永续合约指标卡片（presence-only，仅 crypto 品种有数据时渲染） */}
+      <ReportCryptoMetrics contracts={details?.cryptoContracts} language={reportLanguage} />
 
       {/* 资讯区 */}
       <ReportNews recordId={recordId} limit={8} language={reportLanguage} />
