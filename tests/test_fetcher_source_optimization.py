@@ -110,6 +110,8 @@ class TestFetcherSourceOptimization(unittest.TestCase):
                 "BinanceFetcher",
                 "OkxFetcher",
                 "CoinbaseFetcher",
+                # OKX 永续合约（SWAP）fetcher，priority 55，注册于 spot 三源之后
+                "OkxPerpetualFetcher",
             ],
         )
         mock_tushare.assert_not_called()
