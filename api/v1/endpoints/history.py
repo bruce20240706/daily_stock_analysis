@@ -47,6 +47,7 @@ from src.utils.data_processing import (
     extract_fundamental_detail_fields,
     extract_board_detail_fields,
     extract_realtime_detail_fields,
+    extract_crypto_contracts_detail_fields,
 )
 from src.analysis_context_pack_overview import (
     extract_analysis_context_pack_overview,
@@ -441,6 +442,7 @@ def get_history_detail(
             context_snapshot=result.get("context_snapshot"),
             fallback_fundamental_payload=fallback_fundamental,
         )
+        extracted_contracts = extract_crypto_contracts_detail_fields(result.get("context_snapshot"))
 
         details = ReportDetails(
             news_content=result.get("news_content"),
@@ -451,6 +453,7 @@ def get_history_detail(
             dividend_metrics=extracted_fundamental.get("dividend_metrics"),
             belong_boards=extracted_boards.get("belong_boards"),
             sector_rankings=extracted_boards.get("sector_rankings"),
+            crypto_contracts=extracted_contracts.get("crypto_contracts"),
         )
         
         return AnalysisReport(

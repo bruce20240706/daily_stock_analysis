@@ -960,9 +960,10 @@ def get_analysis_status(task_id: str) -> TaskStatus:
                 context_snapshot=context_snapshot,
                 fallback_fundamental_payload=fallback_fundamental,
             )
+            extracted_contracts = extract_crypto_contracts_detail_fields(context_snapshot)
             has_board_details = bool(extracted_boards.get("belong_boards")) or extracted_boards.get("sector_rankings") is not None
             details = None
-            if any(extracted_fundamental.values()) or has_board_details or context_snapshot is not None or analysis_context_pack_overview is not None:
+            if any(extracted_fundamental.values()) or has_board_details or extracted_contracts.get("crypto_contracts") is not None or context_snapshot is not None or analysis_context_pack_overview is not None:
                 details = ReportDetails(
                     news_content=getattr(record, "news_content", None),
                     raw_result=raw_result,
@@ -972,6 +973,7 @@ def get_analysis_status(task_id: str) -> TaskStatus:
                     dividend_metrics=extracted_fundamental.get("dividend_metrics"),
                     belong_boards=extracted_boards.get("belong_boards"),
                     sector_rankings=extracted_boards.get("sector_rankings"),
+                    crypto_contracts=extracted_contracts.get("crypto_contracts"),
                 )
 
             # Build report from DB record so completed tasks return real data
