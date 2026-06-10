@@ -542,6 +542,62 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             logger.warning("[大盘指标] 收集失败，跳过: %s", e)
             return {}
 
+    def _get_crypto_perp_sentiment(self) -> Dict[str, Any]:
+        """crypto 大盘永续情绪聚合；非 crypto 返回 {}，任何失败优雅降级为 {}。"""
+        if self.region != "crypto":
+            return {}
+        try:
+            from src.services.crypto_derivatives_review_service import CryptoDerivativesReviewService
+            return CryptoDerivativesReviewService().collect()
+        except Exception as e:
+            logger.warning("[永续情绪] 收集失败，跳过: %s", e)
+            return {}
+
+    def _get_crypto_perp_sentiment_prompt_block(self, perp: Optional[Dict[str, Any]], review_language: str | None = None) -> str:
+        """crypto 永续情绪事实块（注入 prompt 供 LLM 引用）；非 crypto 或无数据返回空。"""
+        if self.region != "crypto" or not perp:
+            return ""
+        lang = review_language or self._get_review_language()
+        avg = perp.get("avg_funding_rate")
+        toi = perp.get("total_open_interest_usd")
+        coins = perp.get("coins") if isinstance(perp.get("coins"), list) else []
+        parts: List[str] = []
+        if lang == "en":
+            if avg is not None:
+                parts.append(f"- OI-weighted funding rate: {avg * 100:.4f}%")
+            if toi is not None:
+                parts.append(f"- Total open interest: ${toi:,.0f}")
+            for c in coins:
+                sym = c.get("symbol")
+                if not sym:
+                    continue
+                fr = c.get("funding_rate")
+                oi = c.get("open_interest_usd")
+                fr_txt = f"funding {fr * 100:.4f}%" if fr is not None else "funding n/a"
+                oi_txt = f", OI ${oi:,.0f}" if oi is not None else ""
+                parts.append(f"  - {sym}: {fr_txt}{oi_txt}")
+            if not parts:
+                return ""
+            return ("\n## Crypto Perpetual Sentiment\n" + "\n".join(parts)
+                    + "\n[Crypto] Read leverage sentiment and squeeze risk from funding and open interest; do not invent data.")
+        if avg is not None:
+            parts.append(f"- OI 加权资金费率：{avg * 100:.4f}%")
+        if toi is not None:
+            parts.append(f"- 总未平仓量：${toi:,.0f}")
+        for c in coins:
+            sym = c.get("symbol")
+            if not sym:
+                continue
+            fr = c.get("funding_rate")
+            oi = c.get("open_interest_usd")
+            fr_txt = f"资金费率 {fr * 100:.4f}%" if fr is not None else "资金费率 N/A"
+            oi_txt = f"，OI ${oi:,.0f}" if oi is not None else ""
+            parts.append(f"  - {sym}：{fr_txt}{oi_txt}")
+        if not parts:
+            return ""
+        return ("\n## 加密永续情绪\n" + "\n".join(parts)
+                + "\n[加密货币专属] 结合资金费率与持仓判断杠杆情绪与挤压风险，不得编造数据。")
+
     def search_market_news(self) -> List[Dict]:
         """
         搜索市场新闻
