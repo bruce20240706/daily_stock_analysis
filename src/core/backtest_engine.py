@@ -154,6 +154,26 @@ class BacktestEngine:
         return "cash"
 
     @classmethod
+    def infer_perp_position(cls, operation_advice: Optional[str]) -> str:
+        """Infer perp position: long/short/cash. bearish -> short; otherwise mirrors long-only inference."""
+        text = cls._normalize_text(operation_advice)
+        if cls._matches_intent(text, cls._BEARISH_KEYWORDS):
+            return "short"
+        wait_pos = cls._first_intent_position(text, cls._WAIT_KEYWORDS)
+        if wait_pos is not None:
+            bullish_pos = cls._first_intent_position(text, cls._BULLISH_KEYWORDS)
+            hold_pos = cls._first_intent_position(text, cls._HOLD_KEYWORDS)
+            if (bullish_pos is None or wait_pos < bullish_pos) and (
+                hold_pos is None or wait_pos < hold_pos
+            ):
+                return "cash"
+        if cls._matches_intent(text, cls._BULLISH_KEYWORDS) or cls._matches_intent(text, cls._HOLD_KEYWORDS):
+            return "long"
+        if cls._matches_intent(text, cls._WAIT_KEYWORDS):
+            return "cash"
+        return "cash"
+
+    @classmethod
     def evaluate_single(
         cls,
         *,
