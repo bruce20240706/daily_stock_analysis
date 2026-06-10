@@ -30,7 +30,7 @@ python main.py --stocks BTC/USDT,BTC/USDT:PERP   # 现货 + 永续并列
 - 数据源：OKX SWAP（`/market/candles` 日线、`/market/ticker` 实时，`instId=BASE-QUOTE-SWAP`）；24/7、走 crypto 指南。
 - 自带资金费率/标记价/未平仓量（与现货同样经 `CRYPTO_DERIVATIVES_ENABLED` 注入分析）。
 - 永续日线以独立 code（`BTC/USDT:PERP`）入库，与现货 `BTC/USDT` 互不影响。
-- 范围：仅 OKX、仅线性、暂不含 perp 回测；CLI 优先（含 `:` 的 API code-in-path 需 URL 编码 `%3A`，本期不专门验证）。
+- 范围：仅 OKX、仅线性；CLI 优先（含 `:` 的 API code-in-path 需 URL 编码 `%3A`，本期不专门验证）。
 
 ## 2. 数据源与地区受限
 
@@ -73,6 +73,14 @@ crypto symbol 走与股票**相同**的回测流程，无需独立配置或日�
 - 回测引擎对 `AnalysisHistory` 的 `operation_advice` / `stop_loss` / `take_profit`，在分析日之后的前向日线上评估方向正确性、止盈/止损命中与收益，与股票完全一致。
 - 语义提示：`eval_window_days` 对 crypto 指**自然日**（每日均有 K 线），对股票指**交易日**；同样窗口天数下 crypto 覆盖的 K 线根数通常多于股票（周末/节假日 crypto 仍有数据）。`first_hit_trading_days` 对 crypto 即「命中所需日历日数」（= 交易日数）。
 - 失败降级与股票一致：取不到起始/前向数据时记 `insufficient_data`，不影响其余回测。
+
+### 永续回测（资金费 + 做空，1x）
+
+perp 标的（`BASE/QUOTE:PERP`）回测在现货流程之上叠加两项永续机制（固定 1x，无杠杆/强平）：
+
+- **做空盈亏**：看空建议记 `position="short"`，持有至窗口末，`simulated_return_pct = (入场−出场)/入场×100 + 资金费`（跌则盈）。做空不评估 TP/SL（analysis 价位为多头框架，反向套用会虚构精度）。
+- **资金费成本**：按真实持有窗口（入场=起始 bar 收盘 → 出场=末 bar 收盘，≈ `eval_window_days×3` 个 8h 结算）对 OKX `funding-rate-history` 求和；多头 `−资金费`、空头 `+资金费`（正费率＝多头付空头）。
+- **门控/降级**：资金费抓取复用 `CRYPTO_DERIVATIVES_ENABLED`（默认开），抓取失败或关闭时资金费记 0、方向盈亏照常；现货/股票回测不受影响。
 
 ## 7. API 用法
 
@@ -226,7 +234,7 @@ crypto 大盘复盘包含以下三个部分：
 - **presence-only**：任一指标失败即省略；全失败 / 非 USDT(USDC) 计价 / 禁用 → 不注入，分析照常。
 - 每分析一个加密标的额外拉取一次；注入 LLM 分析 prompt，并结构化透出到报告 API/Web（见下文「报告透出」）。
 - 仅加密标的触发；A股/港股/美股不受影响。
-- 后续子项目（未做）：Binance fapi 备援（本环境 451）、独立 perp 符号、perp klines/回测。
+- 后续子项目（未做）：Binance fapi 备援（本环境 451）。
 
 ### 报告透出
 
@@ -241,6 +249,6 @@ crypto 大盘复盘包含以下三个部分：
 以下为当前**非目标**，留待后续阶段（需另立设计）：
 
 - **日内 / 高频实时监控与触发式告警**（WebSocket 行情流）。
-- **合约 / 永续 / 杠杆**（当前仅现货）。
+- **杠杆**（perp 标的分析与回测已支持；杠杆仍不做）。
 - 以 AICoin 等聚合站为数据源（当前三所现货已覆盖主流交易量）。
 - 结构化新币上新的同名 ticker 碰撞消歧（当前按 base asset 去重，跨项目同名不做区分）。
