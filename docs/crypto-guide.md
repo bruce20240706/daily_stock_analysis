@@ -202,9 +202,17 @@ crypto 大盘复盘包含以下三个部分：
 
 - 免费、无需 API Key；三路并发；超时/重试复用 `CRYPTO_FETCH_TIMEOUT_SECONDS` / `CRYPTO_FETCH_MAX_RETRIES`。
 - **presence-only**：任一指标失败即省略；全失败 / 非 USDT(USDC) 计价 / 禁用 → 不注入，分析照常。
-- 每分析一个加密标的额外拉取一次；仅注入 LLM 分析 prompt（不改报告 schema/API/Web）。
+- 每分析一个加密标的额外拉取一次；注入 LLM 分析 prompt，并结构化透出到报告 API/Web（见下文「报告透出」）。
 - 仅加密标的触发；A股/港股/美股不受影响。
-- 后续子项目（未做）：Binance fapi 备援（本环境 451）、结构化 surfacing、独立 perp 符号、perp klines/回测。
+- 后续子项目（未做）：Binance fapi 备援（本环境 451）、独立 perp 符号、perp klines/回测。
+
+### 报告透出
+
+永续指标除注入分析 prompt 外，也会 presence-only 透出到结构化报告：
+
+- API：`AnalysisReport.details.crypto_contracts`（字段 `funding_rate` / `mark_price` / `open_interest` / `open_interest_usd` / `source`，缺省省略）。
+- Web：分析报告页「合约市场指标」卡片（`ReportCryptoMetrics`），逐字段 presence-only，无数据则整卡不渲染。
+- 依赖 `SAVE_CONTEXT_SNAPSHOT=true`（默认开）——透出从持久化的分析快照读取；关闭快照持久化时不透出。与 `CRYPTO_DERIVATIVES_ENABLED` 联动：上游关闭则无数据可透出。
 
 ## 9. 已知限制（后续阶段）
 

@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 大盘复盘支持数字货币（crypto）：MARKET_REVIEW_REGION=crypto 产出主流币篮子行情 + 市场叙事 + 新币/上新资讯；篮子经 CRYPTO_MARKET_REVIEW_SYMBOLS 可配置（默认 BTC/USDT 等 12 只）；crypto 须显式 opt-in（both 仍为 cn+hk+us），无 breadth/板块/市场灯（无对应数据源）。
 
 - [新功能] crypto 大盘复盘新增结构化新币上新发现：OKX listTime + Coinbase new_at（默认开、无状态）+ Binance 快照差分（默认关、需持久卷）；产出 payload `new_listings` 与 Web 上新行情表；presence-only、按 base 去重、可经 CRYPTO_NEW_LISTING_* 配置。
+- [新功能] crypto 永续合约指标透出到分析报告 API（`ReportDetails.crypto_contracts`）与 Web 卡片（`ReportCryptoMetrics`，presence-only，additive；依赖 `SAVE_CONTEXT_SNAPSHOT`）
 
 ## [3.20.0] - 2026-06-03
 
