@@ -118,8 +118,8 @@ def get_market_for_stock(code: str) -> Optional[str]:
         return None
     code = (code or "").strip().upper()
 
-    from data_provider import is_crypto_code
-    if is_crypto_code(code):
+    from data_provider import is_crypto_code, is_perp_code
+    if is_crypto_code(code) or is_perp_code(code):
         return "crypto"
 
     from data_provider import is_us_stock_code, is_us_index_code, is_hk_stock_code
