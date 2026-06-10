@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 OKX_FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate"
 OKX_MARK_URL = "https://www.okx.com/api/v5/public/mark-price"
 OKX_OI_URL = "https://www.okx.com/api/v5/public/open-interest"
+OKX_FUNDING_HISTORY_URL = "https://www.okx.com/api/v5/public/funding-rate-history"
+# 首页即自窗口右界(after=end_ms)向后翻，故 12 页约束的是"窗口跨度"(~400 天)而非"现在→窗口"距离；
+# 实际 eval 窗口远小于此，正常不会截断；极端超界返回已采集部分（偏低估，fail-soft）。
+_FUNDING_HISTORY_MAX_PAGES = 12  # 100 结算/页 ≈ 33 天/页
 _LINEAR_QUOTES = {"USDT", "USDC"}   # OKX 线性永续计价
 
 
@@ -167,3 +171,38 @@ def fetch_perp_market_snapshot(symbols: list) -> dict:
     if coins:
         out["coins"] = coins
     return out
+
+
+def fetch_funding_rate_history(base: str, quote: str, start_ms: int, end_ms: int) -> list:
+    """OKX 永续 BASE-QUOTE-SWAP 在半开窗口 [start_ms, end_ms) 内的资金费率列表（fundingRate 小数）。
+    自 after=end_ms 起向后分页（after=更早），按窗口过滤；非线性计价/参数非法/无数据 → []。fail-soft。"""
+    base = (base or "").upper()
+    quote = (quote or "").upper()
+    if not base or quote not in _LINEAR_QUOTES:
+        return []
+    inst = f"{base}-{quote}-SWAP"
+    rates: list = []
+    cursor = int(end_ms)  # OKX after: 返回 fundingTime 早于该值的记录；自窗口右界起翻，预算用在窗口内
+    for _ in range(_FUNDING_HISTORY_MAX_PAGES):
+        params = {"instId": inst, "limit": "100", "after": str(cursor)}
+        try:
+            data = _http_get_json(OKX_FUNDING_HISTORY_URL, params)
+        except Exception as e:
+            logger.warning("[资金费历史] %s 抓取失败: %s", inst, e)
+            break
+        arr = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(arr, list) or not arr:
+            break
+        page_min_ts = None
+        for item in arr:
+            ts = _to_float(item.get("fundingTime"))
+            fr = _to_float(item.get("fundingRate"))
+            if ts is None:
+                continue
+            page_min_ts = ts if page_min_ts is None else min(page_min_ts, ts)
+            if fr is not None and start_ms <= ts < end_ms:  # 半开 [start, end)：含 start、排除 end 边界结算
+                rates.append(fr)
+        if page_min_ts is None or page_min_ts <= start_ms or len(arr) < 100:
+            break
+        cursor = int(page_min_ts)
+    return rates
