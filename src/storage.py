@@ -304,7 +304,7 @@ class BacktestResult(Base):
 
     # 建议快照（避免未来分析字段变化导致回测不可解释）
     operation_advice = Column(String(20))
-    position_recommendation = Column(String(8))  # long/cash
+    position_recommendation = Column(String(8))  # long/cash/short
 
     # 价格与收益
     start_price = Column(Float)
@@ -330,7 +330,7 @@ class BacktestResult(Base):
     # 模拟执行（long-only）
     simulated_entry_price = Column(Float)
     simulated_exit_price = Column(Float)
-    simulated_exit_reason = Column(String(24))  # stop_loss/take_profit/window_end/cash/ambiguous_stop_loss
+    simulated_exit_reason = Column(String(24))  # stop_loss/take_profit/window_end/window_end_short/cash/ambiguous_stop_loss
     simulated_return_pct = Column(Float)
 
     __table_args__ = (
