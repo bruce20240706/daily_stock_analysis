@@ -18,6 +18,20 @@ python main.py --stocks BTC/USDT,ETH/USDT
 python main.py --stocks 600519,hk00700,AAPL,BTC/USDT   # 与股票混合分析
 ```
 
+## 永续合约标的（perp instrument）
+
+除现货外，可分析 OKX **永续合约**标的，notation 为 `BASE/QUOTE:PERP`（仅 USDT/USDC 线性永续）：
+
+```bash
+python main.py --stocks BTC/USDT:PERP
+python main.py --stocks BTC/USDT,BTC/USDT:PERP   # 现货 + 永续并列
+```
+
+- 数据源：OKX SWAP（`/market/candles` 日线、`/market/ticker` 实时，`instId=BASE-QUOTE-SWAP`）；24/7、走 crypto 指南。
+- 自带资金费率/标记价/未平仓量（与现货同样经 `CRYPTO_DERIVATIVES_ENABLED` 注入分析）。
+- 永续日线以独立 code（`BTC/USDT:PERP`）入库，与现货 `BTC/USDT` 互不影响。
+- 范围：仅 OKX、仅线性、暂不含 perp 回测；CLI 优先（含 `:` 的 API code-in-path 需 URL 编码 `%3A`，本期不专门验证）。
+
 ## 2. 数据源与地区受限
 
 - 数据源为交易所公共行情（免 API Key）：默认优先级 **Binance → OKX → Coinbase**。单一数据源失败自动降级到下一个。
