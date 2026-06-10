@@ -173,6 +173,14 @@ crypto 大盘复盘包含以下三个部分：
 
 结构化表格提供**事实依据**，叙事段提供**市场上下文**；两者结合可更完整地理解近期上新动态。
 
+### 8.6 永续情绪聚合
+
+`CRYPTO_DERIVATIVES_ENABLED=true`（默认开启）时，crypto 大盘复盘对 `CRYPTO_MARKET_REVIEW_SYMBOLS` 篮子并发拉取各币 OKX 永续指标并聚合（presence-only）：
+
+- OI 加权平均资金费率、总未平仓量(USD)、按 |资金费率| 降序的 top5 明细。
+- 注入复盘 prompt（"## 加密永续情绪"事实块）+ 结构化 `market_review_payload.perp_sentiment` + Web 复盘视图「加密永续情绪」卡片。
+- 复用 `CRYPTO_DERIVATIVES_ENABLED` 与复盘篮子，无新增配置；非 crypto/禁用/无数据 → 不聚合，复盘照常。
+
 ## 加密市场宏观指标
 
 加密货币大盘复盘在 `CRYPTO_MARKET_INDICATORS_ENABLED=true`（默认开启）时，额外抓取以下宏观指标并写入复盘 payload：
