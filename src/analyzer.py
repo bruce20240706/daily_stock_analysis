@@ -159,12 +159,14 @@ def _should_hide_regular_session_ohlc(context: Dict[str, Any]) -> bool:
 def _crypto_volume_amount_units(code: Any) -> Tuple[Optional[str], Optional[str]]:
     """返回展示用的成交量/成交额单位。
 
-    crypto 标的（BASE/QUOTE，如 BTC/USDT）返回 (base, quote)，用于量按 base 资产、额按计价币展示；
+    crypto 现货（BASE/QUOTE）或永续（BASE/QUOTE:PERP）返回 (base, quote)；
     股票（A股/港股/美股）返回 (None, None)，沿用默认的"股/元"口径。
     """
-    from data_provider import is_crypto_code
+    from data_provider import is_crypto_code, is_perp_code, parse_perp_code
 
     text = str(code or "")
+    if is_perp_code(text):
+        return parse_perp_code(text)
     if not is_crypto_code(text):
         return None, None
     base, quote = text.strip().upper().split("/")
