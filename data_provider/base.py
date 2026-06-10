@@ -1670,15 +1670,18 @@ class DataFetcherManager:
             return None
         
         # 获取配置的数据源优先级（crypto 用专属优先级，避免落到 A股源）
-        if is_crypto_code(stock_code):
+        if is_crypto_code(stock_code) or is_perp_code(stock_code):
             _priority_str = getattr(config, "crypto_realtime_priority", "binance,okx,coinbase")
         else:
             _priority_str = config.realtime_source_priority
-        source_priority = [
-            source.strip().lower()
-            for source in _priority_str.split(',')
-            if source.strip()
-        ]
+        if is_perp_code(stock_code):
+            source_priority = ["okx_perp"]
+        else:
+            source_priority = [
+                source.strip().lower()
+                for source in _priority_str.split(',')
+                if source.strip()
+            ]
         
         errors = []
         failed_sources: List[str] = []
@@ -1731,6 +1734,11 @@ class DataFetcherManager:
 
                 elif source == "coinbase":
                     fetcher = self._get_fetcher_by_name("CoinbaseFetcher", capability="realtime_quote")
+                    if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
+                        quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', stock_code)
+
+                elif source == "okx_perp":
+                    fetcher = self._get_fetcher_by_name("OkxPerpetualFetcher", capability="realtime_quote")
                     if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
                         quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', stock_code)
 
