@@ -257,3 +257,20 @@ def extract_board_detail_fields(
         "belong_boards": _normalize_belong_boards(fundamental_ctx.get("belong_boards")),
         "sector_rankings": _normalize_sector_rankings(sector_rankings),
     }
+
+
+def extract_crypto_contracts_detail_fields(context_snapshot: Any) -> Dict[str, Any]:
+    """从 context_snapshot 抽取 crypto 永续合约指标（presence-only）。
+
+    crypto_contracts 由 pipeline 注入 enhanced_context，随快照持久化为
+    {"enhanced_context": {"crypto_contracts": {...}}}。返回 {"crypto_contracts": dict|None}。
+    """
+    snapshot_obj = parse_json_field(context_snapshot)
+    contracts = None
+    if isinstance(snapshot_obj, dict):
+        enhanced = snapshot_obj.get("enhanced_context")
+        if isinstance(enhanced, dict):
+            contracts = _non_empty_dict(enhanced.get("crypto_contracts"))
+        if contracts is None:  # 防御性 dual-shape 兜底（参考 extract_fundamental_context 的双形态读取；此处仅 fallback，不做合并）
+            contracts = _non_empty_dict(snapshot_obj.get("crypto_contracts"))
+    return {"crypto_contracts": contracts}
