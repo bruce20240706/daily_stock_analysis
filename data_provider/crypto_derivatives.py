@@ -107,3 +107,63 @@ def fetch_perp_metrics(base: str, quote: str) -> dict:
     if out:
         out["source"] = "okx"
     return out
+
+
+def _perp_row_for_symbol(symbol: str) -> dict:
+    """单个 BASE/QUOTE 现货代码 → {symbol, funding_rate?, open_interest_usd?}；无可用字段/异常 → {}。"""
+    try:
+        base, sep, quote = (symbol or "").upper().partition("/")
+        if not sep:
+            return {}
+        metrics = fetch_perp_metrics(base, quote)  # 模块内全局引用，便于测试 monkeypatch
+        row: dict = {}
+        if metrics.get("funding_rate") is not None:
+            row["funding_rate"] = metrics["funding_rate"]
+        if metrics.get("open_interest_usd") is not None:
+            row["open_interest_usd"] = metrics["open_interest_usd"]
+        if row:
+            row["symbol"] = symbol
+        return row
+    except Exception as e:  # 单币失败不拖垮整篮子聚合（对齐 _okx_first 的 fail-soft 约定）
+        logger.warning("[永续复盘] %s 处理失败，跳过: %s", symbol, e)
+        return {}
+
+
+def fetch_perp_market_snapshot(symbols: list) -> dict:
+    """对一篮子现货代码并发取各自 OKX 永续指标，聚合复盘情绪（presence-only）。
+    OI 加权平均资金费率 + 总未平仓量(USD) + 按 |funding| 降序 top5 明细。无数据 → {}。"""
+    if not symbols:
+        return {}
+    rows: list = []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for row in ex.map(_perp_row_for_symbol, symbols):
+            if row:
+                rows.append(row)
+    if not rows:
+        return {}
+    out: dict = {}
+    weighted_num = 0.0
+    weighted_den = 0.0
+    total_oi = 0.0
+    has_oi = False
+    for r in rows:
+        fr = r.get("funding_rate")
+        oi = r.get("open_interest_usd")
+        if oi is not None:
+            total_oi += oi
+            has_oi = True
+            if fr is not None and oi > 0:
+                weighted_num += fr * oi
+                weighted_den += oi
+    if weighted_den > 0:
+        out["avg_funding_rate"] = weighted_num / weighted_den
+    if has_oi:
+        out["total_open_interest_usd"] = total_oi
+    coins = sorted(
+        rows,
+        key=lambda r: abs(r["funding_rate"]) if r.get("funding_rate") is not None else -1.0,
+        reverse=True,
+    )[:5]
+    if coins:
+        out["coins"] = coins
+    return out
