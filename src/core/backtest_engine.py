@@ -184,6 +184,8 @@ class BacktestEngine:
         stop_loss: Optional[float],
         take_profit: Optional[float],
         config: EvaluationConfig,
+        is_perp: bool = False,
+        funding_cost_pct: float = 0.0,
     ) -> Dict[str, Any]:
         """Evaluate one historical analysis against forward daily bars.
 
@@ -193,11 +195,13 @@ class BacktestEngine:
           first_hit="ambiguous" and assume stop-loss first for simulated exit.
         """
 
+        infer_position = cls.infer_perp_position if is_perp else cls.infer_position_recommendation
+
         if start_price is None or start_price <= 0:
             return {
                 "analysis_date": analysis_date,
                 "operation_advice": operation_advice,
-                "position_recommendation": cls.infer_position_recommendation(operation_advice),
+                "position_recommendation": infer_position(operation_advice),
                 "direction_expected": cls.infer_direction_expected(operation_advice),
                 "eval_status": "error",
             }
@@ -210,7 +214,7 @@ class BacktestEngine:
             return {
                 "analysis_date": analysis_date,
                 "operation_advice": operation_advice,
-                "position_recommendation": cls.infer_position_recommendation(operation_advice),
+                "position_recommendation": infer_position(operation_advice),
                 "direction_expected": cls.infer_direction_expected(operation_advice),
                 "eval_status": "insufficient_data",
                 "eval_window_days": eval_days,
@@ -230,7 +234,7 @@ class BacktestEngine:
             stock_return_pct = (end_close - start_price) / start_price * 100
 
         direction_expected = cls.infer_direction_expected(operation_advice)
-        position = cls.infer_position_recommendation(operation_advice)
+        position = infer_position(operation_advice)
 
         outcome, direction_correct = cls._classify_outcome(
             stock_return_pct=stock_return_pct,
@@ -254,14 +258,27 @@ class BacktestEngine:
             end_close=end_close,
         )
 
-        simulated_entry_price = start_price if position == "long" else None
+        funding = float(funding_cost_pct or 0.0) if is_perp else 0.0
         simulated_return_pct: Optional[float]
-        if position != "long":
+        if position == "long":
+            simulated_entry_price = start_price
+            if simulated_exit_price is None:
+                simulated_return_pct = None
+            else:
+                simulated_return_pct = (simulated_exit_price - start_price) / start_price * 100
+                if is_perp:
+                    simulated_return_pct -= funding            # 多头付资金费(正费率)
+        elif position == "short":                              # 仅 is_perp 可达（现货推断永不返回 short）
+            simulated_entry_price = start_price
+            simulated_exit_price = end_close                   # 做空持有至窗口末
+            simulated_exit_reason = "window_end_short"
+            if end_close is None:
+                simulated_return_pct = None
+            else:
+                simulated_return_pct = (start_price - end_close) / start_price * 100 + funding  # 跌则盈 + 收资金费
+        else:  # cash
+            simulated_entry_price = None
             simulated_return_pct = 0.0
-        elif simulated_exit_price is None:
-            simulated_return_pct = None
-        else:
-            simulated_return_pct = (simulated_exit_price - start_price) / start_price * 100
 
         return {
             "analysis_date": analysis_date,
