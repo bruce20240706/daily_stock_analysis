@@ -8,7 +8,7 @@ import logging
 from typing import Any, Dict, Optional
 
 import data_provider.crypto_derivatives as cd
-from data_provider.base import is_crypto_code
+from data_provider.base import is_crypto_code, is_perp_code, parse_perp_code
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -21,9 +21,13 @@ class CryptoDerivativesService:
     def collect(self, code: str) -> Dict[str, Any]:
         if not getattr(self.config, "crypto_derivatives_enabled", True):
             return {}
-        if not is_crypto_code(code or ""):
+        code = code or ""
+        if is_perp_code(code):
+            base, quote = parse_perp_code(code)
+        elif is_crypto_code(code):
+            base, _, quote = code.partition("/")
+        else:
             return {}
-        base, _, quote = (code or "").partition("/")
         return cd.fetch_perp_metrics(base, quote)
 
 
