@@ -41,23 +41,23 @@
 
 ```python
 OKX_FUNDING_HISTORY_URL = "https://www.okx.com/api/v5/public/funding-rate-history"
-_FUNDING_HISTORY_MAX_PAGES = 12  # 100 结算/页 ≈ 33 天/页 → 上限约 1 年；超窗返回已得（偏低估，fail-soft）
+# 首页即自窗口右界(after=end_ms)向后翻，故 12 页约束的是“窗口跨度”(~400 天)而非“现在→窗口”距离；
+# 实际 eval 窗口远小于此，正常不会截断；极端超界返回已采集部分（偏低估，fail-soft）。
+_FUNDING_HISTORY_MAX_PAGES = 12  # 100 结算/页 ≈ 33 天/页
 
 
 def fetch_funding_rate_history(base: str, quote: str, start_ms: int, end_ms: int) -> list:
-    """OKX 永续 BASE-QUOTE-SWAP 在 [start_ms, end_ms] 内的资金费率列表（fundingRate 小数）。
-    向后分页（after=更早），按窗口过滤；非线性计价/参数非法/无数据 → []。fail-soft。"""
+    """OKX 永续 BASE-QUOTE-SWAP 在半开窗口 [start_ms, end_ms) 内的资金费率列表（fundingRate 小数）。
+    自 after=end_ms 起向后分页（after=更早），按窗口过滤；非线性计价/参数非法/无数据 → []。fail-soft。"""
     base = (base or "").upper()
     quote = (quote or "").upper()
     if not base or quote not in _LINEAR_QUOTES:
         return []
     inst = f"{base}-{quote}-SWAP"
     rates: list = []
-    cursor = None  # OKX after: 返回 fundingTime 早于该值的记录
+    cursor = int(end_ms)  # OKX after: 返回 fundingTime 早于该值的记录；自窗口右界起翻，预算用在窗口内
     for _ in range(_FUNDING_HISTORY_MAX_PAGES):
-        params = {"instId": inst, "limit": "100"}
-        if cursor is not None:
-            params["after"] = str(cursor)
+        params = {"instId": inst, "limit": "100", "after": str(cursor)}
         try:
             data = _http_get_json(OKX_FUNDING_HISTORY_URL, params)
         except Exception as e:
@@ -73,7 +73,7 @@ def fetch_funding_rate_history(base: str, quote: str, start_ms: int, end_ms: int
             if ts is None:
                 continue
             page_min_ts = ts if page_min_ts is None else min(page_min_ts, ts)
-            if fr is not None and start_ms <= ts <= end_ms:
+            if fr is not None and start_ms <= ts < end_ms:   # 半开 [start, end)：含 start、排除 end 边界结算
                 rates.append(fr)
         if page_min_ts is None or page_min_ts <= start_ms or len(arr) < 100:
             break
@@ -82,7 +82,8 @@ def fetch_funding_rate_history(base: str, quote: str, start_ms: int, end_ms: int
 ```
 
 - presence-only/fail-soft：任何异常或非线性计价 → `[]`（资金费成本归 0，做空/做多方向盈亏仍计算）。
-- 分页上限 `_FUNDING_HISTORY_MAX_PAGES` 防御历史过久的标的；超限返回已采集部分（资金费偏低估，文档注明）。
+- 半开窗口 `[start_ms, end_ms)`：含起界、排除终界结算，避免与上一/下一窗口在 00:00 边界双计；与 §2.4 真实持有区间对齐。
+- 分页自 `after=end_ms` 起向后翻，`_FUNDING_HISTORY_MAX_PAGES` 约束的是窗口跨度（~400 天）而非“现在→窗口”距离；正常 eval 窗口远小于此，超限返回已采集部分（偏低估，fail-soft）。
 
 ### 2.2 `src/core/backtest_engine.py`：`infer_perp_position`（新 classmethod）
 
@@ -112,12 +113,15 @@ def infer_perp_position(cls, operation_advice: Optional[str]) -> str:
 
 ### 2.3 `src/core/backtest_engine.py`：`evaluate_single` 新增 perp 参数（additive）
 
-签名追加 `is_perp: bool = False, funding_cost_pct: float = 0.0`（置于 `config` 之后，全 kwargs，默认 = 现状）。改动点仅两处：
+签名追加 `is_perp: bool = False, funding_cost_pct: float = 0.0`（置于 `config` 之后，全 kwargs，默认 = 现状）。
 
-**(a) position 推断（替换 :213 一行）：**
+**(a) position 推断——三处出口统一（error :180、insufficient_data :193、completed :213）：**
+
+`evaluate_single` 在 `start_price<=0`（:180）、`insufficient_data`（:193）、`completed`（:213）三处**各自独立**计算 `position_recommendation`，当前均硬调 long-only 的 `cls.infer_position_recommendation`。若只改 :213，看空 perp 落到 error/insufficient 时会被记成 `"cash"` 而非 `"short"`（虽不影响仅统计 `completed` 的 `long_count`/`cash_count`，但持久化字段语义错误、与 completed 行不一致）。故在函数体顶部定义一次选择器，三处出口统一使用：
 
 ```python
-position = cls.infer_perp_position(operation_advice) if is_perp else cls.infer_position_recommendation(operation_advice)
+infer_position = cls.infer_perp_position if is_perp else cls.infer_position_recommendation
+# 三处原 `cls.infer_position_recommendation(operation_advice)`（:180/:193/:213）均改为 `infer_position(operation_advice)`
 ```
 
 `_evaluate_targets(position=position, ...)` **不变**：`"long"` 走现有多头 TP/SL；`"short"`/`"cash"` 命中 `position!="long"`→`not_applicable`（`hit_sl/hit_tp=None`、`first_hit="not_applicable"`）。**做空不评估 TP/SL**（理由见下）。
@@ -150,7 +154,7 @@ else:  # cash
 
 返回 dict 不增删键（`simulated_entry_price`/`simulated_exit_price`/`simulated_exit_reason`/`simulated_return_pct` 已存在；short 复写 exit 价/原因，`first_hit`/`hit_*` 维持 `_evaluate_targets` 的 `not_applicable`/`None`）。
 
-**资金费口径与方向：** OKX `fundingRate` 为正＝多头付空头。`funding_cost_pct = Σ(窗口内 fundingRate) × 100`（百分比）。多头 `−funding`，空头 `+funding`。**资金费按整窗口计提**；若多头提前触发 TP/SL，仍按整窗口资金费（轻微高估持有成本，偏保守）——1x、日内 carry 量级很小，可接受，文档注明。
+**资金费口径与方向：** OKX `fundingRate` 为正＝多头付空头。`funding_cost_pct = Σ(持有窗口内 fundingRate) × 100`（百分比）。多头 `−funding`，空头 `+funding`。持有窗口对齐**真实持仓区间**（入场=起始 bar 收盘＝`start_date+1` 00:00 UTC，出场=末 bar 收盘＝`start_date+N+1` 00:00 UTC，半开 `[入场, 出场)` ≈ `eval_window_days×3` 个 8h 结算，见 §2.4）。残余近似仅一处：**多头**提前触发 TP/SL 时仍按整持有窗口计资金费（略高估持有成本，对多头 `−funding` 偏保守，可接受）；**做空恒持有至窗口末、无提前出场**，对齐窗口后无系统性偏置（消除了初版“整窗口计提对空头 `+funding` 反偏乐观”的反保守问题）。1x、日内 carry 量级很小。
 
 **为何做空不评估 TP/SL（相对初版"反向 TP/SL"的收敛）：** `stop_loss`/`take_profit` 来自 analysis（LLM 多头框架，SL 在下、TP 在上）。对做空套用反向判定会把"低于入场的 SL"立即判成触发，产出垃圾。除非 analysis 明确按做空框架产出价位（当前无此保证），否则反向 TP/SL 是**虚构精度**。故做空仅记窗口末方向盈亏 + 资金费，TP/SL 留空（`not_applicable`），对称性让位于正确性。
 
@@ -166,7 +170,8 @@ from data_provider.base import is_perp_code
 # ...evaluate_single 前：
 is_perp = is_perp_code(analysis.code)
 funding_cost_pct = 0.0
-if is_perp and getattr(config, "crypto_derivatives_enabled", True):
+# 仅在 forward_bars 足量（不会落 insufficient_data）时才发起 OKX 资金费抓取，避免对将被丢弃的行做无谓网络 I/O
+if is_perp and len(forward_bars) >= int(eval_window_days) and getattr(config, "crypto_derivatives_enabled", True):
     funding_cost_pct = self._compute_perp_funding_cost_pct(
         code=analysis.code,
         start_date=start_daily.date,
@@ -190,14 +195,17 @@ evaluation = BacktestEngine.evaluate_single(
 
 ```python
 def _compute_perp_funding_cost_pct(self, *, code: str, start_date: date, eval_window_days: int) -> float:
-    """perp 标的回测窗口 [start, start+eval_window_days+1) 的资金费成本(百分比, 多头视角)。
-    非 perp/禁用/异常 → 0.0。"""
+    """perp 标的真实持有窗口 [入场=start_date 收盘, 出场=末 bar 收盘) 的资金费成本(百分比, 多头视角)。
+    窗口半开、≈ eval_window_days×3 个 8h 结算；非 perp/禁用/异常 → 0.0。
+    注：窗口按日历日推算，假定 OKX 24/7 日线无内部缺口（缺口期口径退化为近似）。"""
     try:
         from data_provider.base import parse_perp_code
         import data_provider.crypto_derivatives as cd
         base, quote = parse_perp_code(code)
-        start_dt = datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc)
-        end_dt = start_dt + timedelta(days=eval_window_days + 1)
+        # 持有区间对齐真实持仓：OKX 1D candle 收盘对齐次日 00:00 UTC。
+        midnight = datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc)
+        start_dt = midnight + timedelta(days=1)                    # 入场 = start_date 收盘
+        end_dt = midnight + timedelta(days=eval_window_days + 1)   # 出场 = 末 bar 收盘
         start_ms = int(start_dt.timestamp() * 1000)
         end_ms = int(end_dt.timestamp() * 1000)
         rates = cd.fetch_funding_rate_history(base, quote, start_ms, end_ms)
@@ -214,12 +222,13 @@ def _compute_perp_funding_cost_pct(self, *, code: str, start_date: date, eval_wi
 - `win/loss/neutral`、`direction_accuracy_pct`、`win_rate_pct`、`avg_simulated_return_pct`、`avg_stock_return_pct` 均 position-agnostic → **做空自动正确纳入**（无改动）。
 - `long_count`/`cash_count` 维持现状：perp 多头计入 `long_count`、perp 无持仓计入 `cash_count`；**做空（`"short"`）不计入这两项**，但计入 `completed_count`，并以 `position_recommendation="short"` 结果行可查。
 - `stop_loss_trigger_rate`/`take_profit_trigger_rate`/`ambiguous_rate`/`avg_days_to_first_hit` 的 applicable 过滤键于 `position=="long"`——做空 `hit_*=None` 天然被排除，**无需改动**。
-- **不新增 `short_count`/funding summary 列**，故 `compute_summary`/`_build_summary_model`/`upsert_summary`/`storage` 均**零改动**。注：对 perp 数据集 `long_count + cash_count < completed_count`（差额为做空数），属预期；现货数据集仍 `long+cash==completed`。
+- **不新增 `short_count`/funding summary 列**，故 `compute_summary`/`_build_summary_model`/`upsert_summary`/`storage` 均**零改动**。注：凡 `completed` 集合含做空行的 summary——含 `scope="overall"` 的现货+perp **混合行**以及 perp 个股行——都会 `long_count + cash_count < completed_count`（差额=做空数），属预期；仅 `completed` 全为现货/股票的 summary 才严格 `long+cash==completed`。无消费方依赖该等式（已核：无 Python 断言依赖，Web fixture 本身亦不满足该等式）。
 
 ### 2.6 配置 / schema
 
 - **无新配置项**：复用 `crypto_derivatives_enabled`（默认开）。无 `.env.example`/registry/locale 改动。
-- **无 DB schema 改动、无迁移**：`position_recommendation` 复用，资金费/做空盈亏折进 `simulated_return_pct`。
+- **无 DB schema 改动、无迁移**：`position_recommendation`（`String(8)`，容纳 `"short"`）复用，资金费/做空盈亏折进 `simulated_return_pct`。
+- **同步更新两处枚举注释**（纯注释、无迁移）：`src/storage.py:307` `# long/cash` → `# long/cash/short`；`src/storage.py:333` `# stop_loss/take_profit/window_end/cash/ambiguous_stop_loss` → 追加 `window_end_short`（`"window_end_short"` 16 字符 ≤ `String(24)`）。保持列契约注释与实际取值集一致。
 
 ## 3. 数据流
 
@@ -248,25 +257,28 @@ run_backtest(perp 标的) 逐 analysis
 
 | 层 | 用例 |
 |---|---|
-| data_provider | `fetch_funding_rate_history`：monkeypatch `_http_get_json`：窗口内求和正确、窗口外过滤、向后分页拼接、非线性计价→[]、异常→[]、超页上限截断 |
+| data_provider | `fetch_funding_rate_history`：monkeypatch `_http_get_json`：半开窗口 `[start,end)` 内求和正确（`ts==start` 含、`ts==end` 排除的边界用例）、窗口外过滤、自 `after=end_ms` 起向后分页拼接、非线性计价→[]、异常→[]、超页上限截断。fake 须按 `"funding-rate-history" in url` **先于** `"funding-rate"` 分支匹配（避免误入现货 funding-rate fixture） |
 | 引擎 position | `infer_perp_position`：bearish→short、bullish/hold→long、wait/默认→cash（对照 `infer_position_recommendation` 仅 bearish 分叉） |
 | 引擎 long（perp） | `evaluate_single(is_perp=True, funding_cost_pct=f)`：多头 `(exit−start)/start×100 − f`；TP/SL 命中路径与现货一致；funding=0 时数值等同 spot long |
 | 引擎 short | 看空建议：position="short"、`(start−end)/start×100 + f`、`simulated_exit_reason="window_end_short"`、`hit_*`/`first_hit` 为 None/not_applicable；跌则 win（direction down） |
-| 引擎现货回归 | `is_perp=False`（默认）：long/cash 与改动前**逐字一致**（同输入同输出，含 simulated_return_pct/entry/exit） |
+| 引擎 error/insufficient（perp）| 看空 perp 落 `start_price<=0` 或 `insufficient_data`：`position_recommendation=="short"`（验证三处出口选择器统一，非 long-only `"cash"`） |
+| 引擎现货回归 | 现有 lock/characterization 套件 **`tests/test_backtest_engine.py` + `tests/test_backtest_summary.py` + `tests/test_crypto_backtest.py` 必须原样全绿、不得改 fixture/断言**（`is_perp=False` 逐字不变的首要回归证据）；另补一例显式断言默认参数下 long/cash 的 `simulated_return_pct`/entry/exit 与改动前一致 |
 | summary | 含 short 行：`win/loss/avg_simulated_return` 纳入 short；`long_count`/`cash_count` 不含 short；`completed_count` 含 short；现货集仍 `long+cash==completed` |
+| funding 窗口 helper | `_compute_perp_funding_cost_pct`：spy 捕获传入 `fetch_funding_rate_history` 的 `(start_ms, end_ms)`，断言＝入场(`start_date+1` 00:00 UTC)/出场(`start_date+N+1` 00:00 UTC)，且 `pct==sum(rates)*100`；`forward_bars` 不足时**不发起**抓取（gate 生效） |
 | service | `run_backtest` perp 标的：monkeypatch `cd.fetch_funding_rate_history` + seeded bars → 落 `position="short"`/资金费调整后的 `simulated_return_pct`；`crypto_derivatives_enabled=False` → funding 0、方向盈亏仍计算；非 perp 标的不调资金费 |
 
 真实在线可达性（OKX funding-rate-history）走 `network-smoke`/手测。
 
 ## 6. 文档
 
-- `docs/crypto-guide.md` 回测节补「永续回测（资金费 + 做空，1x）」小节：做空盈亏口径、资金费成本口径与整窗口计提、1x、不做杠杆/强平/做空 TP/SL、门控复用 `crypto_derivatives_enabled`。
+- `docs/crypto-guide.md` 回测节补「永续回测（资金费 + 做空，1x）」小节：做空盈亏口径、资金费成本口径与持有窗口对齐、1x、不做杠杆/强平/做空 TP/SL、门控复用 `crypto_derivatives_enabled`。
+- **同步修正同文件中与本期矛盾的旧表述**（避免文档自相矛盾，对齐 AGENTS.md 反漂移）：`docs/crypto-guide.md:33` 删/改 “暂不含 perp 回测”；`:229` 从“后续子项目（未做）”移除 “perp klines/回测”（klines 属 C+D、回测属 E，均已落地）；`:244`「合约 / 永续 / 杠杆（当前仅现货）」精修为“perp 标的分析与回测已支持，杠杆仍不做”。
 - `docs/CHANGELOG.md` `[Unreleased]` 扁平：`- [新功能] crypto 永续合约回测纳入资金费成本与做空盈亏（1x，additive，零 schema，复用 crypto_derivatives_enabled；现货/股票回测不变）`。
 
 ## 7. 分支与回滚
 
 - 分支：`feat/crypto-perp-backtest`，叠在 `feat/crypto-perp-instrument` 上。
-- 回滚：纯新增/参数默认值（1 抓取函数 + 引擎 `infer_perp_position` + `evaluate_single` 两处分支 + service perp 检测/资金费 helper）；`is_perp` 默认 False → 现货/股票路径不变；`CRYPTO_DERIVATIVES_ENABLED=false` 即停资金费抓取；`git revert`/丢弃分支即恢复。无 DB 迁移需回滚。
+- 回滚：纯新增/参数默认值（1 抓取函数 + 引擎 `infer_perp_position` + `evaluate_single` position 选择器/entry-exit 分支 + service perp 检测/资金费 helper）；`is_perp` 默认 False → 现货/股票路径不变；`CRYPTO_DERIVATIVES_ENABLED=false` 即停资金费抓取；`git revert`/丢弃分支即恢复。无 DB 迁移需回滚。
 
 ## 8. 范围边界（YAGNI / 不做）
 
