@@ -8,6 +8,7 @@ import type {
   MarketReviewPayload,
   MarketReviewPayloadSection,
   NewListing,
+  PerpSentiment,
   ReportLanguage,
 } from '../../types/analysis';
 import { markdownToPlainText } from '../../utils/markdown';
@@ -48,6 +49,7 @@ type StructuredMarketData = {
   indices: NonNullable<MarketReviewPayload['indices']>;
   newListings?: NewListing[];
   marketIndicators?: MarketIndicators;
+  perpSentiment?: PerpSentiment;
 };
 
 const isMarketReviewPayload = (value: unknown): value is MarketReviewPayload =>
@@ -170,8 +172,17 @@ const getPayloadSections = (payload?: MarketReviewPayload | null): MarketReviewS
     }));
 };
 
+const hasPerpSentimentData = (perp: MarketReviewPayload['perpSentiment']): boolean =>
+  Boolean(
+    perp && (
+      perp.avgFundingRate !== undefined ||
+      perp.totalOpenInterestUsd !== undefined ||
+      (perp.coins && perp.coins.length > 0)
+    ),
+  );
+
 const hasStructuredMarketData = (payload?: MarketReviewPayload | null): boolean =>
-  Boolean(payload?.breadth || payload?.indices?.length);
+  Boolean(payload?.breadth || payload?.indices?.length || hasPerpSentimentData(payload?.perpSentiment));
 
 const getStructuredMarketData = (payload?: MarketReviewPayload | null): StructuredMarketData[] => {
   if (!payload) {
@@ -189,6 +200,7 @@ const getStructuredMarketData = (payload?: MarketReviewPayload | null): Structur
         indices: marketPayload.indices || [],
         newListings: marketPayload.newListings,
         marketIndicators: marketPayload.marketIndicators,
+        perpSentiment: marketPayload.perpSentiment,
       }));
   }
 
@@ -204,6 +216,7 @@ const getStructuredMarketData = (payload?: MarketReviewPayload | null): Structur
     indices: payload.indices || [],
     newListings: payload.newListings,
     marketIndicators: payload.marketIndicators,
+    perpSentiment: payload.perpSentiment,
   }];
 };
 
@@ -234,6 +247,9 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   ethDominance: string;
   totalMarketCap: string;
   fearGreed: string;
+  perpSentiment: string;
+  avgFundingRate: string;
+  totalOpenInterest: string;
 }> = {
   zh: {
     reviewSummary: '复盘摘要',
@@ -262,6 +278,9 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     ethDominance: 'ETH 主导率',
     totalMarketCap: '加密总市值',
     fearGreed: '恐贪指数',
+    perpSentiment: '加密永续情绪',
+    avgFundingRate: 'OI 加权资金费率',
+    totalOpenInterest: '总未平仓量',
   },
   en: {
     reviewSummary: 'Review Summary',
@@ -290,6 +309,9 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     ethDominance: 'ETH Dominance',
     totalMarketCap: 'Total Market Cap',
     fearGreed: 'Fear & Greed',
+    perpSentiment: 'Perpetual Sentiment',
+    avgFundingRate: 'OI-weighted Funding',
+    totalOpenInterest: 'Total Open Interest',
   },
 };
 
@@ -561,6 +583,39 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                         </div>
                       ) : null}
                     </div>
+                  </div>
+                ) : null}
+                {marketData.region === 'crypto' && marketData.perpSentiment &&
+                  (marketData.perpSentiment.avgFundingRate !== undefined ||
+                   marketData.perpSentiment.totalOpenInterestUsd !== undefined ||
+                   (marketData.perpSentiment.coins && marketData.perpSentiment.coins.length > 0)) ? (
+                  <div>
+                    <h4 className="mb-2 text-sm font-semibold text-foreground">{marketReviewText.perpSentiment}</h4>
+                    <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+                      {marketData.perpSentiment.avgFundingRate !== undefined ? (
+                        <div className="rounded-lg border border-subtle p-3">
+                          <p className="label-uppercase">{marketReviewText.avgFundingRate}</p>
+                          <p className="mt-1 font-semibold text-foreground">{(marketData.perpSentiment.avgFundingRate * 100).toFixed(4)}%</p>
+                        </div>
+                      ) : null}
+                      {marketData.perpSentiment.totalOpenInterestUsd !== undefined ? (
+                        <div className="rounded-lg border border-subtle p-3">
+                          <p className="label-uppercase">{marketReviewText.totalOpenInterest}</p>
+                          <p className="mt-1 font-semibold text-foreground">${marketData.perpSentiment.totalOpenInterestUsd.toLocaleString()}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                    {marketData.perpSentiment.coins && marketData.perpSentiment.coins.length > 0 ? (
+                      <ul className="mt-2 space-y-1 text-sm text-secondary-text">
+                        {marketData.perpSentiment.coins.map((c) => (
+                          <li key={c.symbol}>
+                            {c.symbol}
+                            {c.fundingRate !== undefined ? ` · ${(c.fundingRate * 100).toFixed(4)}%` : ''}
+                            {c.openInterestUsd !== undefined ? ` · $${c.openInterestUsd.toLocaleString()}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
                   </div>
                 ) : null}
                 {marketData.indices.length > 0 ? (

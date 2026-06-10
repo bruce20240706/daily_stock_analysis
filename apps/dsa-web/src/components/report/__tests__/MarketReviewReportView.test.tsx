@@ -289,3 +289,30 @@ describe('MarketReviewReportView crypto market indicators', () => {
     expect(screen.queryByText(/Extreme Fear/)).not.toBeInTheDocument();
   });
 });
+
+describe('MarketReviewReportView crypto perp sentiment', () => {
+  it('renders crypto perp sentiment when present', () => {
+    const payload = {
+      version: 1, kind: 'market_review', region: 'crypto', title: 'Crypto', generatedAt: '2026-06-09',
+      indices: [],
+      perpSentiment: {
+        avgFundingRate: 0.00025,
+        totalOpenInterestUsd: 4000000000,
+        coins: [{ symbol: 'ETH/USDT', fundingRate: 0.0003, openInterestUsd: 3000000000 }],
+      },
+    };
+    render(<MarketReviewReportView payload={payload as never} reportLanguage="zh" />);
+    expect(screen.getByText('加密永续情绪')).toBeInTheDocument();
+    expect(screen.getByText(/0\.0250%/)).toBeInTheDocument();
+    expect(screen.getByText(/ETH\/USDT/)).toBeInTheDocument();
+  });
+
+  it('does not render perp sentiment when absent', () => {
+    const payload = {
+      version: 1, kind: 'market_review', region: 'crypto', title: 'Crypto', generatedAt: '2026-06-09',
+      indices: [{ name: 'BTC', current: 1, changePct: 0 }],
+    };
+    render(<MarketReviewReportView payload={payload as never} reportLanguage="zh" />);
+    expect(screen.queryByText('加密永续情绪')).not.toBeInTheDocument();
+  });
+});
