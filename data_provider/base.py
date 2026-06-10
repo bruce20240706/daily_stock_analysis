@@ -58,6 +58,35 @@ def is_crypto_code(code: str) -> bool:
     return bool(base) and quote in SUPPORTED_QUOTES
 
 
+_LINEAR_PERP_QUOTES = {"USDT", "USDC"}   # OKX 线性永续计价
+_PERP_SUFFIX = ":PERP"
+
+
+def is_perp_code(code: str) -> bool:
+    """识别 OKX 永续标的：BASE/QUOTE:PERP（QUOTE ∈ USDT/USDC）。is_crypto_code 现货保持独立。"""
+    if not code or not str(code).strip():
+        return False
+    s = str(code).strip().upper()
+    if not s.endswith(_PERP_SUFFIX) or "/" not in s:
+        return False
+    base, _, quote = s[: -len(_PERP_SUFFIX)].partition("/")
+    return bool(base) and quote in _LINEAR_PERP_QUOTES
+
+
+def parse_perp_code(code: str):
+    """BTC/USDT:PERP -> ('BTC','USDT')；非 perp -> (None, None)。"""
+    if not is_perp_code(code):
+        return None, None
+    s = str(code).strip().upper()
+    base, _, quote = s[: -len(_PERP_SUFFIX)].partition("/")
+    return base, quote
+
+
+def is_crypto_like(code: str) -> bool:
+    """crypto 现货或永续——用于 crypto 区路由（市场/日历/数据/实时）。"""
+    return is_crypto_code(code) or is_perp_code(code)
+
+
 def unwrap_exception(exc: Exception) -> Exception:
     """
     Follow chained exceptions and return the deepest non-cyclic cause.
