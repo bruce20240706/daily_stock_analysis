@@ -644,7 +644,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         
         return all_news
     
-    def generate_market_review(self, overview: MarketOverview, news: List, indicators: Optional[Dict[str, Any]] = None) -> str:
+    def generate_market_review(self, overview: MarketOverview, news: List, indicators: Optional[Dict[str, Any]] = None, perp_sentiment: Optional[Dict[str, Any]] = None) -> str:
         """
         使用大模型生成大盘复盘报告
 
@@ -661,7 +661,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             return self._generate_template_review(overview, news)
 
         # 构建 Prompt
-        prompt = self._build_review_prompt(overview, news, indicators)
+        prompt = self._build_review_prompt(overview, news, indicators, perp_sentiment)
 
         logger.info("[大盘] 调用大模型生成复盘报告...")
         # Use the public generate_text() entry point - never access private analyzer attributes.
@@ -683,6 +683,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         market_light_snapshot: Optional[Dict[str, Any]] = None,
         new_listings: Optional[List[Dict[str, Any]]] = None,
         market_indicators: Optional[Dict[str, Any]] = None,
+        perp_sentiment: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Build the structured market-review contract consumed by API, Web, and notifications."""
         language = self._get_review_language()
@@ -749,6 +750,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         if market_indicators:
             payload["market_indicators"] = market_indicators
+
+        if perp_sentiment:
+            payload["perp_sentiment"] = perp_sentiment
 
         return payload
 
@@ -1219,7 +1223,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         label = str(scores["temperature_label"])
         return score, label
 
-    def _build_review_prompt(self, overview: MarketOverview, news: List, indicators: Optional[Dict[str, Any]] = None) -> str:
+    def _build_review_prompt(self, overview: MarketOverview, news: List, indicators: Optional[Dict[str, Any]] = None, perp_sentiment: Optional[Dict[str, Any]] = None) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
 
@@ -1330,6 +1334,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 
 {self._get_strategy_prompt_block()}
 {self._get_crypto_indicators_prompt_block(indicators, review_language)}
+{self._get_crypto_perp_sentiment_prompt_block(perp_sentiment, review_language)}
 {self._get_crypto_addendum_prompt(review_language)}
 
 ---
@@ -1396,6 +1401,7 @@ Output the report content directly, no extra commentary.
 
 {self._get_strategy_prompt_block()}
 {self._get_crypto_indicators_prompt_block(indicators, review_language)}
+{self._get_crypto_perp_sentiment_prompt_block(perp_sentiment, review_language)}
 {self._get_crypto_addendum_prompt(review_language)}
 
 ---
@@ -1556,9 +1562,10 @@ Market conditions can change quickly. The data above is for reference only and d
 
         # crypto 大盘宏观指标（需在报告生成前取，以注入 prompt）
         indicators = self._get_crypto_market_indicators()
+        perp_sentiment = self._get_crypto_perp_sentiment()
 
         # 3. 生成复盘报告
-        report = self.generate_market_review(overview, news, indicators)
+        report = self.generate_market_review(overview, news, indicators, perp_sentiment)
         # crypto skips MarketLightSnapshot; build_market_review_payload also guards this
         # via `if self.region == "crypto": light = None` — keep both in sync when changing.
         snapshot = None if self.region == "crypto" else self.build_market_light_snapshot(overview)
@@ -1570,6 +1577,7 @@ Market conditions can change quickly. The data above is for reference only and d
             snapshot,
             new_listings=new_listings,
             market_indicators=indicators,
+            perp_sentiment=perp_sentiment,
         )
 
         logger.info("========== 大盘复盘分析完成 ==========")
