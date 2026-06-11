@@ -40,3 +40,11 @@ def test_non_dict_snapshot_returns_none():
 def test_flat_top_level_fallback_returns_contracts():
     snapshot = {"crypto_contracts": _CONTRACTS}  # 防御性 dual-shape
     assert extract_crypto_contracts_detail_fields(snapshot)["crypto_contracts"] == _CONTRACTS
+
+
+def test_long_short_ratio_fields_pass_through():
+    contracts = {**_CONTRACTS, "long_short_ratio": 1.23, "long_short_ratio_top": 0.85}
+    snapshot = {"enhanced_context": {"crypto_contracts": contracts}}
+    out = extract_crypto_contracts_detail_fields(snapshot)["crypto_contracts"]
+    assert out["long_short_ratio"] == 1.23
+    assert out["long_short_ratio_top"] == 0.85

@@ -25,3 +25,12 @@ def test_review_prompt_includes_perp_block():
     ov = MarketOverview(date="2026-06-09")
     prompt = a._build_review_prompt(ov, [], None, PERP)
     assert "加密永续情绪" in prompt
+
+
+def test_payload_perp_sentiment_passes_long_short_ratio():
+    a = MarketAnalyzer(region="crypto")
+    ov = MarketOverview(date="2026-06-09")
+    perp = {**PERP, "avg_long_short_ratio": 1.75, "avg_long_short_ratio_top": 1.10}
+    payload = a.build_market_review_payload(ov, news=[], report="# 复盘", perp_sentiment=perp)
+    assert payload["perp_sentiment"]["avg_long_short_ratio"] == 1.75
+    assert payload["perp_sentiment"]["avg_long_short_ratio_top"] == 1.10
