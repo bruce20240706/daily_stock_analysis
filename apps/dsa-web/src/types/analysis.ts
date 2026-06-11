@@ -199,6 +199,8 @@ export interface CryptoContracts {
   openInterest?: number;      // 张
   openInterestUsd?: number;
   source?: string;            // 'okx'
+  longShortRatio?: number;      // 全市场账户多空比（>1 偏多）
+  longShortRatioTop?: number;   // 大户账户多空比
 }
 
 export interface MarketReviewPayload {

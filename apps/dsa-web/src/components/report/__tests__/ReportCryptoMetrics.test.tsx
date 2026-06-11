@@ -42,4 +42,17 @@ describe('ReportCryptoMetrics', () => {
     expect(screen.getByText(/\$1,793,545,573/)).toBeInTheDocument();
     expect(screen.queryByText(/张/)).not.toBeInTheDocument();
   });
+
+  it('renders long/short ratio rows when present', () => {
+    render(<ReportCryptoMetrics contracts={{ fundingRate: 0.0001, longShortRatio: 1.23, longShortRatioTop: 0.85 }} language="zh" />);
+    expect(screen.getByText('多空比(全市场)')).toBeInTheDocument();
+    expect(screen.getByText('1.23')).toBeInTheDocument();
+    expect(screen.getByText('多空比(大户)')).toBeInTheDocument();
+    expect(screen.getByText('0.85')).toBeInTheDocument();
+  });
+
+  it('omits long/short ratio rows when absent', () => {
+    render(<ReportCryptoMetrics contracts={{ fundingRate: 0.0001 }} language="zh" />);
+    expect(screen.queryByText('多空比(全市场)')).not.toBeInTheDocument();
+  });
 });

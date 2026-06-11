@@ -15,6 +15,9 @@ const TEXT = {
     title: '合约市场指标',
     fundingRate: '资金费率',
     fundingHint: '正=多头付费 / 负=空头付费（约 8h 结算）',
+    longShortRatio: '多空比(全市场)',
+    longShortHint: '>1 散户偏多 / <1 偏空',
+    longShortRatioTop: '多空比(大户)',
     markPrice: '标记价',
     openInterest: '未平仓量(OI)',
     source: '来源',
@@ -24,6 +27,9 @@ const TEXT = {
     title: 'Contract Market Metrics',
     fundingRate: 'Funding Rate',
     fundingHint: 'positive = longs pay / negative = shorts pay (~8h settlement)',
+    longShortRatio: 'L/S Ratio (Market)',
+    longShortHint: '>1 longs lean / <1 shorts lean',
+    longShortRatioTop: 'L/S Ratio (Top Traders)',
     markPrice: 'Mark Price',
     openInterest: 'Open Interest',
     source: 'Source',
@@ -38,6 +44,12 @@ export const ReportCryptoMetrics: React.FC<ReportCryptoMetricsProps> = ({ contra
   const rows: Array<{ label: string; value: string; hint?: string }> = [];
   if (typeof contracts.fundingRate === 'number') {
     rows.push({ label: t.fundingRate, value: `${(contracts.fundingRate * 100).toFixed(4)}%`, hint: t.fundingHint });
+  }
+  if (typeof contracts.longShortRatio === 'number') {
+    rows.push({ label: t.longShortRatio, value: contracts.longShortRatio.toFixed(2), hint: t.longShortHint });
+  }
+  if (typeof contracts.longShortRatioTop === 'number') {
+    rows.push({ label: t.longShortRatioTop, value: contracts.longShortRatioTop.toFixed(2) });
   }
   if (typeof contracts.markPrice === 'number') {
     rows.push({ label: t.markPrice, value: String(contracts.markPrice) });
