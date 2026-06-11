@@ -76,6 +76,7 @@ const POSITION_LABELS: Record<string, string> = {
 const EXIT_REASON_LABELS: Record<string, string> = {
   take_profit: '止盈',
   stop_loss: '止损',
+  ambiguous_stop_loss: '同日触双线(按止损)',
   window_end: '窗口期满',
   window_end_short: '窗口期满(空)',
   cash: '无交易',

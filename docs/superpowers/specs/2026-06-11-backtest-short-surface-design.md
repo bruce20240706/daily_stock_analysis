@@ -35,8 +35,8 @@
   - badge 变体：`long` → `success`、`short` → `danger`、`cash` → `default`；未知值经 `labelFromMap` 原样回显（`default` 变体），与现有容错一致。
   - 模拟收益：`pct(row.simulatedReturnPct)`，按符号着色（复用现有三元式：`>0` `text-success` / `<0` `text-danger` / `=0` `text-secondary-text`，null → `text-muted-text` 显示 `--`）。cash 行引擎产出 `0.0` → 显示 `0.0%` 中性色（真实语义：空仓零收益，非缺数据）。
 - **第二行（小字）**：出场原因
-  - `EXIT_REASON_LABELS: Record<string, string> = { take_profit: '止盈', stop_loss: '止损', window_end: '窗口期满', window_end_short: '窗口期满(空)', cash: '无交易' }`（新增常量，与 `POSITION_LABELS` 一样当前文件中不存在）
-  - 引擎事实（对抗审查修正后，对照 `_evaluate_targets` 非 long 分支 7 元组逐槽位核实）：long → `take_profit`/`stop_loss`/`window_end`；short → 恒为 `window_end_short`（`evaluate_single` 覆写）；**cash → `'cash'`**（元组第 7 槽位；`'not_applicable'` 是第 3 槽位 `first_hit` 的值，不是出场原因——本 spec 初稿曾误归因，已更正）。未知值经 `labelFromMap` 原样回显。
+  - `EXIT_REASON_LABELS: Record<string, string> = { take_profit: '止盈', stop_loss: '止损', ambiguous_stop_loss: '同日触双线(按止损)', window_end: '窗口期满', window_end_short: '窗口期满(空)', cash: '无交易' }`（新增常量，与 `POSITION_LABELS` 一样当前文件中不存在）
+  - 引擎事实（对抗审查修正后，对照 `_evaluate_targets` 非 long 分支 7 元组逐槽位核实）：long → `take_profit`/`stop_loss`/`window_end`/`ambiguous_stop_loss`（同根 K 线双触 SL/TP，保守按止损）；short → 恒为 `window_end_short`（`evaluate_single` 覆写）；**cash → `'cash'`**（元组第 7 槽位；`'not_applicable'` 是第 3 槽位 `first_hit` 的值，不是出场原因——本 spec 初稿曾误归因，已更正）。未知值经 `labelFromMap` 原样回显。
   - cash 标签选 `'无交易'` 而非 `'空仓'`：badge 已显示「空仓」，小字重复无信息量；「无交易」表达真实语义（未开仓、无出场）。
 
 **缺省语义**：`positionRecommendation` 为 falsy（`undefined`/`null`/空串——旧记录/`insufficient_data`/error 行）→ 以 `!row.positionRecommendation` 守卫，整列渲染 `--`（不渲染 badge 与小字）。`positionRecommendation` 存在但 `simulatedReturnPct` 为 null（如 long 行极端窗口缺收盘）→ badge 照渲、收益位 `--`（`pct()` 既有行为）。
@@ -65,7 +65,7 @@ vitest（rsync 至 /tmp 无空格副本跑 `npx vitest run src/pages/__tests__/B
 ## 6. 风险与回滚
 
 - **风险**：极低——纯增列渲染，presence-only，不触碰任何取数/状态逻辑；旧数据（无仓位字段）降级为 `--`。
-- **回滚**：单 commit revert，字节级恢复。
+- **回滚**：按提交逐个 revert，字节级恢复。
 
 ## 7. 已核实事实（设计依据）
 
@@ -74,3 +74,4 @@ vitest（rsync 至 /tmp 无空格副本跑 `npx vitest run src/pages/__tests__/B
 - 「窗口收益」列的 `actualReturnPct` 即 `stock_return_pct` 的直接映射（`src/services/backtest_service.py:667`），窗口模式恒填充——§0 的"价格红/结果绿"反差断言依此成立；1 日验证模式下新列同样成立（引擎同路径产出模拟字段），无需条件渲染。
 - 桌面端复用 web 构建（`apps/dsa-desktop/main.js` 加载 `--serve-only` 后端静态挂载的同一 dist）。
 - `BacktestPage.test.tsx` 存在于 `apps/dsa-web/src/pages/__tests__/`，测试可循其约定扩展；其基础 fixture 的 `'做多'` 断言来自方向列遗留映射（详见 §3 碰撞陷阱）。
+- 整分支终审补充：long 出场原因还有第 4 个真实值 `ambiguous_stop_loss`（`backtest_engine.py` 同根 K 线双触分支；`storage.py:333` 列注释可证全集为 6 值）——初稿与对抗审查均漏，已补标签与用例。

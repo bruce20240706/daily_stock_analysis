@@ -295,4 +295,12 @@ describe('BacktestPage', () => {
     expect(await screen.findByText('做空')).toBeInTheDocument();
     expect(screen.getByText('some_future_reason')).toBeInTheDocument();  // labelFromMap 未知值原样回显
   });
+
+  it('renders ambiguous stop-loss exit reason label', async () => {
+    mockSingleRow({ ...perpRowBase, directionExpected: 'up', positionRecommendation: 'long', simulatedReturnPct: -3.0, simulatedExitReason: 'ambiguous_stop_loss' });
+    render(<BacktestPage />);
+
+    expect(await screen.findByText('做多')).toBeInTheDocument();
+    expect(screen.getByText('同日触双线(按止损)')).toBeInTheDocument();  // 引擎同根K线双触SL/TP（保守按止损）
+  });
 });
