@@ -21,7 +21,7 @@ OKX_LS_TOP_URL = "https://www.okx.com/api/v5/rubik/stat/contracts/long-short-acc
 # 首页即自窗口右界(after=end_ms)向后翻，故 12 页约束的是"窗口跨度"(~400 天)而非"现在→窗口"距离；
 # 实际 eval 窗口远小于此，正常不会截断；极端超界返回已采集部分（偏低估，fail-soft）。
 _FUNDING_HISTORY_MAX_PAGES = 12  # 100 结算/页 ≈ 33 天/页
-_LINEAR_QUOTES = {"USDT", "USDC"}   # OKX 线性永续计价
+_LINEAR_QUOTES = {"USDT", "USDC"}   # OKX 线性永续计价（供 binance_derivatives 复用）
 
 
 def _fetch_timeout() -> float:
@@ -49,7 +49,7 @@ def _fetch_max_retries() -> int:
 
 
 def _http_get_json(url: str, params: Optional[dict] = None, headers: Optional[dict] = None) -> object:
-    """GET JSON，复用 CRYPTO_FETCH_* 超时/重试语义（4xx 不重试）。失败抛 requests 异常。"""
+    """GET JSON，复用 CRYPTO_FETCH_* 超时/重试语义（4xx 不重试）。失败抛 requests 异常。供 binance_derivatives 复用。"""
     timeout = _fetch_timeout()
     max_retries = _fetch_max_retries()
     for attempt in range(max_retries + 1):
@@ -130,8 +130,10 @@ def fetch_perp_metrics(base: str, quote: str) -> dict:
         out["long_short_ratio"] = ls
     if lst is not None:
         out["long_short_ratio_top"] = lst
-    if out:
-        out["source"] = "okx"
+    if not out:  # OKX 整组全空（含全部失败）→ 整源降级 Binance（fapi）
+        from data_provider import binance_derivatives as bd  # 延迟 import 防循环（bd 顶层 import 本模块 helpers）
+        return bd.fetch_perp_metrics(base, quote)            # 空时返回 {}，presence-only 契约保持
+    out["source"] = "okx"
     return out
 
 
@@ -246,4 +248,7 @@ def fetch_funding_rate_history(base: str, quote: str, start_ms: int, end_ms: int
         if page_min_ts is None or page_min_ts <= start_ms or len(arr) < 100:
             break
         cursor = int(page_min_ts)
+    if not rates:  # OKX 窗口内无数据/抓取失败 → 整源降级 Binance 同窗口
+        from data_provider import binance_derivatives as bd  # 延迟 import 防循环
+        return bd.fetch_funding_rate_history(base, quote, start_ms, end_ms)
     return rates

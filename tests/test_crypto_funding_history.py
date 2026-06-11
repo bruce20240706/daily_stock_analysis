@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """fetch_funding_rate_history：半开窗口求和/边界、向后分页、降级、超页截断。"""
 import data_provider.crypto_derivatives as cd
+import data_provider.binance_derivatives as bd
 
 
 def _page_fake(settlements):
@@ -61,6 +62,7 @@ def test_exception_fails_soft_to_empty(monkeypatch):
         raise RuntimeError("okx down")
 
     monkeypatch.setattr(cd, "_http_get_json", boom)
+    monkeypatch.setattr(bd, "_http_get_json", boom)  # 双源全挂：防降级分支击穿到真实网络
     assert cd.fetch_funding_rate_history("BTC", "USDT", 0, 10_000) == []
 
 
@@ -74,3 +76,30 @@ def test_max_pages_truncation(monkeypatch):
     rates = cd.fetch_funding_rate_history("BTC", "USDT", start_ms, end_ms)
     assert len(rates) == 1200
     assert len(calls) == 12
+
+
+def test_history_falls_back_to_binance_when_okx_empty(monkeypatch):
+    def okx_boom(*a, **k):
+        raise RuntimeError("okx down")
+    def fake_binance(url, params=None, headers=None):
+        assert "/fapi/v1/fundingRate" in url
+        return [
+            {"fundingTime": "1000", "fundingRate": "0.0001"},
+            {"fundingTime": "2000", "fundingRate": "0.0002"},
+            {"fundingTime": "4000", "fundingRate": "0.0004"},  # == end_ms，半开排除
+        ]
+    monkeypatch.setattr(cd, "_http_get_json", okx_boom)
+    monkeypatch.setattr(bd, "_http_get_json", fake_binance)
+    assert cd.fetch_funding_rate_history("BTC", "USDT", 1000, 4000) == [0.0001, 0.0002]
+
+
+def test_history_no_binance_call_when_okx_non_empty(monkeypatch):
+    bd_calls = {"n": 0}
+    def bd_spy(*a, **k):
+        bd_calls["n"] += 1
+        return []
+    fake, _calls = _page_fake([(2000, 0.02)])
+    monkeypatch.setattr(cd, "_http_get_json", fake)
+    monkeypatch.setattr(bd, "_http_get_json", bd_spy)
+    assert cd.fetch_funding_rate_history("BTC", "USDT", 1000, 4000) == [0.02]
+    assert bd_calls["n"] == 0
