@@ -315,4 +315,24 @@ describe('MarketReviewReportView crypto perp sentiment', () => {
     render(<MarketReviewReportView payload={payload as never} reportLanguage="zh" />);
     expect(screen.queryByText('加密永续情绪')).not.toBeInTheDocument();
   });
+
+  it('renders long/short ratio in perp sentiment card', () => {
+    const payload = {
+      version: 1, kind: 'market_review', region: 'crypto', title: 'Crypto', generatedAt: '2026-06-09',
+      indices: [],
+      perpSentiment: {
+        avgFundingRate: 0.00025,
+        totalOpenInterestUsd: 4000000000,
+        avgLongShortRatio: 1.75,
+        avgLongShortRatioTop: 1.1,
+        coins: [{ symbol: 'ETH/USDT', fundingRate: 0.0003, openInterestUsd: 3000000000, longShortRatio: 2.0 }],
+      },
+    };
+    render(<MarketReviewReportView payload={payload as never} reportLanguage="zh" />);
+    expect(screen.getByText('OI 加权多空比(全市场)')).toBeInTheDocument();
+    expect(screen.getByText('1.75')).toBeInTheDocument();
+    expect(screen.getByText('OI 加权多空比(大户)')).toBeInTheDocument();
+    expect(screen.getByText('1.10')).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes('L/S 2.00'))).toBeInTheDocument();
+  });
 });

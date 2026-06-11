@@ -185,11 +185,14 @@ export interface PerpSentimentCoin {
   symbol: string;
   fundingRate?: number;
   openInterestUsd?: number;
+  longShortRatio?: number;
 }
 
 export interface PerpSentiment {
   avgFundingRate?: number;
   totalOpenInterestUsd?: number;
+  avgLongShortRatio?: number;
+  avgLongShortRatioTop?: number;
   coins?: PerpSentimentCoin[];
 }
 

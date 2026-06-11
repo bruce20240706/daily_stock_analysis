@@ -250,6 +250,8 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   perpSentiment: string;
   avgFundingRate: string;
   totalOpenInterest: string;
+  avgLongShortRatio: string;
+  avgLongShortRatioTop: string;
 }> = {
   zh: {
     reviewSummary: '复盘摘要',
@@ -281,6 +283,8 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     perpSentiment: '加密永续情绪',
     avgFundingRate: 'OI 加权资金费率',
     totalOpenInterest: '总未平仓量',
+    avgLongShortRatio: 'OI 加权多空比(全市场)',
+    avgLongShortRatioTop: 'OI 加权多空比(大户)',
   },
   en: {
     reviewSummary: 'Review Summary',
@@ -312,6 +316,8 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     perpSentiment: 'Perpetual Sentiment',
     avgFundingRate: 'OI-weighted Funding',
     totalOpenInterest: 'Total Open Interest',
+    avgLongShortRatio: 'OI-weighted L/S (Market)',
+    avgLongShortRatioTop: 'OI-weighted L/S (Top)',
   },
 };
 
@@ -604,6 +610,18 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                           <p className="mt-1 font-semibold text-foreground">${marketData.perpSentiment.totalOpenInterestUsd.toLocaleString()}</p>
                         </div>
                       ) : null}
+                      {marketData.perpSentiment.avgLongShortRatio !== undefined ? (
+                        <div className="rounded-lg border border-subtle p-3">
+                          <p className="label-uppercase">{marketReviewText.avgLongShortRatio}</p>
+                          <p className="mt-1 font-semibold text-foreground">{marketData.perpSentiment.avgLongShortRatio.toFixed(2)}</p>
+                        </div>
+                      ) : null}
+                      {marketData.perpSentiment.avgLongShortRatioTop !== undefined ? (
+                        <div className="rounded-lg border border-subtle p-3">
+                          <p className="label-uppercase">{marketReviewText.avgLongShortRatioTop}</p>
+                          <p className="mt-1 font-semibold text-foreground">{marketData.perpSentiment.avgLongShortRatioTop.toFixed(2)}</p>
+                        </div>
+                      ) : null}
                     </div>
                     {marketData.perpSentiment.coins && marketData.perpSentiment.coins.length > 0 ? (
                       <ul className="mt-2 space-y-1 text-sm text-secondary-text">
@@ -612,6 +630,7 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                             {c.symbol}
                             {c.fundingRate !== undefined ? ` · ${(c.fundingRate * 100).toFixed(4)}%` : ''}
                             {c.openInterestUsd !== undefined ? ` · $${c.openInterestUsd.toLocaleString()}` : ''}
+                            {c.longShortRatio !== undefined ? ` · L/S ${c.longShortRatio.toFixed(2)}` : ''}
                           </li>
                         ))}
                       </ul>
