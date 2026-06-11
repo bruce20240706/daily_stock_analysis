@@ -132,7 +132,7 @@ class BacktestService:
 
                 is_perp = is_perp_code(analysis.code)
                 funding_cost_pct = 0.0
-                # 仅在 forward_bars 足量（不会落 insufficient_data）时才发起 OKX 资金费抓取，避免对将被丢弃的行做无谓网络 I/O
+                # 仅在 forward_bars 足量（不会落 insufficient_data）时才发起资金费抓取（OKX 主源，Binance fapi 兜底），避免对将被丢弃的行做无谓网络 I/O
                 if is_perp and len(forward_bars) >= int(eval_window_days) and getattr(config, "crypto_derivatives_enabled", True):
                     funding_cost_pct = self._compute_perp_funding_cost_pct(
                         code=analysis.code,

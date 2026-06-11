@@ -1,7 +1,7 @@
 """crypto 永续合约指标（纯抓取，免 API Key）。
 
 分层纪律：本模块不 import src.*、不碰 DB。仅读取 CRYPTO_FETCH_TIMEOUT_SECONDS /
-CRYPTO_FETCH_MAX_RETRIES（与 crypto_base 一致）。数据源：OKX 公共接口（永续 SWAP）。
+CRYPTO_FETCH_MAX_RETRIES（与 crypto_base 一致）。数据源：OKX 公共接口（永续 SWAP）主源；整组不可得时整源降级 Binance fapi（见 binance_derivatives）。
 """
 import logging
 import os
@@ -99,7 +99,7 @@ def _okx_ratio(url: str, params: dict) -> Optional[float]:
 
 
 def fetch_perp_metrics(base: str, quote: str) -> dict:
-    """spot BASE/QUOTE → OKX 永续 BASE-QUOTE-SWAP；并发拉 5 个公共接口；presence-only；失败/不支持 → {}。"""
+    """spot BASE/QUOTE → OKX 永续 BASE-QUOTE-SWAP；并发拉 5 个公共接口；presence-only；OKX 全空时整源降级 Binance fapi；失败/不支持 → {}。"""
     base = (base or "").upper()
     quote = (quote or "").upper()
     if not base or quote not in _LINEAR_QUOTES:
@@ -218,7 +218,7 @@ def fetch_perp_market_snapshot(symbols: list) -> dict:
 
 def fetch_funding_rate_history(base: str, quote: str, start_ms: int, end_ms: int) -> list:
     """OKX 永续 BASE-QUOTE-SWAP 在半开窗口 [start_ms, end_ms) 内的资金费率列表（fundingRate 小数）。
-    自 after=end_ms 起向后分页（after=更早），按窗口过滤；非线性计价/参数非法/无数据 → []。fail-soft。"""
+    自 after=end_ms 起向后分页（after=更早），按窗口过滤；OKX 空结果时整源降级 Binance fapi 同窗口；非线性计价/参数非法/无数据 → []。fail-soft。"""
     base = (base or "").upper()
     quote = (quote or "").upper()
     if not base or quote not in _LINEAR_QUOTES:
