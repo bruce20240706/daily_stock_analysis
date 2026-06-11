@@ -58,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] crypto 永续合约回测纳入资金费成本与做空盈亏（1x，additive，零 schema，复用 crypto_derivatives_enabled；现货/股票回测不变）
 - [新功能] crypto 永续新增多空比指标（全市场账户 + 大户，单股/复盘 prompt 与 OI 加权聚合，经透传随 API 返回并在 Web 卡片渲染，presence-only，默认开）
 - [新功能] Web 回测页新增「仓位/模拟」列：透出做多/做空/空仓、资金费折算后的模拟收益与出场原因（perp 做空回测结果首次用户可见，旧数据降级显示 --）
+- [新功能] crypto 衍生品抓取新增 Binance fapi 整源兜底（OKX 全空才降级，source 标实际来源并动态进 prompt；回测资金费历史同享；新增 BINANCE_FAPI_BASE_URL 可换镜像，默认官方域名）
 
 ## [3.20.0] - 2026-06-03
 

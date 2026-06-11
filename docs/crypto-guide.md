@@ -79,7 +79,7 @@ crypto symbol 走与股票**相同**的回测流程，无需独立配置或日�
 perp 标的（`BASE/QUOTE:PERP`）回测在现货流程之上叠加两项永续机制（固定 1x，无杠杆/强平）：
 
 - **做空盈亏**：看空建议记 `position="short"`，持有至窗口末，`simulated_return_pct = (入场−出场)/入场×100 + 资金费`（跌则盈）。做空不评估 TP/SL（analysis 价位为多头框架，反向套用会虚构精度）。
-- **资金费成本**：按真实持有窗口（入场=起始 bar 收盘 → 出场=末 bar 收盘，≈ `eval_window_days×3` 个 8h 结算）对 OKX `funding-rate-history` 求和；多头 `−资金费`、空头 `+资金费`（正费率＝多头付空头）。
+- **资金费成本**：按真实持有窗口（入场=起始 bar 收盘 → 出场=末 bar 收盘，≈ `eval_window_days×3` 个 8h 结算）对 OKX `funding-rate-history` 求和；多头 `−资金费`、空头 `+资金费`（正费率＝多头付空头）。OKX 拉不到时自动改用 Binance fapi 同窗口（同 `[start, end)` 半开语义）。
 - **门控/降级**：资金费抓取复用 `CRYPTO_DERIVATIVES_ENABLED`（默认开），抓取失败或关闭时资金费记 0、方向盈亏照常；现货/股票回测不受影响。
 - **Web 透出**：回测页结果表「仓位/模拟」列展示仓位（做多/做空/空仓）、资金费折算后的模拟收益与出场原因（做空恒为窗口期满；空仓显示"无交易"）；旧记录无仓位字段时该列显示 `--`。
 
@@ -237,7 +237,7 @@ crypto 大盘复盘包含以下三个部分：
 - **presence-only**：任一指标失败即省略；全失败 / 非 USDT(USDC) 计价 / 禁用 → 不注入，分析照常。
 - 每分析一个加密标的额外拉取一次；注入 LLM 分析 prompt，并结构化透出到报告 API/Web（见下文「报告透出」）。
 - 仅加密标的触发；A股/港股/美股不受影响。
-- 后续子项目（未做）：Binance fapi 备援（本环境 451）。
+- 数据源：OKX 主源；OKX 整组不可得时自动整源降级 **Binance fapi**（`source` 字段标实际来源，分析 prompt 标题同步显示实际来源；Binance 路 OI 仅 USD 口径、无张数）。基址可经 `BINANCE_FAPI_BASE_URL` 换镜像（仅备援路径使用，与现货 `BINANCE_BASE_URL` 互不影响）。
 
 ### 报告透出
 
