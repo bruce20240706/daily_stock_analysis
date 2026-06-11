@@ -289,10 +289,10 @@ const settingsHelpZhCN: SettingsHelpMap = {
   },
   'settings.data_source.crypto_derivatives': {
     title: '加密永续合约指标',
-    summary: '分析加密现货标的时，注入对应永续合约的资金费率、标记价、未平仓量（来自 OKX 公开 API），供 LLM 判断杠杆情绪。',
+    summary: '分析加密现货标的时，注入对应永续合约的资金费率、标记价、未平仓量与多空比（OKX 主源，整组不可得时自动降级 Binance fapi），供 LLM 判断杠杆情绪。',
     usage: 'CRYPTO_DERIVATIVES_ENABLED 开启或关闭（默认开启）。',
     valueNotes: [
-      '数据源为 OKX 永续公开接口（funding-rate / mark-price / open-interest），免费、无需 API Key，三路并发拉取。',
+      '数据源：OKX 永续公开接口五路并发（funding-rate / mark-price / open-interest / 两路多空比）；OKX 整组不可得时整源降级 Binance fapi（source 标实际来源）。免费、无需 API Key。',
       '每分析一个加密标的会额外拉取一次；任一指标失败自动省略，不影响分析其余部分。',
     ],
     impact: ['影响加密现货分析 prompt 中是否包含「合约市场指标」块。'],
@@ -1275,10 +1275,10 @@ const settingsHelpEnUS: SettingsHelpMap = {
   },
   'settings.data_source.crypto_derivatives': {
     title: 'Crypto Derivatives (Perpetual) Metrics',
-    summary: 'Injects the matching perpetual funding rate, mark price, and open interest (from OKX public APIs) into the crypto spot analysis prompt for leverage-sentiment context.',
+    summary: 'Injects the matching perpetual funding rate, mark price, open interest, and long/short ratios (OKX primary; falls back to Binance fapi whole-source when OKX yields nothing) into the crypto spot analysis prompt for leverage-sentiment context.',
     usage: 'CRYPTO_DERIVATIVES_ENABLED toggles the feature (enabled by default).',
     valueNotes: [
-      'Source is OKX perpetual public endpoints (funding-rate / mark-price / open-interest); free, no API key, fetched concurrently.',
+      'Source: five concurrent OKX perpetual public endpoints (funding-rate / mark-price / open-interest / two long-short ratios); falls back to Binance fapi as a whole source when OKX yields nothing (source field marks the actual origin). Free, no API key.',
       'Adds one fetch per analyzed crypto symbol; any failed metric is omitted without affecting the rest of the analysis.',
     ],
     impact: ['Affects whether the crypto spot analysis prompt includes a "contract market metrics" block.'],

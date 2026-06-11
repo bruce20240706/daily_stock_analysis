@@ -938,6 +938,8 @@ class Config:
     crypto_derivatives_enabled: bool = True
     # Binance 公共行情 Base URL（地区受限可切 https://data-api.binance.vision）
     binance_base_url: str = "https://api.binance.com"
+    # Binance fapi（衍生品备援）Base URL：仅 OKX 整组不可得时使用；受限地区可换镜像
+    binance_fapi_base_url: str = "https://fapi.binance.com"
     # 实时行情缓存时间（秒）
     realtime_cache_ttl: int = 600
     # 熔断器冷却时间（秒）
@@ -1778,6 +1780,7 @@ class Config:
             crypto_market_indicators_enabled=os.getenv('CRYPTO_MARKET_INDICATORS_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on'),
             crypto_derivatives_enabled=os.getenv('CRYPTO_DERIVATIVES_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on'),
             binance_base_url=os.getenv('BINANCE_BASE_URL', 'https://api.binance.com'),
+            binance_fapi_base_url=os.getenv('BINANCE_FAPI_BASE_URL', 'https://fapi.binance.com'),
             realtime_cache_ttl=parse_env_int(os.getenv('REALTIME_CACHE_TTL'), 600, field_name='REALTIME_CACHE_TTL', minimum=0),
             circuit_breaker_cooldown=parse_env_int(os.getenv('CIRCUIT_BREAKER_COOLDOWN'), 300, field_name='CIRCUIT_BREAKER_COOLDOWN', minimum=0),
             enable_fundamental_pipeline=os.getenv('ENABLE_FUNDAMENTAL_PIPELINE', 'true').lower() == 'true',

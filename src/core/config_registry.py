@@ -3884,7 +3884,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "CRYPTO_DERIVATIVES_ENABLED": {
         "title": "Crypto Derivatives (Perpetual) Metrics",
-        "description": "Enable injecting matching perpetual funding rate, mark price, and open interest into the crypto spot analysis prompt (sourced from OKX public APIs).",
+        "description": "Enable injecting matching perpetual funding rate, mark price, and open interest into the crypto spot analysis prompt (OKX primary source; falls back to Binance fapi whole-source when OKX yields nothing).",
         "category": "data_source",
         "data_type": "boolean",
         "ui_control": "switch",
