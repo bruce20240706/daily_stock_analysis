@@ -48,6 +48,27 @@ const basePerformance = {
   diagnostics: {},
 };
 
+const perpRowBase = {
+  analysisHistoryId: 201,
+  code: 'BTC/USDT:PERP',
+  stockName: 'BTC 永续',
+  analysisDate: '2026-05-20',
+  evalWindowDays: 10,
+  engineVersion: 'test-engine',
+  evalStatus: 'completed',
+  operationAdvice: '卖出',
+  trendPrediction: '看空',
+  actualMovement: 'down',
+  actualReturnPct: -5.2,
+  directionExpected: 'down',
+  directionCorrect: true,
+  outcome: 'win',
+};
+
+function mockSingleRow(row: Record<string, unknown>) {
+  mockGetResults.mockResolvedValue({ total: 1, page: 1, limit: 20, items: [row] });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetOverallPerformance.mockResolvedValue(basePerformance);
@@ -214,5 +235,64 @@ describe('BacktestPage', () => {
     expect(screen.getByText('实际表现')).toBeInTheDocument();
     expect(screen.getByText('准确性')).toBeInTheDocument();
     expect(screen.getByText('1 日验证模式会用下一个交易日收盘表现校验 AI 预测。')).toBeInTheDocument();
+  });
+
+  it('renders short position with funding-adjusted simulated return and exit reason', async () => {
+    mockSingleRow({ ...perpRowBase, positionRecommendation: 'short', simulatedReturnPct: 5.4, simulatedExitReason: 'window_end_short' });
+    render(<BacktestPage />);
+
+    expect(await screen.findByText('做空')).toBeInTheDocument();
+    expect(screen.getByText('仓位/模拟')).toBeInTheDocument();      // 新表头
+    const ret = screen.getByText('5.4%');                           // 模拟收益（正，绿色）
+    expect(ret).toHaveClass('text-success');
+    expect(screen.getByText('窗口期满(空)')).toBeInTheDocument();
+    expect(screen.getByText('-5.2%')).toBeInTheDocument();          // 价格列红负与结果绿共存的核心反差场景
+  });
+
+  it('renders long position with take-profit exit', async () => {
+    mockSingleRow({ ...perpRowBase, directionExpected: 'up', actualMovement: 'up', actualReturnPct: 8.0, positionRecommendation: 'long', simulatedReturnPct: 10.5, simulatedExitReason: 'take_profit' });
+    render(<BacktestPage />);
+
+    expect(await screen.findByText('做多')).toBeInTheDocument();    // 此 fixture 中唯一（方向列为 '看涨'）
+    expect(screen.getByText('10.5%')).toBeInTheDocument();
+    expect(screen.getByText('止盈')).toBeInTheDocument();
+  });
+
+  it('renders cash position with zero return and no-trade reason', async () => {
+    mockSingleRow({ ...perpRowBase, directionExpected: 'flat', actualMovement: 'flat', actualReturnPct: 0.3, positionRecommendation: 'cash', simulatedReturnPct: 0.0, simulatedExitReason: 'cash' });
+    render(<BacktestPage />);
+
+    expect(await screen.findByText('空仓')).toBeInTheDocument();
+    const ret = screen.getByText('0.0%');
+    expect(ret).toHaveClass('text-secondary-text');                 // 0 中性色：真实零收益，非缺数据
+    expect(screen.getByText('无交易')).toBeInTheDocument();         // 引擎 cash 行出场原因为 'cash'
+  });
+
+  it('renders -- without badge when positionRecommendation is absent', async () => {
+    mockSingleRow({ ...perpRowBase });                              // 无 positionRecommendation
+    render(<BacktestPage />);
+
+    await screen.findByText('BTC/USDT:PERP');
+    expect(screen.queryByText('做空')).not.toBeInTheDocument();
+    expect(screen.queryByText('做多')).not.toBeInTheDocument();
+    expect(screen.queryByText('空仓')).not.toBeInTheDocument();
+    expect(screen.queryByText('无交易')).not.toBeInTheDocument();
+  });
+
+  it('renders badge but -- return when simulatedReturnPct is missing', async () => {
+    mockSingleRow({ ...perpRowBase, directionExpected: 'up', positionRecommendation: 'long', simulatedExitReason: 'window_end' });
+    render(<BacktestPage />);
+
+    expect(await screen.findByText('做多')).toBeInTheDocument();
+    expect(screen.getByText('窗口期满')).toBeInTheDocument();       // badge 照渲、收益位为 pct(null)='--'
+    expect(screen.getByText('窗口期满').closest('td')).toHaveTextContent('--');  // 收益位缺值渲染 --（锁同一单元格）
+  });
+
+  it('echoes unknown exit reason verbatim', async () => {
+    mockSingleRow({ ...perpRowBase, positionRecommendation: 'short', simulatedReturnPct: 1.0, simulatedExitReason: 'some_future_reason' });
+    render(<BacktestPage />);
+
+    expect(await screen.findByText('做空')).toBeInTheDocument();
+    expect(screen.getByText('some_future_reason')).toBeInTheDocument();  // labelFromMap 未知值原样回显
   });
 });

@@ -67,6 +67,20 @@ const DIRECTION_EXPECTED_LABELS: Record<string, string> = {
   flat: '持平',
 };
 
+const POSITION_LABELS: Record<string, string> = {
+  long: '做多',
+  short: '做空',
+  cash: '空仓',
+};
+
+const EXIT_REASON_LABELS: Record<string, string> = {
+  take_profit: '止盈',
+  stop_loss: '止损',
+  window_end: '窗口期满',
+  window_end_short: '窗口期满(空)',
+  cash: '无交易',
+};
+
 function labelFromMap(value: string | null | undefined, labels: Record<string, string>): string {
   if (!value) return '--';
   return labels[value] ?? value;
@@ -110,6 +124,19 @@ function actualMovementBadge(movement?: string | null) {
       return <Badge variant="warning">{MOVEMENT_LABELS.flat}</Badge>;
     default:
       return <Badge variant="default">--</Badge>;
+  }
+}
+
+function positionBadge(position: string) {
+  switch (position) {
+    case 'long':
+      return <Badge variant="success">{POSITION_LABELS.long}</Badge>;
+    case 'short':
+      return <Badge variant="danger">{POSITION_LABELS.short}</Badge>;
+    case 'cash':
+      return <Badge variant="default">{POSITION_LABELS.cash}</Badge>;
+    default:
+      return <Badge variant="default">{position}</Badge>;
   }
 }
 
@@ -590,7 +617,7 @@ const BacktestPage: React.FC = () => {
                 <span className="backtest-table-scroll-hint">小屏幕可横向滚动</span>
               </div>
               <div className="backtest-table-wrapper">
-                <table className="backtest-table min-w-[900px] w-full text-sm">
+                <table className="backtest-table min-w-[1020px] w-full text-sm">
                   <thead className="backtest-table-head">
                     <tr className="text-left">
                       <th className="backtest-table-head-cell">股票</th>
@@ -600,6 +627,7 @@ const BacktestPage: React.FC = () => {
                       <th className="backtest-table-head-cell">
                         {showNextDayActualColumns ? '实际表现' : '窗口收益'}
                       </th>
+                      <th className="backtest-table-head-cell">仓位/模拟</th>
                       <th className="backtest-table-head-cell">
                         {showNextDayActualColumns ? '准确性' : '方向匹配'}
                       </th>
@@ -647,6 +675,27 @@ const BacktestPage: React.FC = () => {
                               {pct(row.actualReturnPct)}
                             </span>
                           </div>
+                        </td>
+                        <td className="backtest-table-cell">
+                          {row.positionRecommendation ? (
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                {positionBadge(row.positionRecommendation)}
+                                <span className={
+                                  row.simulatedReturnPct != null
+                                    ? row.simulatedReturnPct > 0 ? 'text-success' : row.simulatedReturnPct < 0 ? 'text-danger' : 'text-secondary-text'
+                                    : 'text-muted-text'
+                                }>
+                                  {pct(row.simulatedReturnPct)}
+                                </span>
+                              </div>
+                              <span className="text-xs text-muted-text">
+                                {labelFromMap(row.simulatedExitReason, EXIT_REASON_LABELS)}
+                              </span>
+                            </div>
+                          ) : (
+                            '--'
+                          )}
                         </td>
                         <td className="backtest-table-cell">
                           <span className="flex items-center gap-2">
