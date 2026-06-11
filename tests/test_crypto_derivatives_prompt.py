@@ -24,3 +24,20 @@ def test_prompt_includes_contract_block_when_present():
 def test_prompt_omits_contract_block_when_absent():
     prompt = a._format_prompt(dict(_BASE_CTX), "BTC/USDT", report_language="zh")
     assert "合约市场指标" not in prompt
+
+
+def test_prompt_includes_long_short_ratio_rows():
+    ctx = dict(_BASE_CTX)
+    ctx["crypto_contracts"] = {"funding_rate": 0.0001, "long_short_ratio": 1.23, "long_short_ratio_top": 0.85, "source": "okx"}
+    prompt = a._format_prompt(ctx, "BTC/USDT", report_language="zh")
+    assert "多空比(全市场)" in prompt
+    assert "1.23" in prompt
+    assert "多空比(大户)" in prompt
+    assert "0.85" in prompt
+
+
+def test_prompt_omits_long_short_ratio_when_absent():
+    ctx = dict(_BASE_CTX)
+    ctx["crypto_contracts"] = {"funding_rate": 0.0001, "source": "okx"}
+    prompt = a._format_prompt(ctx, "BTC/USDT", report_language="zh")
+    assert "多空比" not in prompt

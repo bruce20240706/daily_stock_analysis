@@ -3009,6 +3009,12 @@ class GeminiAnalyzer:
             fr = contracts.get("funding_rate")
             if fr is not None:
                 rows.append(f"| 资金费率 | {fr * 100:.4f}% | 正=多头付费 / 负=空头付费（约 8h 结算） |")
+            lsr = contracts.get("long_short_ratio")
+            if lsr is not None:
+                rows.append(f"| 多空比(全市场) | {lsr:.2f} | >1 散户偏多 / <1 偏空 |")
+            lsr_top = contracts.get("long_short_ratio_top")
+            if lsr_top is not None:
+                rows.append(f"| 多空比(大户) | {lsr_top:.2f} | 大户账户净多/净空，与散户对比看分歧 |")
             mp = contracts.get("mark_price")
             if mp is not None:
                 rows.append(f"| 标记价 | {self._format_price(mp, crypto=True)} | 永续标记价（与现货价对比看基差） |")
