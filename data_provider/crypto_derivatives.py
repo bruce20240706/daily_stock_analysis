@@ -136,7 +136,7 @@ def fetch_perp_metrics(base: str, quote: str) -> dict:
 
 
 def _perp_row_for_symbol(symbol: str) -> dict:
-    """单个 BASE/QUOTE 现货代码 → {symbol, funding_rate?, open_interest_usd?}；无可用字段/异常 → {}。"""
+    """单个 BASE/QUOTE 现货代码 → {symbol, funding_rate?, open_interest_usd?, long_short_ratio?, long_short_ratio_top?}；无可用字段/异常 → {}。"""
     try:
         base, sep, quote = (symbol or "").upper().partition("/")
         if not sep:
@@ -147,6 +147,10 @@ def _perp_row_for_symbol(symbol: str) -> dict:
             row["funding_rate"] = metrics["funding_rate"]
         if metrics.get("open_interest_usd") is not None:
             row["open_interest_usd"] = metrics["open_interest_usd"]
+        if metrics.get("long_short_ratio") is not None:
+            row["long_short_ratio"] = metrics["long_short_ratio"]
+        if metrics.get("long_short_ratio_top") is not None:
+            row["long_short_ratio_top"] = metrics["long_short_ratio_top"]
         if row:
             row["symbol"] = symbol
         return row
@@ -157,7 +161,7 @@ def _perp_row_for_symbol(symbol: str) -> dict:
 
 def fetch_perp_market_snapshot(symbols: list) -> dict:
     """对一篮子现货代码并发取各自 OKX 永续指标，聚合复盘情绪（presence-only）。
-    OI 加权平均资金费率 + 总未平仓量(USD) + 按 |funding| 降序 top5 明细。无数据 → {}。"""
+    OI 加权平均资金费率 + 总未平仓量(USD) + OI 加权多空比（全市场/大户）+ 按 |funding| 降序 top5 明细。无数据 → {}。"""
     if not symbols:
         return {}
     rows: list = []
@@ -172,6 +176,8 @@ def fetch_perp_market_snapshot(symbols: list) -> dict:
     weighted_den = 0.0
     total_oi = 0.0
     has_oi = False
+    ls_num = ls_den = 0.0       # 全市场多空比 OI 加权
+    lst_num = lst_den = 0.0     # 大户多空比 OI 加权
     for r in rows:
         fr = r.get("funding_rate")
         oi = r.get("open_interest_usd")
@@ -181,10 +187,23 @@ def fetch_perp_market_snapshot(symbols: list) -> dict:
             if fr is not None and oi > 0:
                 weighted_num += fr * oi
                 weighted_den += oi
+            if oi > 0:
+                lsr = r.get("long_short_ratio")
+                if lsr is not None:
+                    ls_num += lsr * oi
+                    ls_den += oi
+                lsrt = r.get("long_short_ratio_top")
+                if lsrt is not None:
+                    lst_num += lsrt * oi
+                    lst_den += oi
     if weighted_den > 0:
         out["avg_funding_rate"] = weighted_num / weighted_den
     if has_oi:
         out["total_open_interest_usd"] = total_oi
+    if ls_den > 0:
+        out["avg_long_short_ratio"] = ls_num / ls_den
+    if lst_den > 0:
+        out["avg_long_short_ratio_top"] = lst_num / lst_den
     coins = sorted(
         rows,
         key=lambda r: abs(r["funding_rate"]) if r.get("funding_rate") is not None else -1.0,
