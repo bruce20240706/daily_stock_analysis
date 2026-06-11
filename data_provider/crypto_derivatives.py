@@ -99,17 +99,20 @@ def _okx_ratio(url: str, params: dict) -> Optional[float]:
 
 
 def fetch_perp_metrics(base: str, quote: str) -> dict:
-    """spot BASE/QUOTE → OKX 永续 BASE-QUOTE-SWAP；并发拉 3 个公共接口；presence-only；失败/不支持 → {}。"""
+    """spot BASE/QUOTE → OKX 永续 BASE-QUOTE-SWAP；并发拉 5 个公共接口；presence-only；失败/不支持 → {}。"""
     base = (base or "").upper()
     quote = (quote or "").upper()
     if not base or quote not in _LINEAR_QUOTES:
         return {}
     inst = f"{base}-{quote}-SWAP"
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    with ThreadPoolExecutor(max_workers=5) as ex:
         f_fr = ex.submit(_okx_first, OKX_FUNDING_URL, {"instId": inst})
         f_mp = ex.submit(_okx_first, OKX_MARK_URL, {"instType": "SWAP", "instId": inst})
         f_oi = ex.submit(_okx_first, OKX_OI_URL, {"instId": inst})
+        f_ls = ex.submit(_okx_ratio, OKX_LS_ACCOUNT_URL, {"ccy": base, "period": "5m"})
+        f_lst = ex.submit(_okx_ratio, OKX_LS_TOP_URL, {"instId": inst, "period": "5m"})
         fr, mp, oi = f_fr.result(), f_mp.result(), f_oi.result()
+        ls, lst = f_ls.result(), f_lst.result()
     out: dict = {}
     fr_v = _to_float(fr.get("fundingRate"))
     if fr_v is not None:
@@ -123,6 +126,10 @@ def fetch_perp_metrics(base: str, quote: str) -> dict:
     oiusd = _to_float(oi.get("oiUsd"))
     if oiusd is not None:
         out["open_interest_usd"] = oiusd
+    if ls is not None:
+        out["long_short_ratio"] = ls
+    if lst is not None:
+        out["long_short_ratio_top"] = lst
     if out:
         out["source"] = "okx"
     return out
