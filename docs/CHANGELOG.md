@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 支持 OKX 永续合约标的（notation BASE/QUOTE:PERP，如 BTC/USDT:PERP）：独立 perp 日线 + 实时 + 自带资金费率/标记价/未平仓量，走完整 crypto 分析链；OKX-only、线性
 - [新功能] crypto 永续合约回测纳入资金费成本与做空盈亏（1x，additive，零 schema，复用 crypto_derivatives_enabled；现货/股票回测不变）
 - [新功能] crypto 永续新增多空比指标（全市场账户 + 大户，单股/复盘 prompt 与 OI 加权聚合，经透传随 API 返回并在 Web 卡片渲染，presence-only，默认开）
+- [新功能] Web 回测页新增「仓位/模拟」列：透出做多/做空/空仓、资金费折算后的模拟收益与出场原因（perp 做空回测结果首次用户可见，旧数据降级显示 --）
 
 ## [3.20.0] - 2026-06-03
 
