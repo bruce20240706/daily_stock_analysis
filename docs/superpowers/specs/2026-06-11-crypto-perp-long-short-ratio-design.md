@@ -192,7 +192,8 @@ def _okx_ratio(url: str, params: dict) -> Optional[float]:
 
 - **门控**：单股经 `CryptoDerivativesService.collect`（已判 `crypto_derivatives_enabled`）；复盘经 `CryptoDerivativesReviewService.collect`（已判 enabled + region）。多空比随 `fetch_perp_metrics`/`fetch_perp_market_snapshot` 流入，**无需新增门控**。
 - **契约**：纯追加 dict 字段；下游 `crypto_contracts` / 复盘 payload 的消费方读取靠 `.get(...)`，旧字段全保留，向后兼容。
-- **零改动面**：DB schema、`evaluate_single`、回测 service、`.env.example`、API/Schema、Web/Desktop、`analysis_tools.py`。
+- **零改动面**：DB schema、`evaluate_single`、回测 service、`.env.example`、`analysis_tools.py`。
+- **更正（实施期发现）**：原 spec 称 API/Schema、Web/Desktop 零改动，不准确——结构化 payload（`crypto_contracts` / `perp_sentiment`）为整 dict 透传，新字段经前端 `toCamelCase` 增量进入 API 响应（无 schema 改动，向后兼容）；Web 单股卡片与复盘卡片已同步渲染两个比值（实施计划 Task 7/8）。
 
 ## 6. 测试计划
 
@@ -221,6 +222,8 @@ def _okx_ratio(url: str, params: dict) -> Optional[float]:
 - **回滚**：纯追加改动，按提交逐个 revert 即可；无数据迁移、无契约破坏，回滚后旧行为字节级恢复。
 
 ## 9. 未验证假设（实施/验证阶段确认）
+
+> **已于 2026-06-11 终审在线实证关闭**：两个 rubik 端点在本环境可达，返回 2 元行 `[ts, ratio]`、按时间**新→旧**排序（`data[0]` 即最新，5m 颗粒），`_okx_ratio` 取 `data[0][1]` 语义正确。以下保留原假设清单备查。
 
 - OKX rubik 端点在本环境可达（funding/mark/OI 已通，预计同样可达；不可达则 presence-only 自动缺省，离线测试用 monkeypatch 不依赖网络）。
 - 大户端点 `long-short-account-ratio-contract-top-trader` 返回结构与全市场端点同为 `data:[[ts, ratio], ...]`（2 元行）。若实际为多元行，`_okx_ratio` 取索引 1 仍为比值；如不符，验证阶段据真实样例修正索引。

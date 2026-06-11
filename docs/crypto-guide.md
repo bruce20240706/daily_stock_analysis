@@ -199,7 +199,7 @@ crypto 大盘复盘包含以下三个部分：
 
 `CRYPTO_DERIVATIVES_ENABLED=true`（默认开启）时，crypto 大盘复盘对 `CRYPTO_MARKET_REVIEW_SYMBOLS` 篮子并发拉取各币 OKX 永续指标并聚合（presence-only）：
 
-- OI 加权平均资金费率、总未平仓量(USD)、按 |资金费率| 降序的 top5 明细。
+- OI 加权平均资金费率、总未平仓量(USD)、OI 加权多空比（全市场/大户）、按 |资金费率| 降序的 top5 明细（明细含各币多空比）。
 - 注入复盘 prompt（"## 加密永续情绪"事实块）+ 结构化 `market_review_payload.perp_sentiment` + Web 复盘视图「加密永续情绪」卡片。
 - 复用 `CRYPTO_DERIVATIVES_ENABLED` 与复盘篮子，无新增配置；非 crypto/禁用/无数据 → 不聚合，复盘照常。
 
@@ -229,8 +229,10 @@ crypto 大盘复盘包含以下三个部分：
 | 资金费率 | OKX `/public/funding-rate` | 正=多头付费 / 负=空头付费（约 8h 结算） |
 | 标记价 | OKX `/public/mark-price` | 与现货价对比看基差 |
 | 未平仓量(OI / USD) | OKX `/public/open-interest` | 持仓规模与杠杆活跃度 |
+| 多空比(全市场) | OKX `/rubik/stat/contracts/long-short-account-ratio`（`ccy` 维度） | 全市场（散户）账户净多/净空，>1 偏多 |
+| 多空比(大户) | OKX `/rubik/stat/contracts/long-short-account-ratio-contract-top-trader`（`instId` 维度） | 大户账户多空比，与全市场对比看分歧 |
 
-- 免费、无需 API Key；三路并发；超时/重试复用 `CRYPTO_FETCH_TIMEOUT_SECONDS` / `CRYPTO_FETCH_MAX_RETRIES`。
+- 免费、无需 API Key；五路并发；超时/重试复用 `CRYPTO_FETCH_TIMEOUT_SECONDS` / `CRYPTO_FETCH_MAX_RETRIES`。
 - **presence-only**：任一指标失败即省略；全失败 / 非 USDT(USDC) 计价 / 禁用 → 不注入，分析照常。
 - 每分析一个加密标的额外拉取一次；注入 LLM 分析 prompt，并结构化透出到报告 API/Web（见下文「报告透出」）。
 - 仅加密标的触发；A股/港股/美股不受影响。
@@ -240,8 +242,8 @@ crypto 大盘复盘包含以下三个部分：
 
 永续指标除注入分析 prompt 外，也会 presence-only 透出到结构化报告：
 
-- API：`AnalysisReport.details.crypto_contracts`（字段 `funding_rate` / `mark_price` / `open_interest` / `open_interest_usd` / `source`，缺省省略）。
-- Web：分析报告页「合约市场指标」卡片（`ReportCryptoMetrics`），逐字段 presence-only，无数据则整卡不渲染。
+- API：`AnalysisReport.details.crypto_contracts`（字段 `funding_rate` / `mark_price` / `open_interest` / `open_interest_usd` / `long_short_ratio` / `long_short_ratio_top` / `source`，缺省省略）。复盘 `market_review_payload.perp_sentiment` 同步新增聚合字段 `avg_long_short_ratio` / `avg_long_short_ratio_top` 与 per-coin `long_short_ratio`（presence-only，经透传随 API 返回）。
+- Web：分析报告页「合约市场指标」卡片（`ReportCryptoMetrics`）与复盘「加密永续情绪」卡片，均已同步渲染多空比（全市场/大户），逐字段 presence-only，无数据则整卡不渲染。
 - 依赖 `SAVE_CONTEXT_SNAPSHOT=true`（默认开）——透出从持久化的分析快照读取；关闭快照持久化时不透出。与 `CRYPTO_DERIVATIVES_ENABLED` 联动：上游关闭则无数据可透出。
 
 ## 9. 已知限制（后续阶段）
