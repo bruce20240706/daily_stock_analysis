@@ -41,3 +41,18 @@ def test_prompt_omits_long_short_ratio_when_absent():
     ctx["crypto_contracts"] = {"funding_rate": 0.0001, "source": "okx"}
     prompt = a._format_prompt(ctx, "BTC/USDT", report_language="zh")
     assert "多空比" not in prompt
+
+
+def test_prompt_contract_source_dynamic_binance():
+    ctx = dict(_BASE_CTX)
+    ctx["crypto_contracts"] = {"funding_rate": 0.0001, "source": "binance"}
+    prompt = a._format_prompt(ctx, "BTC/USDT", report_language="zh")
+    assert "来源 BINANCE" in prompt
+    assert "来源 OKX" not in prompt
+
+
+def test_prompt_contract_source_defaults_to_okx():
+    ctx = dict(_BASE_CTX)
+    ctx["crypto_contracts"] = {"funding_rate": 0.0001}   # 无 source（防御：理论上抓取层总会带）
+    prompt = a._format_prompt(ctx, "BTC/USDT", report_language="zh")
+    assert "来源 OKX" in prompt

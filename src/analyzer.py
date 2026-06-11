@@ -3027,8 +3027,9 @@ class GeminiAnalyzer:
                 rows.append(f"| 未平仓量(OI) | {joined} | 持仓规模与杠杆活跃度 |")
             if rows:
                 rows_text = "\n".join(rows)
+                src_label = (contracts.get("source") or "okx").upper()
                 prompt += f"""
-### 合约市场指标（永续，来源 OKX）
+### 合约市场指标（永续，来源 {src_label}）
 | 指标 | 数值 | 含义 |
 |------|------|------|
 {rows_text}
