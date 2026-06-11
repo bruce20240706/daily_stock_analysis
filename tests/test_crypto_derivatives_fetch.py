@@ -54,3 +54,24 @@ def test_fetch_perp_metrics_all_fail_returns_empty(monkeypatch):
         raise RuntimeError("down")
     monkeypatch.setattr(cd, "_http_get_json", boom)
     assert cd.fetch_perp_metrics("BTC", "USDT") == {}
+
+
+def test_okx_ratio_parses_latest_row(monkeypatch):
+    monkeypatch.setattr(
+        cd, "_http_get_json",
+        lambda url, params=None, headers=None: {"code": "0", "data": [["1700000300000", "1.23"], ["1700000000000", "1.10"]]},
+    )
+    assert abs(cd._okx_ratio(cd.OKX_LS_ACCOUNT_URL, {"ccy": "BTC", "period": "5m"}) - 1.23) < 1e-12
+
+
+def test_okx_ratio_structural_anomalies_return_none(monkeypatch):
+    for payload in [{}, {"data": None}, {"data": []}, {"data": [["onlyts"]]}, {"data": "x"}, {"data": [123]}, {"data": [["ts", "abc"]]}]:
+        monkeypatch.setattr(cd, "_http_get_json", lambda url, params=None, headers=None, p=payload: p)
+        assert cd._okx_ratio(cd.OKX_LS_TOP_URL, {}) is None
+
+
+def test_okx_ratio_http_failure_returns_none(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("down")
+    monkeypatch.setattr(cd, "_http_get_json", boom)
+    assert cd._okx_ratio(cd.OKX_LS_ACCOUNT_URL, {}) is None

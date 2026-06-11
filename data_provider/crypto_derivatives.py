@@ -16,6 +16,8 @@ OKX_FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate"
 OKX_MARK_URL = "https://www.okx.com/api/v5/public/mark-price"
 OKX_OI_URL = "https://www.okx.com/api/v5/public/open-interest"
 OKX_FUNDING_HISTORY_URL = "https://www.okx.com/api/v5/public/funding-rate-history"
+OKX_LS_ACCOUNT_URL = "https://www.okx.com/api/v5/rubik/stat/contracts/long-short-account-ratio"
+OKX_LS_TOP_URL = "https://www.okx.com/api/v5/rubik/stat/contracts/long-short-account-ratio-contract-top-trader"
 # 首页即自窗口右界(after=end_ms)向后翻，故 12 页约束的是"窗口跨度"(~400 天)而非"现在→窗口"距离；
 # 实际 eval 窗口远小于此，正常不会截断；极端超界返回已采集部分（偏低估，fail-soft）。
 _FUNDING_HISTORY_MAX_PAGES = 12  # 100 结算/页 ≈ 33 天/页
@@ -81,6 +83,19 @@ def _okx_first(url: str, params: dict) -> dict:
     if isinstance(arr, list) and arr and isinstance(arr[0], dict):
         return arr[0]
     return {}
+
+
+def _okx_ratio(url: str, params: dict) -> Optional[float]:
+    """GET OKX rubik 多空比端点，取最新一行 [ts, ratio] 的比值；失败/空/结构异常 → None（fail-soft）。"""
+    try:
+        data = _http_get_json(url, params)
+    except Exception as e:
+        logger.warning("[多空比] %s 抓取失败: %s", url, e)
+        return None
+    arr = data.get("data") if isinstance(data, dict) else None
+    if isinstance(arr, list) and arr and isinstance(arr[0], (list, tuple)) and len(arr[0]) >= 2:
+        return _to_float(arr[0][1])
+    return None
 
 
 def fetch_perp_metrics(base: str, quote: str) -> dict:
