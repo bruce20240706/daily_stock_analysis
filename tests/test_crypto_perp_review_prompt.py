@@ -66,3 +66,36 @@ def test_crypto_get_perp_sentiment_uses_service(monkeypatch):
     )
     a = MarketAnalyzer(region="crypto")
     assert a._get_crypto_perp_sentiment() == {"avg_funding_rate": 0.0001}
+
+
+def test_perp_prompt_block_zh_long_short_ratio():
+    a = MarketAnalyzer(region="crypto")
+    perp = {
+        "avg_funding_rate": 0.00025,
+        "avg_long_short_ratio": 1.75,
+        "avg_long_short_ratio_top": 1.10,
+        "coins": [{"symbol": "ETH/USDT", "funding_rate": 0.0003, "open_interest_usd": 3000.0, "long_short_ratio": 2.0}],
+    }
+    block = a._get_crypto_perp_sentiment_prompt_block(perp, "zh")
+    assert "OI 加权多空比(全市场)：1.75" in block
+    assert "OI 加权多空比(大户)：1.10" in block
+    assert "多空比 2.00" in block  # per-coin 全市场比值
+
+
+def test_perp_prompt_block_en_long_short_ratio():
+    a = MarketAnalyzer(region="crypto")
+    perp = {
+        "avg_long_short_ratio": 1.75,
+        "avg_long_short_ratio_top": 1.10,
+        "coins": [{"symbol": "ETH/USDT", "funding_rate": 0.0003, "open_interest_usd": 3000.0, "long_short_ratio": 2.0}],
+    }
+    block = a._get_crypto_perp_sentiment_prompt_block(perp, "en")
+    assert "Market long/short ratio (OI-weighted): 1.75" in block
+    assert "Top-trader long/short ratio (OI-weighted): 1.10" in block
+    assert "L/S 2.00" in block
+
+
+def test_perp_prompt_block_omits_long_short_ratio_when_absent():
+    a = MarketAnalyzer(region="crypto")
+    block = a._get_crypto_perp_sentiment_prompt_block(PERP, "zh")  # 模块常量 PERP 无 ls 字段
+    assert "多空比" not in block

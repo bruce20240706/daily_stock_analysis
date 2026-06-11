@@ -567,6 +567,12 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 parts.append(f"- OI-weighted funding rate: {avg * 100:.4f}%")
             if toi is not None:
                 parts.append(f"- Total open interest: ${toi:,.0f}")
+            lsr = perp.get("avg_long_short_ratio")
+            if lsr is not None:
+                parts.append(f"- Market long/short ratio (OI-weighted): {lsr:.2f}")
+            lsr_top = perp.get("avg_long_short_ratio_top")
+            if lsr_top is not None:
+                parts.append(f"- Top-trader long/short ratio (OI-weighted): {lsr_top:.2f}")
             for c in coins:
                 sym = c.get("symbol")
                 if not sym:
@@ -575,7 +581,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 oi = c.get("open_interest_usd")
                 fr_txt = f"funding {fr * 100:.4f}%" if fr is not None else "funding n/a"
                 oi_txt = f", OI ${oi:,.0f}" if oi is not None else ""
-                parts.append(f"  - {sym}: {fr_txt}{oi_txt}")
+                lsr_c = c.get("long_short_ratio")
+                ls_txt = f", L/S {lsr_c:.2f}" if lsr_c is not None else ""
+                parts.append(f"  - {sym}: {fr_txt}{oi_txt}{ls_txt}")
             if not parts:
                 return ""
             return ("\n## Crypto Perpetual Sentiment\n" + "\n".join(parts)
@@ -584,6 +592,12 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             parts.append(f"- OI 加权资金费率：{avg * 100:.4f}%")
         if toi is not None:
             parts.append(f"- 总未平仓量：${toi:,.0f}")
+        lsr = perp.get("avg_long_short_ratio")
+        if lsr is not None:
+            parts.append(f"- OI 加权多空比(全市场)：{lsr:.2f}")
+        lsr_top = perp.get("avg_long_short_ratio_top")
+        if lsr_top is not None:
+            parts.append(f"- OI 加权多空比(大户)：{lsr_top:.2f}")
         for c in coins:
             sym = c.get("symbol")
             if not sym:
@@ -592,7 +606,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             oi = c.get("open_interest_usd")
             fr_txt = f"资金费率 {fr * 100:.4f}%" if fr is not None else "资金费率 N/A"
             oi_txt = f"，OI ${oi:,.0f}" if oi is not None else ""
-            parts.append(f"  - {sym}：{fr_txt}{oi_txt}")
+            lsr_c = c.get("long_short_ratio")
+            ls_txt = f"，多空比 {lsr_c:.2f}" if lsr_c is not None else ""
+            parts.append(f"  - {sym}：{fr_txt}{oi_txt}{ls_txt}")
         if not parts:
             return ""
         return ("\n## 加密永续情绪\n" + "\n".join(parts)
