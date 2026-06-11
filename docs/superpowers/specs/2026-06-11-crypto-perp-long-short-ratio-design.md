@@ -32,7 +32,7 @@
 | `long_short_ratio` | `/api/v5/rubik/stat/contracts/long-short-account-ratio` | `ccy=BASE`, `period=5m` | 全市场散户账户净多/净空比，>1 偏多 |
 | `long_short_ratio_top` | `/api/v5/rubik/stat/contracts/long-short-account-ratio-contract-top-trader` | `instId=BASE-QUOTE-SWAP`, `period=5m` | 大户账户多空比 |
 
-两端点返回结构均为 `{"code":"0","data":[[ts, ratio], ...]}`，按时间**新→旧**排序。presence-only 取 `data[0]` 的比值元素（索引 1）。`period=5m` 取最新颗粒值（最鲜）。非线性计价（quote∉{USDT,USDC}）/参数非法/空/异常 → 字段缺省（fail-soft，不抛）。
+两端点返回结构均为 `{"code":"0","data":[[ts, ratio], ...]}`，按时间**新→旧**排序（取 `data[0]` 为最新；**排序是关键假设，列入 §9 验证项**）。presence-only 取 `data[0]` 的比值元素（索引 1）。`period=5m` 取最新颗粒值（最鲜）。非线性计价（quote∉{USDT,USDC}）/参数非法/空/异常 → 字段缺省（fail-soft，不抛）。
 
 注意：全市场端点 url 子串 `long-short-account-ratio` 是大户端点 url（`...-contract-top-trader`）的前缀，**测试 fake 的 url 匹配必须先判 `top-trader` 再判通用串**，否则两路会命中同一分支。
 
@@ -199,8 +199,8 @@ def _okx_ratio(url: str, params: dict) -> Optional[float]:
 新增用例为主；既有用例因不检查"排他性"且不含多空比数据，缺省字段不渲染，应保持全绿（强回归证据）。
 
 - **抓取层** `tests/test_crypto_derivatives_fetch.py`（扩展）：
-  - 扩 `_fake_okx`，新增两路 ls 端点（**先判 `top-trader` 再判通用 `long-short-account-ratio`**），返回 `{"data": [[ts, ratio], ...]}`。
-  - 强化 `test_fetch_perp_metrics_parses_all`：追加断言 `out["long_short_ratio"]`、`out["long_short_ratio_top"]`。
+  - 扩 `_fake_okx`，新增两路 ls 端点（**先判 `top-trader` 再判通用 `long-short-account-ratio`**），两端点返回**不同**比值（如全市场 1.20、大户 0.80），结构 `{"data": [[ts, ratio], ...]}`。
+  - 强化 `test_fetch_perp_metrics_parses_all`：分别断言 `out["long_short_ratio"]` 取到全市场值、`out["long_short_ratio_top"]` 取到大户值，**两值不同**——这是 §1 url 前缀匹配顺序（top-trader 误路由到通用分支）的**唯一回归保障**；若两端点 fake 返回同值，该陷阱将零覆盖。
   - 新增：单路 ls 失败其余保留（fail-soft）；非线性计价仍 `{}` 且零网络调用（断言 `called["n"]==0` 路径不被新 submit 破坏——guard 在 submit 之前）。
   - 新增 `_okx_ratio` 结构异常（data 非 list / 行长 <2 / 空）→ None。
 - **聚合层** `tests/test_crypto_perp_snapshot.py`（扩展）：`_fake_metrics` 表加 `long_short_ratio`/`long_short_ratio_top`，断言 `avg_long_short_ratio`/`avg_long_short_ratio_top` 为 OI 加权值；某币缺 OI 不参与权重；coins 携带各币比值。
@@ -217,9 +217,11 @@ def _okx_ratio(url: str, params: dict) -> Optional[float]:
 ## 8. 风险与回滚
 
 - **风险**：rubik 端点偶发限流/不可达 → 字段缺省（presence-only fail-soft），不影响主流程。新增两路并发使单标的抓取从 3 路增至 5 路，仍在同一 `ThreadPoolExecutor` 一次性发起，延迟不叠加。
+- **并发量**：复盘篮子路径为外层 `ThreadPoolExecutor(max_workers=8)` × 内层 5 路 ≈ 最多 40 个并发连接（原 24）。但两个新端点是**独立端点**，每端点并发仍为篮子规模 N（不变），故**单端点限流压力不变**，仅总连接数上升、可接受；触限亦 fail-soft 缺省。
 - **回滚**：纯追加改动，按提交逐个 revert 即可；无数据迁移、无契约破坏，回滚后旧行为字节级恢复。
 
 ## 9. 未验证假设（实施/验证阶段确认）
 
 - OKX rubik 端点在本环境可达（funding/mark/OI 已通，预计同样可达；不可达则 presence-only 自动缺省，离线测试用 monkeypatch 不依赖网络）。
 - 大户端点 `long-short-account-ratio-contract-top-trader` 返回结构与全市场端点同为 `data:[[ts, ratio], ...]`（2 元行）。若实际为多元行，`_okx_ratio` 取索引 1 仍为比值；如不符，验证阶段据真实样例修正索引。
+- **返回按时间新→旧排序**（故取 `data[0]` 为最新）。若实际为旧→新升序，`data[0]` 将是最旧值（默认 `limit=100`、`period=5m` ≈ 8 小时前），语义失真但仍 fail-soft 不崩。验证阶段确认排序；若为升序，改取 `data[-1]` 或传 `limit=1`（需先确认 ccy 端点 `long-short-account-ratio` 是否支持 `limit` 参数）。
