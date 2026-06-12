@@ -186,6 +186,7 @@ class BacktestEngine:
         config: EvaluationConfig,
         is_perp: bool = False,
         funding_cost_pct: float = 0.0,
+        leverage: int = 1,
     ) -> Dict[str, Any]:
         """Evaluate one historical analysis against forward daily bars.
 
@@ -193,6 +194,9 @@ class BacktestEngine:
         - Daily bars cannot determine intraday ordering. If stop-loss and
           take-profit are both touched in the same bar, we record
           first_hit="ambiguous" and assume stop-loss first for simulated exit.
+        - Leverage (perp only, leverage > 1): liquidation is touch-based per bar
+          (conservative), liq price excludes MMR (slightly optimistic), funding
+          stops accruing after liquidation, non-liquidated PnL is clamped >= -100%.
         """
 
         infer_position = cls.infer_perp_position if is_perp else cls.infer_position_recommendation
@@ -279,6 +283,36 @@ class BacktestEngine:
         else:  # cash
             simulated_entry_price = None
             simulated_return_pct = 0.0
+
+        # 杠杆情景分支（仅 is_perp 且 L>1；L=1 与非 perp 完全不进入，保证既有路径字节级一致）
+        leverage_int = int(leverage or 1)
+        if is_perp and leverage_int > 1 and position in ("long", "short"):
+            if position == "long":
+                liq_price = start_price * (1.0 - 1.0 / leverage_int)
+                liq_touch_idx = cls._first_liq_touch_idx(window_bars, liq_price=liq_price, side="long")
+                # 基线出场 bar 序号：SL/TP/ambiguous 出场取命中 bar，否则窗口末
+                if simulated_exit_reason in ("stop_loss", "take_profit", "ambiguous_stop_loss"):
+                    baseline_exit_idx = first_hit_days
+                else:
+                    baseline_exit_idx = len(window_bars)
+            else:
+                liq_price = start_price * (1.0 + 1.0 / leverage_int)
+                liq_touch_idx = cls._first_liq_touch_idx(window_bars, liq_price=liq_price, side="short")
+                baseline_exit_idx = len(window_bars)
+
+            if liq_touch_idx is not None and liq_touch_idx <= baseline_exit_idx:
+                # 触线即强平（保守）；同 bar 与 TP/SL 双触时强平优先；强平后资金费不再计入
+                simulated_exit_price = liq_price
+                simulated_exit_reason = "liquidated"
+                simulated_return_pct = -100.0
+            elif simulated_return_pct is not None:
+                if position == "long":
+                    price_return_pct = (simulated_exit_price - start_price) / start_price * 100
+                    simulated_return_pct = leverage_int * price_return_pct - leverage_int * funding
+                else:
+                    price_return_pct = (start_price - simulated_exit_price) / start_price * 100
+                    simulated_return_pct = leverage_int * price_return_pct + leverage_int * funding
+                simulated_return_pct = max(simulated_return_pct, -100.0)  # 保证金不可亏穿
 
         return {
             "analysis_date": analysis_date,
@@ -676,6 +710,23 @@ class BacktestEngine:
             exit_price,
             exit_reason,
         )
+
+    @classmethod
+    def _first_liq_touch_idx(
+        cls,
+        window_bars: List[DailyBarLike],
+        *,
+        liq_price: float,
+        side: str,
+    ) -> Optional[int]:
+        """首个触及强平价的 bar 序号（1-based，按日序）；未触及返回 None。"""
+        for idx, bar in enumerate(window_bars, start=1):
+            if side == "long":
+                if bar.low is not None and bar.low <= liq_price:
+                    return idx
+            elif bar.high is not None and bar.high >= liq_price:
+                return idx
+        return None
 
     @staticmethod
     def _average(values: Iterable[Optional[float]]) -> Optional[float]:
