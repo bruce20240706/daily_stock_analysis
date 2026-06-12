@@ -80,6 +80,10 @@ class LeverageEngineTestCase(unittest.TestCase):
         self.assertTrue(res["hit_take_profit"])
         self.assertEqual(res["first_hit"], "take_profit")
         self.assertEqual(res["first_hit_trading_days"], 2)
+        # direction_correct 同样不感知强平：与无杠杆评估一致（此 fixture 为方向判错+强平并存）
+        base = _eval("买入", bars=bars, take_profit=110.0, funding=0.5)
+        self.assertEqual(res["direction_correct"], base["direction_correct"])
+        self.assertIs(res["direction_correct"], False)
 
     def test_long_exit_before_liq_touch_is_not_liquidated(self):
         # 判别用例（整窗 min/max 误实现的唯一可挂点）：bar1 触 TP 出场，bar2 才跌穿强平线 75

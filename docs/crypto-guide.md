@@ -90,7 +90,7 @@ perp 标的（`BASE/QUOTE:PERP`）回测在现货流程之上叠加永续机制�
 - **启用方式**：`CRYPTO_BACKTEST_LEVERAGE`（默认 1，合法域 1-125，仅影响按需运行——CLI `--backtest` / API `/run` 未显式传参时）或 API `POST /api/v1/backtest/run` 的 `leverage` 参数；**每日自动回测固定 1x**，不受配置影响。仅 perp 标的生效（L>1 的 run 只评估 perp 候选）。
 - **强平口径（线性逐仓简化）**：`liq_long = entry×(1−1/L)`、`liq_short = entry×(1+1/L)`；窗口内逐日 bar 触线（long：`low ≤ liq`；short：`high ≥ liq`）即判强平——`simulated_return_pct = -100%`、出场原因 `liquidated`、出场价 = 强平价。
 - **四条近似声明**：① 不含维持保证金率（MMR），强平价比真实略远、结果**略乐观**；② 日线无法判定 bar 内先后，触线即强平为**保守**裁定（同 bar 与 TP/SL 双触时强平优先）；③ 强平后资金费不再计入；④ 非强平行收益 = `L×方向收益 + L×带符号资金费`，钳制 ≥ −100%（保证金不可亏穿）。
-- **数据隔离**：杠杆行落库 `engine_version` 标签 `v1-xN`（如 `v1-x3`），与 1x 行按唯一键共存互不覆盖；读 API（`GET /results`、`GET /performance`、`GET /performance/{code}`）默认仍只看配置基础版本，显式传 `engine_version=v1-x3` 查询情景行。`BACKTEST_ENGINE_VERSION` 不应设为带 `-xN` 后缀的标签值（否则叠出 `v1-x3-x3` 复合标签）。
+- **数据隔离**：杠杆行落库 `engine_version` 标签 `v1-xN`（如 `v1-x3`），与 1x 行按唯一键共存互不覆盖；读 API（`GET /results`、`GET /performance`、`GET /performance/{code}`）默认仍只看配置基础版本，显式传 `engine_version=v1-x3` 查询情景行（Web 回测页默认视图不传该参数，杠杆情景行不在页面展示，仅经 API 查询）。`BACKTEST_ENGINE_VERSION` 不应设为带 `-xN` 后缀的标签值（否则叠出 `v1-x3-x3` 复合标签）。
 - 预测质量字段（方向正确率、TP/SL 命中）不感知强平、与 1x 同口径："方向判对但被强平"并存即杠杆风险的呈现方式。
 
 ## 7. API 用法
