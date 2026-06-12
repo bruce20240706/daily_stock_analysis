@@ -258,6 +258,15 @@ describe('BacktestPage', () => {
     expect(screen.getByText('止盈')).toBeInTheDocument();
   });
 
+  it('renders liquidated exit reason for leverage scenario rows', async () => {
+    mockSingleRow({ ...perpRowBase, directionExpected: 'up', actualMovement: 'down', actualReturnPct: -30, positionRecommendation: 'long', simulatedReturnPct: -100, simulatedExitReason: 'liquidated' });
+    render(<BacktestPage />);
+
+    expect(await screen.findByText('做多')).toBeInTheDocument();
+    expect(screen.getByText('强平')).toBeInTheDocument();           // 新标签；未映射时会显示原文 'liquidated'
+    expect(screen.getAllByText(/-100(\.0)?%/).length).toBeGreaterThanOrEqual(1);    // 模拟收益 −100
+  });
+
   it('renders cash position with zero return and no-trade reason', async () => {
     mockSingleRow({ ...perpRowBase, directionExpected: 'flat', actualMovement: 'flat', actualReturnPct: 0.3, positionRecommendation: 'cash', simulatedReturnPct: 0.0, simulatedExitReason: 'cash' });
     render(<BacktestPage />);

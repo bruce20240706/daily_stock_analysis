@@ -79,6 +79,7 @@ const EXIT_REASON_LABELS: Record<string, string> = {
   ambiguous_stop_loss: '同日触双线(按止损)',
   window_end: '窗口期满',
   window_end_short: '窗口期满(空)',
+  liquidated: '强平',
   cash: '无交易',
 };
 
