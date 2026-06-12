@@ -1,11 +1,17 @@
 # -*- coding: utf-8 -*-
 """perp 杠杆情景回测：引擎强平/放大分支、repo perp_only 粗滤、service 标签隔离、API 参数面。
 L=1 与现货回归见锁套件（test_backtest_engine / test_crypto_backtest / test_backtest_summary / test_perp_backtest_engine，零改动）。"""
+import json
+import os
+import tempfile
 import unittest
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
+from src.config import Config
 from src.core.backtest_engine import BacktestEngine, EvaluationConfig
+from src.repositories.backtest_repo import BacktestRepository
+from src.storage import AnalysisHistory, DatabaseManager
 
 PERP_CODE = "BTC/USDT:PERP"
 
@@ -130,6 +136,60 @@ class LeverageEngineTestCase(unittest.TestCase):
             _eval("买入", bars=bars, leverage=5, take_profit=110.0, is_perp=False),
             _eval("买入", bars=bars, take_profit=110.0, is_perp=False),
         )
+
+
+class _TempDbTestCase(unittest.TestCase):
+    """临时 DB + 配置隔离（形态同 tests/test_perp_backtest_service.py）。"""
+
+    def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        os.environ["DATABASE_PATH"] = os.path.join(self._temp_dir.name, "leverage_bt.db")
+        for key in ("CRYPTO_BACKTEST_LEVERAGE", "BACKTEST_ENGINE_VERSION", "CRYPTO_DERIVATIVES_ENABLED"):
+            os.environ.pop(key, None)
+        Config._instance = None
+        DatabaseManager.reset_instance()
+        self.db = DatabaseManager.get_instance()
+
+    def tearDown(self):
+        for key in ("CRYPTO_BACKTEST_LEVERAGE", "BACKTEST_ENGINE_VERSION", "CRYPTO_DERIVATIVES_ENABLED"):
+            os.environ.pop(key, None)
+        Config._instance = None
+        DatabaseManager.reset_instance()
+        self._temp_dir.cleanup()
+
+    def _add_analysis(self, *, query_id, code, created_at, advice="买入"):
+        with self.db.get_session() as session:
+            session.add(AnalysisHistory(
+                query_id=query_id, code=code, name=code, report_type="simple",
+                sentiment_score=40, operation_advice=advice, trend_prediction="测试",
+                analysis_summary="leverage test", created_at=created_at,
+                context_snapshot=json.dumps({"enhanced_context": {"date": created_at.strftime("%Y-%m-%d")}}),
+            ))
+            session.commit()
+
+
+class GetCandidatesPerpOnlyTestCase(_TempDbTestCase):
+    def test_sql_filter_prevents_starvation(self):
+        # 饥饿判别：5 条更新的股票分析 + 1 条更老的 perp，limit=3 < 股票行数。
+        # 若只靠循环内跳过（无 SQL 粗滤），配额会被 3 条最新股票占满、永远选不到 perp。
+        for i in range(5):
+            self._add_analysis(query_id=f"s{i}", code="600519", created_at=datetime(2024, 1, 10 + i))
+        self._add_analysis(query_id="p1", code=PERP_CODE, created_at=datetime(2024, 1, 1), advice="卖出")
+
+        rows = BacktestRepository(self.db).get_candidates(
+            code=None, min_age_days=0, limit=3, eval_window_days=3,
+            engine_version="v1-x3", force=False, perp_only=True,
+        )
+        self.assertEqual([r.code for r in rows], [PERP_CODE])
+
+    def test_default_perp_only_false_keeps_existing_behavior(self):
+        self._add_analysis(query_id="s0", code="600519", created_at=datetime(2024, 1, 2))
+        self._add_analysis(query_id="p1", code=PERP_CODE, created_at=datetime(2024, 1, 1), advice="卖出")
+        rows = BacktestRepository(self.db).get_candidates(
+            code=None, min_age_days=0, limit=10, eval_window_days=3,
+            engine_version="v1", force=False,
+        )
+        self.assertEqual({r.code for r in rows}, {"600519", PERP_CODE})
 
 
 if __name__ == "__main__":

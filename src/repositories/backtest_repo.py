@@ -35,6 +35,7 @@ class BacktestRepository:
         eval_window_days: int,
         engine_version: str,
         force: bool,
+        perp_only: bool = False,
     ) -> List[AnalysisHistory]:
         """Return AnalysisHistory rows eligible for backtest."""
         cutoff_dt = datetime.now() - timedelta(days=min_age_days)
@@ -43,6 +44,9 @@ class BacktestRepository:
             conditions = [AnalysisHistory.created_at <= cutoff_dt]
             if code:
                 conditions.append(AnalysisHistory.code == code)
+            if perp_only:
+                # 杠杆情景粗滤：非 perp 候选在 v1-xN 命名空间永无结果行可去重，会每轮重扫占满 limit 配额
+                conditions.append(func.upper(AnalysisHistory.code).like('%:PERP'))
             conditions.append(
                 or_(
                     AnalysisHistory.report_type.is_(None),
