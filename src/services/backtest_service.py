@@ -283,9 +283,12 @@ class BacktestService:
         analysis_date_from: Optional[date] = None,
         analysis_date_to: Optional[date] = None,
         analysis_phase: Optional[str] = None,
+        engine_version: Optional[str] = None,
     ) -> Dict[str, Any]:
-        config = get_config()
-        engine_version = str(getattr(config, "backtest_engine_version", "v1"))
+        if engine_version is None:
+            engine_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
+        else:
+            engine_version = str(engine_version)
 
         phase_bucket = self._normalize_phase_filter(analysis_phase)
         if eval_window_days is None and (analysis_date_from is not None or analysis_date_to is not None or phase_bucket is not None):
@@ -341,9 +344,12 @@ class BacktestService:
         analysis_date_from: Optional[date] = None,
         analysis_date_to: Optional[date] = None,
         analysis_phase: Optional[str] = None,
+        engine_version: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        config = get_config()
-        engine_version = str(getattr(config, "backtest_engine_version", "v1"))
+        if engine_version is None:
+            engine_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
+        else:
+            engine_version = str(engine_version)
         lookup_code = OVERALL_SENTINEL_CODE if scope == "overall" else code
 
         phase_bucket = self._normalize_phase_filter(analysis_phase)

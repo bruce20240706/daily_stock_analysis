@@ -10,10 +10,10 @@ from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 from src.config import Config
-from src.core.backtest_engine import BacktestEngine, EvaluationConfig
+from src.core.backtest_engine import OVERALL_SENTINEL_CODE, BacktestEngine, EvaluationConfig
 from src.repositories.backtest_repo import BacktestRepository
 from src.services.backtest_service import BacktestService
-from src.storage import AnalysisHistory, BacktestResult, DatabaseManager, StockDaily
+from src.storage import AnalysisHistory, BacktestResult, BacktestSummary, DatabaseManager, StockDaily
 
 PERP_CODE = "BTC/USDT:PERP"
 
@@ -265,6 +265,86 @@ class LeverageServiceTestCase(_TempDbTestCase):
             svc.run_backtest(code=PERP_CODE, eval_window_days=3, min_age_days=0, limit=10, leverage=0)    # → 1：不打标签
             svc.run_backtest(code=PERP_CODE, eval_window_days=3, min_age_days=0, limit=10, leverage=126)  # → 125
         self.assertEqual({r.engine_version for r in self._rows()}, {"v1", "v1-x125"})
+
+
+class LeverageApiTestCase(_TempDbTestCase):
+    def setUp(self):
+        super().setUp()
+        from fastapi.testclient import TestClient
+        from api.app import app
+        self.client = TestClient(app)
+
+    def test_run_request_leverage_bounds_rejected(self):
+        for bad in (0, 126):
+            resp = self.client.post("/api/v1/backtest/run", json={"leverage": bad})
+            self.assertEqual(resp.status_code, 422, f"leverage={bad} 应被 Field 校验拒绝")
+
+    def test_run_passes_leverage_to_service(self):
+        import api.v1.endpoints.backtest as backtest_ep
+        captured = {}
+
+        class _Spy:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def run_backtest(self, **kwargs):
+                captured.update(kwargs)
+                return {"processed": 0, "saved": 0, "completed": 0, "insufficient": 0, "errors": 0}
+
+        with patch.object(backtest_ep, "BacktestService", _Spy):
+            resp = self.client.post("/api/v1/backtest/run", json={"leverage": 3})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(captured["leverage"], 3)
+
+    def _seed_tagged_results(self):
+        with self.db.get_session() as session:
+            session.add(AnalysisHistory(
+                query_id="pq1", code=PERP_CODE, name="BTC perp", report_type="simple",
+                operation_advice="卖出", created_at=datetime(2024, 1, 1),
+            ))
+            session.commit()
+            ah_id = session.query(AnalysisHistory).filter_by(query_id="pq1").one().id
+            for version, ret in (("v1", 5.0), ("v1-x3", 15.0)):
+                session.add(BacktestResult(
+                    analysis_history_id=ah_id, code=PERP_CODE, analysis_date=date(2024, 1, 1),
+                    eval_window_days=3, engine_version=version, eval_status="completed",
+                    evaluated_at=datetime(2024, 1, 10), position_recommendation="short",
+                    simulated_return_pct=ret,
+                ))
+            session.commit()
+
+    def test_results_engine_version_filters_and_default_unchanged(self):
+        self._seed_tagged_results()
+        tagged = self.client.get("/api/v1/backtest/results", params={"engine_version": "v1-x3"}).json()
+        self.assertEqual(tagged["total"], 1)
+        self.assertEqual(tagged["items"][0]["engine_version"], "v1-x3")
+        # 默认行为不变判别：不带参数仍只看 config 基础版本 v1
+        default = self.client.get("/api/v1/backtest/results").json()
+        self.assertEqual(default["total"], 1)
+        self.assertEqual(default["items"][0]["engine_version"], "v1")
+
+    def test_performance_engine_version_param(self):
+        with self.db.get_session() as session:
+            for version in ("v1", "v1-x3"):
+                session.add(BacktestSummary(
+                    scope="overall", code=OVERALL_SENTINEL_CODE, eval_window_days=3,
+                    engine_version=version, total_evaluations=1, completed_count=1,
+                ))
+            session.commit()
+        tagged = self.client.get("/api/v1/backtest/performance",
+                                 params={"engine_version": "v1-x3", "eval_window_days": 3})
+        self.assertEqual(tagged.status_code, 200)
+        self.assertEqual(tagged.json()["engine_version"], "v1-x3")
+        default = self.client.get("/api/v1/backtest/performance", params={"eval_window_days": 3})
+        self.assertEqual(default.json()["engine_version"], "v1")
+
+    def test_openapi_declares_engine_version_on_all_read_endpoints(self):
+        paths = self.client.get("/openapi.json").json()["paths"]
+        for path in ("/api/v1/backtest/results",
+                     "/api/v1/backtest/performance",
+                     "/api/v1/backtest/performance/{code}"):
+            names = {p["name"] for p in paths[path]["get"]["parameters"]}
+            self.assertIn("engine_version", names, f"{path} 缺 engine_version 查询参数")
 
 
 if __name__ == "__main__":

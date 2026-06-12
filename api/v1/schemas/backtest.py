@@ -16,6 +16,7 @@ class BacktestRunRequest(BaseModel):
     eval_window_days: Optional[int] = Field(None, ge=1, le=120, description="评估窗口（交易日数）")
     min_age_days: Optional[int] = Field(None, ge=0, le=365, description="分析记录最小天龄（0=不限）")
     limit: int = Field(200, ge=1, le=2000, description="最多处理的分析记录数")
+    leverage: Optional[int] = Field(None, ge=1, le=125, description="perp 杠杆情景（默认取配置 CRYPTO_BACKTEST_LEVERAGE；1=与现状一致；仅 perp 标的生效）")
 
 
 class BacktestRunResponse(BaseModel):
