@@ -940,6 +940,8 @@ class Config:
     binance_base_url: str = "https://api.binance.com"
     # Binance fapi（衍生品备援）Base URL：仅 OKX 整组不可得时使用；受限地区可换镜像
     binance_fapi_base_url: str = "https://fapi.binance.com"
+    # perp 杠杆情景回测默认杠杆（1=与现状一致；仅按需运行生效，每日自动回测固定 1x；上限 125 在 service 钳制）
+    crypto_backtest_leverage: int = 1
     # 实时行情缓存时间（秒）
     realtime_cache_ttl: int = 600
     # 熔断器冷却时间（秒）
@@ -1781,6 +1783,7 @@ class Config:
             crypto_derivatives_enabled=os.getenv('CRYPTO_DERIVATIVES_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on'),
             binance_base_url=os.getenv('BINANCE_BASE_URL', 'https://api.binance.com'),
             binance_fapi_base_url=os.getenv('BINANCE_FAPI_BASE_URL', 'https://fapi.binance.com'),
+            crypto_backtest_leverage=parse_env_int(os.getenv('CRYPTO_BACKTEST_LEVERAGE'), 1, field_name='CRYPTO_BACKTEST_LEVERAGE', minimum=1),
             realtime_cache_ttl=parse_env_int(os.getenv('REALTIME_CACHE_TTL'), 600, field_name='REALTIME_CACHE_TTL', minimum=0),
             circuit_breaker_cooldown=parse_env_int(os.getenv('CIRCUIT_BREAKER_COOLDOWN'), 300, field_name='CIRCUIT_BREAKER_COOLDOWN', minimum=0),
             enable_fundamental_pipeline=os.getenv('ENABLE_FUNDAMENTAL_PIPELINE', 'true').lower() == 'true',

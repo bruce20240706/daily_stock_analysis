@@ -652,6 +652,7 @@ def run_full_analysis(
                     eval_window_days=getattr(config, 'backtest_eval_window_days', 10),
                     min_age_days=getattr(config, 'backtest_min_age_days', 14),
                     limit=200,
+                    leverage=1,  # 每日自动回测固定 1x：v1 生产流水线对 CRYPTO_BACKTEST_LEVERAGE 免疫
                 )
                 logger.info(
                     f"自动回测完成: processed={stats.get('processed')} saved={stats.get('saved')} "

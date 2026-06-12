@@ -7,11 +7,13 @@ import tempfile
 import unittest
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from unittest.mock import patch
 
 from src.config import Config
 from src.core.backtest_engine import BacktestEngine, EvaluationConfig
 from src.repositories.backtest_repo import BacktestRepository
-from src.storage import AnalysisHistory, DatabaseManager
+from src.services.backtest_service import BacktestService
+from src.storage import AnalysisHistory, BacktestResult, DatabaseManager, StockDaily
 
 PERP_CODE = "BTC/USDT:PERP"
 
@@ -190,6 +192,79 @@ class GetCandidatesPerpOnlyTestCase(_TempDbTestCase):
             engine_version="v1", force=False,
         )
         self.assertEqual({r.code for r in rows}, {"600519", PERP_CODE})
+
+
+def _seed_perp(db, *, code=PERP_CODE):
+    """perp 分析 + 起始 bar + 3 根下跌前向 bar（同 E 的 service 测试种子：做空 1x 收益 5% + funding）。"""
+    with db.get_session() as session:
+        session.add(AnalysisHistory(
+            query_id=f"q-{code}", code=code, name=code, report_type="simple",
+            sentiment_score=40, operation_advice="卖出", trend_prediction="看空",
+            analysis_summary="leverage test", created_at=datetime(2024, 1, 1),
+            context_snapshot=json.dumps({"enhanced_context": {"date": "2024-01-01"}}),
+        ))
+        session.add(StockDaily(code=code, date=date(2024, 1, 1), open=100000.0, high=100500.0, low=99500.0, close=100000.0))
+        session.add_all([
+            StockDaily(code=code, date=date(2024, 1, 2), open=100000.0, high=100000.0, low=97000.0, close=98000.0),
+            StockDaily(code=code, date=date(2024, 1, 3), open=98000.0, high=98000.0, low=95000.0, close=96000.0),
+            StockDaily(code=code, date=date(2024, 1, 4), open=96000.0, high=96000.0, low=94000.0, close=95000.0),
+        ])
+        session.commit()
+
+
+FUNDING_PATCH = patch("data_provider.crypto_derivatives.fetch_funding_rate_history", return_value=[0.0003])  # 0.03%
+
+
+class LeverageServiceTestCase(_TempDbTestCase):
+    def _rows(self):
+        with self.db.get_session() as session:
+            return session.query(BacktestResult).order_by(BacktestResult.id).all()
+
+    def test_leverage_run_writes_tagged_rows_coexisting_with_v1(self):
+        _seed_perp(self.db)
+        with FUNDING_PATCH:
+            svc = BacktestService(self.db)
+            svc.run_backtest(code=PERP_CODE, eval_window_days=3, min_age_days=0, limit=10)              # 1x → v1
+            svc.run_backtest(code=PERP_CODE, eval_window_days=3, min_age_days=0, limit=10, leverage=3)  # 3x → v1-x3
+        rows = {r.engine_version: r for r in self._rows()}
+        self.assertEqual(set(rows), {"v1", "v1-x3"})                                  # 标签隔离共存，互不覆盖
+        self.assertAlmostEqual(rows["v1"].simulated_return_pct, 5.03, places=4)       # E 语义不变
+        # liq_short=133333 未触（max high 100000）→ 放大：3×5 + 3×0.03 = 15.09
+        self.assertAlmostEqual(rows["v1-x3"].simulated_return_pct, 15.09, places=4)
+        self.assertEqual(rows["v1-x3"].simulated_exit_reason, "window_end_short")
+
+    def test_non_perp_candidate_excluded_in_leverage_run(self):
+        _seed_perp(self.db)
+        self._add_analysis(query_id="s1", code="600519", created_at=datetime(2024, 1, 1))
+        with FUNDING_PATCH:
+            stats = BacktestService(self.db).run_backtest(eval_window_days=3, min_age_days=0, limit=10, leverage=3)
+        self.assertEqual([r.code for r in self._rows()], [PERP_CODE])   # 股票候选不写入
+        self.assertEqual(stats["processed"], 1)                          # 统计照实反映 perp-only run
+
+    def test_loop_guard_catches_sql_filter_leak(self):
+        # 两层过滤判别：ABC/BUSD:PERP 过得了 SQL 粗滤（后缀 :PERP）但 is_perp_code 为假（quote 非 USDT/USDC）
+        # → 循环内兜底跳过，不写入、不计入统计
+        self._add_analysis(query_id="b1", code="ABC/BUSD:PERP", created_at=datetime(2024, 1, 1), advice="卖出")
+        with FUNDING_PATCH:
+            stats = BacktestService(self.db).run_backtest(eval_window_days=3, min_age_days=0, limit=10, leverage=3)
+        self.assertEqual(self._rows(), [])
+        self.assertEqual(stats["processed"], 0)
+
+    def test_leverage_none_falls_back_to_config(self):
+        os.environ["CRYPTO_BACKTEST_LEVERAGE"] = "3"
+        Config._instance = None
+        _seed_perp(self.db)
+        with FUNDING_PATCH:
+            BacktestService(self.db).run_backtest(code=PERP_CODE, eval_window_days=3, min_age_days=0, limit=10)
+        self.assertEqual(self._rows()[0].engine_version, "v1-x3")
+
+    def test_leverage_clamped_to_bounds(self):
+        _seed_perp(self.db)
+        with FUNDING_PATCH:
+            svc = BacktestService(self.db)
+            svc.run_backtest(code=PERP_CODE, eval_window_days=3, min_age_days=0, limit=10, leverage=0)    # → 1：不打标签
+            svc.run_backtest(code=PERP_CODE, eval_window_days=3, min_age_days=0, limit=10, leverage=126)  # → 125
+        self.assertEqual({r.engine_version for r in self._rows()}, {"v1", "v1-x125"})
 
 
 if __name__ == "__main__":

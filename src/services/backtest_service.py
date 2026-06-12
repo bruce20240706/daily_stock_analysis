@@ -38,6 +38,7 @@ class BacktestService:
         eval_window_days: Optional[int] = None,
         min_age_days: Optional[int] = None,
         limit: int = 200,
+        leverage: Optional[int] = None,
     ) -> Dict[str, Any]:
         config = get_config()
 
@@ -46,7 +47,21 @@ class BacktestService:
         if min_age_days is None:
             min_age_days = getattr(config, "backtest_min_age_days", 14)
 
-        engine_version = getattr(config, "backtest_engine_version", "v1")
+        if leverage is None:
+            leverage = getattr(config, "crypto_backtest_leverage", 1)
+        try:
+            leverage = int(leverage)
+        except (TypeError, ValueError):
+            leverage = 1
+        leverage = max(1, min(125, leverage))  # service 兜底钳制（API Field 已拒越界，config 已钳下限）
+        perp_only = leverage > 1
+
+        engine_version = str(getattr(config, "backtest_engine_version", "v1"))
+        if perp_only:
+            # 情景标签：去重、落库、汇总全程使用标签版本，与 1x 行按唯一键隔离共存
+            engine_version = f"{engine_version}-x{leverage}"
+            logger.info(f"杠杆情景回测: L={leverage}（仅 perp 候选, engine_version={engine_version}）")
+
         neutral_band_pct = float(getattr(config, "backtest_neutral_band_pct", 2.0))
 
         eval_config = EvaluationConfig(
@@ -62,6 +77,7 @@ class BacktestService:
             eval_window_days=int(eval_window_days),
             engine_version=str(engine_version),
             force=force,
+            perp_only=perp_only,
         )
 
         processed = 0
@@ -71,10 +87,15 @@ class BacktestService:
         touched_codes: set[str] = set()
 
         results_to_save: List[BacktestResult] = []
+        skipped_non_perp = 0
 
         from data_provider.base import is_perp_code
 
         for analysis in candidates:
+            if perp_only and not is_perp_code(analysis.code):
+                # SQL 粗滤漏网兜底（如 quote 非 USDT/USDC 的构造码）：杠杆情景只评估 perp
+                skipped_non_perp += 1
+                continue
             processed += 1
             touched_codes.add(analysis.code)
 
@@ -150,6 +171,7 @@ class BacktestService:
                     config=eval_config,
                     is_perp=is_perp,
                     funding_cost_pct=funding_cost_pct,
+                    leverage=leverage,
                 )
 
                 status = evaluation.get("eval_status")
@@ -219,6 +241,9 @@ class BacktestService:
                 eval_window_days=int(eval_window_days),
                 engine_version=str(engine_version),
             )
+
+        if skipped_non_perp:
+            logger.info(f"杠杆情景回测跳过非 perp 候选 {skipped_non_perp} 条")
 
         return {
             "processed": processed,
