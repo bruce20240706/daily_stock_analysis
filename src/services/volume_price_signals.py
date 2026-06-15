@@ -533,6 +533,91 @@ def _anchored_vwap_signals(prim: pd.DataFrame, config: VPSConfig) -> list[VPSign
     return out
 
 
+def _detect_vsa_bars(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
+    """VSA 单 bar 形态检测：No Demand / No Supply / Stopping-Climactic / Effort-vs-Result。
+
+    全部输出 confidence='low'、is_daily_approx=True（B 类降权契约）。
+    一字板（is_limit_bar）和量比缺失（rel_vol NaN）均跳过。
+    """
+    out: list[VPSignal] = []
+    for i in range(len(prim)):
+        rv = prim["rel_vol"].iloc[i]
+        rp = prim["range_pos"].iloc[i]
+        body = prim["body"].iloc[i]
+        if pd.isna(rv) or bool(prim["is_limit_bar"].iloc[i]):
+            continue  # 一字板/量比缺失 -> 排除
+        ts = _to_epoch_ms_shanghai(prim["date"].iloc[i])
+        price = float(prim["close"].astype(float).iloc[i])
+        # No Demand：缩量上涨、收在上半区无力 -> 看空意味
+        if rv < config.vol_shrink and body > 0 and not pd.isna(rp) and rp < 0.5:
+            out.append(_vsa_signal(ts, price, "vsa_no_demand", "bearish", rv))
+        # No Supply：缩量下跌、收在下半区无量承接 -> 看多意味
+        elif rv < config.vol_shrink and body < 0 and not pd.isna(rp) and rp > 0.5:
+            out.append(_vsa_signal(ts, price, "vsa_no_supply", "bullish", rv))
+        # Stopping/Climactic：高量大幅波动后收回中部
+        elif rv >= config.vol_high and not pd.isna(rp) and 0.3 <= rp <= 0.7:
+            out.append(_vsa_signal(ts, price, "vsa_stopping", "neutral", rv))
+        # Effort vs Result：高量但实体极小（努力无果）
+        elif rv >= config.vol_high and abs(body) < (prim["spread"].iloc[i] * 0.2):
+            out.append(_vsa_signal(ts, price, "vsa_effort_vs_result", "neutral", rv))
+    return out
+
+
+def _vsa_signal(ts: int, price: float, sig_type: str, direction: str, rv: float) -> VPSignal:
+    """构造 VSA B 类信号（降权标记）。"""
+    return VPSignal(
+        timestamp=ts, price=price, anchor="close", direction=direction,
+        signal_type=sig_type, confidence="low", is_daily_approx=True,
+        is_anomalous=False, reason="VSA 单 bar 形态（日线近似，低置信）",
+        threshold=None, observed_value=float(rv),
+    )
+
+
+def _detect_upthrust_spring(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
+    """Upthrust（假突破顶）与 Spring（假跌破底）检测。
+
+    复用 find_swing_pivots 确认摆动点（左右各 k 根，天然滞后 k），不含未来函数。
+    对每根 bar，只参照已确认的（index < i）前序 pivot，保证无前视偏差。
+    输出 confidence='low'、is_daily_approx=True（B 类降权契约）。
+    """
+    high = prim["high"].astype(float).reset_index(drop=True)
+    low = prim["low"].astype(float).reset_index(drop=True)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    all_pivots = _attach_pivot_timestamps(find_swing_pivots(close, config.swing_k), prim)
+    highs = [p for p in all_pivots if p.kind == "high"]
+    lows = [p for p in all_pivots if p.kind == "low"]
+    out: list[VPSignal] = []
+    for i in range(len(prim)):
+        ts = _to_epoch_ms_shanghai(prim["date"].iloc[i])
+        prior_highs = [p for p in highs if p.index < i]
+        prior_lows = [p for p in lows if p.index < i]
+        if prior_highs and high.iloc[i] > prior_highs[-1].price and close.iloc[i] < prior_highs[-1].price:
+            out.append(VPSignal(
+                timestamp=ts, price=float(close.iloc[i]), anchor="high", direction="bearish",
+                signal_type="upthrust", confidence="low", is_daily_approx=True, is_anomalous=False,
+                reason="假突破顶（Upthrust，日线近似）", threshold=float(prior_highs[-1].price),
+                observed_value=float(high.iloc[i]),
+            ))
+        if prior_lows and low.iloc[i] < prior_lows[-1].price and close.iloc[i] > prior_lows[-1].price:
+            out.append(VPSignal(
+                timestamp=ts, price=float(close.iloc[i]), anchor="low", direction="bullish",
+                signal_type="spring", confidence="low", is_daily_approx=True, is_anomalous=False,
+                reason="假跌破底（Spring，日线近似）", threshold=float(prior_lows[-1].price),
+                observed_value=float(low.iloc[i]),
+            ))
+    return out
+
+
+def _limit_b_class(b_markers: list[VPSignal], config: VPSConfig) -> list[VPSignal]:
+    """按 observed_value 绝对值降序取 top-k，控制 B 类信号密度上限。"""
+    ranked = sorted(
+        b_markers,
+        key=lambda m: abs(m.observed_value) if m.observed_value is not None else 0.0,
+        reverse=True,
+    )
+    return ranked[:config.b_class_top_k]
+
+
 def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSResult:
     """主入口：输入 OHLCV DataFrame，输出 VPSResult，串联 A 类量价信号。"""
     cfg = config or VPSConfig()
@@ -553,6 +638,10 @@ def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSR
     markers.extend(_detect_breakouts(prim, cfg))
     markers.extend(_detect_shrink_pullback(prim, cfg))
     markers.extend(_anchored_vwap_signals(prim, cfg))
+
+    # B 类信号追加（A 类组装完毕后接入），top-k 限流防止图表过密
+    b_markers = _detect_vsa_bars(prim, cfg) + _detect_upthrust_spring(prim, cfg)
+    markers.extend(_limit_b_class(b_markers, cfg))
 
     status = "degraded" if degraded_reason else "ok"
     return VPSResult(markers=markers, status=status, degraded_reason=degraded_reason)

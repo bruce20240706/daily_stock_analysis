@@ -344,3 +344,63 @@ def test_compute_ok_status_on_sufficient_window():
     res = compute_volume_price_signals(df)
     assert res.status == "ok"
     assert all(isinstance(m, VPSignal) for m in res.markers)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: B 类 VSA/Upthrust/Spring 降权契约 + top-k 限流
+# ---------------------------------------------------------------------------
+
+def _b_class(markers):
+    return [m for m in markers if m.signal_type.startswith("vsa_") or m.signal_type in {"upthrust", "spring"}]
+
+
+def test_b_class_confidence_always_low():
+    df = _trend_up_df(50)
+    res = compute_volume_price_signals(df)
+    for m in _b_class(res.markers):
+        assert m.confidence == "low"
+
+
+def test_b_class_is_daily_approx_always_true():
+    df = _trend_up_df(50)
+    res = compute_volume_price_signals(df)
+    for m in _b_class(res.markers):
+        assert m.is_daily_approx is True
+
+
+def test_b_class_respects_top_k_limit():
+    # 制造大量 VSA 候选，断言不超过 top_k
+    rows = []
+    for i in range(60):
+        v = 3000 if i % 2 == 0 else 200  # 高低量交替，制造大量 No Demand/No Supply
+        rows.append(_bar(100, 100.2, 99.8, 100, v))
+    df = _make_df(rows)
+    cfg = VPSConfig(b_class_top_k=2)
+    res = compute_volume_price_signals(df, config=cfg)
+    assert len(_b_class(res.markers)) <= cfg.b_class_top_k
+
+
+def test_b_class_does_not_change_a_class_direction_set():
+    df = _trend_up_df(50)
+    with_b = compute_volume_price_signals(df)
+    a_only = [m for m in with_b.markers if m not in _b_class(with_b.markers)]
+    # B 类移除后 A 类方向集合不变（B 不污染 A）
+    a_directions = {(m.signal_type, m.direction) for m in a_only}
+    recomputed = compute_volume_price_signals(df)
+    a_recomputed = {
+        (m.signal_type, m.direction)
+        for m in recomputed.markers
+        if not (m.signal_type.startswith("vsa_") or m.signal_type in {"upthrust", "spring"})
+    }
+    assert a_directions == a_recomputed
+
+
+def test_upthrust_and_spring_reuse_swing_pivots():
+    # 假突破顶（upthrust）：冲高后收回到前高之下
+    pad = [_bar(100, 101, 99, 100, 1000) for _ in range(30)]
+    pivot_high = [_bar(100, 108, 100, 107, 1500), _bar(107, 107.5, 105, 106, 1200),
+                  _bar(106, 106.5, 104, 105, 1100)]
+    upthrust = [_bar(105, 110, 104, 104, 4000)]  # 冲破 108 后收回 104 < 前高
+    df = _make_df(pad + pivot_high + upthrust)
+    res = compute_volume_price_signals(df, config=VPSConfig(swing_k=2))
+    assert any(m.signal_type == "upthrust" and m.direction == "bearish" for m in res.markers)
