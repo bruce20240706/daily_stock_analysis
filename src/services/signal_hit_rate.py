@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from src.config import get_config
 from src.repositories.backtest_repo import BacktestRepository
 
 
@@ -41,3 +42,27 @@ def backfill_signal_hit_rate(signal_type: str, code: str) -> HitRate:
 
     correct = sum(1 for r in rows if r.direction_correct is True)
     return HitRate(hit_rate=round(correct / sample, 4), hit_sample=sample)
+
+
+def resolve_marker_hit_fields(signal_type: str, code: str) -> dict:
+    """把命中率聚合结果映射为 SignalMarker 的 hit_rate/hit_sample/verified 字段。
+
+    - 无样本：hit_rate=None, hit_sample=None（对齐 SignalMarker 契约「无样本则 null」），
+      verified=False。
+    - 有样本：hit_sample 达 signal_hit_verified_min_sample 阈值则 verified=True。
+    """
+    rate = backfill_signal_hit_rate(signal_type, code)
+
+    if rate.hit_sample <= 0:
+        return {"hit_rate": None, "hit_sample": None, "verified": False}
+
+    config = get_config()
+    min_sample = int(getattr(config, "signal_hit_verified_min_sample", 0) or 0)
+    if min_sample <= 0:
+        min_sample = int(getattr(config, "backtest_eval_window_days", 10))
+
+    return {
+        "hit_rate": rate.hit_rate,
+        "hit_sample": rate.hit_sample,
+        "verified": rate.hit_sample >= min_sample,
+    }

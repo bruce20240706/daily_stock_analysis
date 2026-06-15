@@ -8,7 +8,11 @@ from datetime import date
 
 from src.config import Config
 from src.repositories.backtest_repo import BacktestRepository
-from src.services.signal_hit_rate import HitRate, backfill_signal_hit_rate
+from src.services.signal_hit_rate import (
+    HitRate,
+    backfill_signal_hit_rate,
+    resolve_marker_hit_fields,
+)
 from src.storage import AnalysisHistory, BacktestResult, DatabaseManager
 
 
@@ -174,6 +178,70 @@ class BackfillSignalHitRateTestCase(unittest.TestCase):
 
         self.assertIsNone(result.hit_rate)
         self.assertEqual(result.hit_sample, 0)
+
+
+class ResolveMarkerHitFieldsTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._db_path = os.path.join(self._temp_dir.name, "test_resolve.db")
+        os.environ["DATABASE_PATH"] = self._db_path
+        os.environ["SIGNAL_HIT_VERIFIED_MIN_SAMPLE"] = "3"
+
+        Config._instance = None
+        DatabaseManager.reset_instance()
+        self.db = DatabaseManager.get_instance()
+
+    def tearDown(self) -> None:
+        DatabaseManager.reset_instance()
+        Config._instance = None
+        os.environ.pop("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", None)
+        self._temp_dir.cleanup()
+
+    def _add(self, *, code, analysis_date, direction_correct):
+        # 先落 AnalysisHistory 父行满足 BacktestResult.analysis_history_id（nullable=False FK）。
+        with self.db.get_session() as session:
+            history = AnalysisHistory(code=code, name=code, report_type="single")
+            session.add(history)
+            session.flush()
+            session.add(
+                BacktestResult(
+                    analysis_history_id=history.id,
+                    code=code,
+                    analysis_date=analysis_date,
+                    eval_status="completed",
+                    direction_correct=direction_correct,
+                    eval_window_days=10,
+                    engine_version="v1",
+                )
+            )
+            session.commit()
+
+    def test_sample_at_threshold_sets_verified_true(self) -> None:
+        self._add(code="600519", analysis_date=date(2024, 1, 1), direction_correct=True)
+        self._add(code="600519", analysis_date=date(2024, 1, 2), direction_correct=True)
+        self._add(code="600519", analysis_date=date(2024, 1, 3), direction_correct=False)
+
+        fields = resolve_marker_hit_fields("rule_score", "600519")
+
+        self.assertEqual(fields["hit_sample"], 3)
+        self.assertTrue(fields["verified"])
+        self.assertAlmostEqual(fields["hit_rate"], round(2 / 3, 4))
+
+    def test_sample_below_threshold_not_verified(self) -> None:
+        self._add(code="600519", analysis_date=date(2024, 1, 1), direction_correct=True)
+        self._add(code="600519", analysis_date=date(2024, 1, 2), direction_correct=True)
+
+        fields = resolve_marker_hit_fields("rule_score", "600519")
+
+        self.assertEqual(fields["hit_sample"], 2)
+        self.assertFalse(fields["verified"])
+
+    def test_no_sample_returns_null_fields_not_verified(self) -> None:
+        fields = resolve_marker_hit_fields("rule_score", "000002")
+
+        self.assertIsNone(fields["hit_rate"])
+        self.assertIsNone(fields["hit_sample"])
+        self.assertFalse(fields["verified"])
 
 
 if __name__ == "__main__":
