@@ -85,6 +85,111 @@ def test_is_invalid_price_level_flags_disordered_levels() -> None:
     assert is_invalid_price_level(entry=100.0, stop=95.0, target=110.0, current_price=101.0) is False
 
 
+def _fund_flow(main: float, five_day: float = 0.0) -> dict:
+    return {
+        "capital_flow": {
+            "status": "ok",
+            "data": {"stock_flow": {"main_net_inflow": main, "inflow_5d": five_day}},
+        }
+    }
+
+
+def test_apply_price_levels_feeds_guard_via_price_position_not_bypass() -> None:
+    """Buy near resistance without inflow must be downgraded by the EXISTING
+    guard. We assert guard side-effects (decision_stability.applied, decision_type
+    flip, support/resistance echoed) to prove levels travel through
+    data_perspective.price_position -> stabilize_decision_with_structure."""
+    import numpy as np
+    import pandas as pd
+
+    from src.analyzer import AnalysisResult
+    from src.services.volume_price_signals import apply_price_levels_to_guard
+
+    # current price hugging resistance -> guard should downgrade a buy
+    n = 60
+    dates = pd.date_range("2026-01-01", periods=n, freq="D").strftime("%Y-%m-%d")
+    base = np.linspace(100.0, 130.0, n)
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "open": base - 0.2,
+            "high": base + 1.0,
+            "low": base - 1.0,
+            "close": base + 0.2,
+            "volume": np.full(n, 1_000_000.0),
+        }
+    )
+
+    result = AnalysisResult(
+        code="600519",
+        name="贵州茅台",
+        sentiment_score=66,
+        trend_prediction="看多",
+        operation_advice="买入",
+        decision_type="buy",
+        report_language="zh",
+        current_price=float(df["close"].iloc[-1]),
+        change_pct=1.2,
+        dashboard={
+            "core_conclusion": {"one_sentence": "原始结论"},
+            "data_perspective": {
+                "price_position": {
+                    "current_price": float(df["close"].iloc[-1]),
+                    # resistance just above current price; support far below
+                    "support_level": float(df["close"].iloc[-1]) * 0.85,
+                    "resistance_level": float(df["close"].iloc[-1]) * 1.005,
+                }
+            },
+        },
+    )
+
+    levels = apply_price_levels_to_guard(
+        result, df, fundamental_context=_fund_flow(main=-1_000_000, five_day=-2_000_000)
+    )
+
+    # guard ran (not bypassed): side-effects written
+    stability = result.dashboard["decision_stability"]
+    assert stability["applied"] is True
+    # guard read support/resistance from data_perspective.price_position
+    pp = result.dashboard["data_perspective"]["price_position"]
+    assert stability["resistance"] == pytest.approx(pp["resistance_level"], rel=1e-9)
+    # buy near resistance without inflow -> downgraded to hold
+    assert result.decision_type == "hold"
+    assert result.operation_advice != "买入"
+    # returned levels are the single price-line authority (source=rule)
+    assert levels.entry is not None
+
+
+def test_apply_price_levels_writes_levels_into_price_position() -> None:
+    import numpy as np
+    import pandas as pd
+
+    from src.analyzer import AnalysisResult
+    from src.services.volume_price_signals import apply_price_levels_to_guard
+
+    df = _uptrend_df()
+    result = AnalysisResult(
+        code="600519",
+        name="贵州茅台",
+        sentiment_score=55,
+        trend_prediction="震荡",
+        operation_advice="持有",
+        decision_type="hold",
+        report_language="zh",
+        current_price=float(df["close"].iloc[-1]),
+        change_pct=0.0,
+        dashboard={"core_conclusion": {"one_sentence": "x"}, "data_perspective": {}},
+    )
+
+    apply_price_levels_to_guard(result, df, fundamental_context=None)
+
+    pp = result.dashboard["data_perspective"]["price_position"]
+    # support/resistance populated by the back-calculator for the guard to read
+    assert "support_level" in pp
+    assert "resistance_level" in pp
+    assert "current_price" in pp
+
+
 def test_derive_price_levels_falls_back_to_atr_when_entry_above_current() -> None:
     """When swing/MA entry sits above current price (invalid long entry),
     the back-calculator must fall back to ATR-anchored levels off current price,

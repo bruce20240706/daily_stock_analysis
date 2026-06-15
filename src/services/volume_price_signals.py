@@ -783,6 +783,50 @@ def _limit_b_class(b_markers: list[VPSignal], config: VPSConfig) -> list[VPSigna
     return ranked[:config.b_class_top_k]
 
 
+def apply_price_levels_to_guard(
+    result,
+    df,
+    *,
+    fundamental_context=None,
+    atr_mult: float = _DEFAULT_ATR_MULT,
+    rr_target: float = _DEFAULT_RR_TARGET,
+) -> PriceLevels:
+    """Derive price levels, write support/resistance/current_price into
+    result.dashboard['data_perspective']['price_position'], then call the
+    EXISTING stabilize_decision_with_structure guard. Returns the validated
+    PriceLevels (single price-line authority, source=rule)."""
+    levels = derive_price_levels(df, atr_mult=atr_mult, rr_target=rr_target)
+
+    if result is not None and df is not None and "close" in getattr(df, "columns", []):
+        dashboard = result.dashboard if isinstance(result.dashboard, dict) else {}
+        result.dashboard = dashboard
+        dp = dashboard.get("data_perspective")
+        if not isinstance(dp, dict):
+            dp = {}
+            dashboard["data_perspective"] = dp
+        pp = dp.get("price_position")
+        if not isinstance(pp, dict):
+            pp = {}
+            dp["price_position"] = pp
+
+        current_price = _last_finite(df["close"].astype(float))
+        if current_price is not None:
+            pp.setdefault("current_price", current_price)
+        # stop is the structural support the 文案护栏 reads; target the resistance.
+        if levels.stop is not None:
+            pp.setdefault("support_level", levels.stop)
+        if levels.target is not None:
+            pp.setdefault("resistance_level", levels.target)
+
+    # Delayed import to avoid analyzer<->service top-level circular import.
+    from src.analyzer import stabilize_decision_with_structure
+
+    stabilize_decision_with_structure(
+        result, trend_result=None, fundamental_context=fundamental_context
+    )
+    return levels
+
+
 def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSResult:
     """主入口：输入 OHLCV DataFrame，输出 VPSResult，串联 A 类量价信号。"""
     cfg = config or VPSConfig()
