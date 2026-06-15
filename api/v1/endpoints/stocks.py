@@ -23,6 +23,7 @@ from api.v1.schemas.stocks import (
     ExtractFromImageResponse,
     ExtractItem,
     KLineData,
+    SignalsResponse,
     StockHistoryResponse,
     StockQuote,
 )
@@ -41,6 +42,16 @@ from src.services.import_parser import (
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from data_provider.base import normalize_stock_code
+
+import os
+
+import pandas as pd
+
+from src.config import parse_env_int, parse_env_float
+from src.services.volume_price_signals import compute_volume_price_signals
+from src.services.signals_service import build_signals_payload, STALE_TRADING_DAYS_DEFAULT
+from src.stock_analyzer import StockTrendAnalyzer
+from src.storage import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -558,3 +569,124 @@ def get_stock_history(
                 "message": f"获取历史行情失败: {str(e)}"
             }
         )
+
+
+@router.get(
+    "/{stock_code:path}/signals",
+    response_model=SignalsResponse,
+    responses={
+        200: {"description": "信号契约（含 ok/degraded）"},
+        500: {"description": "服务器错误", "model": ErrorResponse},
+    },
+    summary="获取股票量价/规则买卖信号",
+    description=(
+        "返回与 /history 同源的日线收盘级买卖信号标注：规则信号逐 bar、"
+        "LLM 结论最新 1 点、量价/规则一致性与价位线（价位线由后续里程碑填值）。"
+        "degraded 状态仍返回 200 + 部分结果。"
+    ),
+)
+def get_stock_signals(
+    stock_code: str,
+    days: int = Query(120, ge=1, le=365, description="日历回看天数（与 /history 同源）"),
+) -> SignalsResponse:
+    """
+    获取量价/规则买卖信号契约。
+
+    与 /history 同源：复用 StockService.get_history_data 取同一 bar 序列，
+    再叠加 M1 量价引擎 markers、收敛后的单个 BuySignal 代表方向、LLM 最新结论点。
+
+    Args:
+        stock_code: 股票代码（含 '/' 的 crypto 代码通过 {stock_code:path} 路由透传）
+        days: 日历回看天数（与 /history 同源；语义同 get_daily_data）
+
+    Returns:
+        SignalsResponse：status/markers/price_lines/consistency/degraded_reason
+    """
+    try:
+        service = StockService()
+        history = service.get_history_data(stock_code=stock_code, period="daily", days=days)
+        rows = history.get("data", []) or []
+
+        # 数据不足/取数为空：degraded 200，不报错（与 /history 失败不拖垮抽屉一致）
+        if not rows:
+            payload = {
+                "status": "degraded",
+                "markers": [],
+                "price_lines": {"entry": None, "stop": None, "target": None},
+                "consistency": "unknown",
+                "degraded_reason": "无可用历史数据",
+            }
+            return SignalsResponse(**payload)
+
+        df = pd.DataFrame(rows)
+        latest_bar_date = str(rows[-1].get("date"))
+        # LLM 点价位锚到最新 bar 收盘（N1：真实收盘，非 0.0 占位）
+        _latest_close_raw = rows[-1].get("close")
+        latest_close = float(_latest_close_raw) if _latest_close_raw is not None else None
+
+        # M1 量价引擎（逐 bar markers + status/degraded）
+        engine_result = compute_volume_price_signals(df)
+
+        # 收敛后的单个 BuySignal 作"规则代表方向"
+        rule_signal = None
+        try:
+            analyzer = StockTrendAnalyzer()
+            trend_result = analyzer.analyze(df, stock_code)
+            rule_signal = getattr(trend_result, "buy_signal", None)
+        except Exception as exc:  # 规则信号失败不拖垮 markers
+            logger.warning("规则代表方向计算失败 code=%s err=%s", stock_code, exc)
+
+        # LLM 最新 1 条（latest-by-code）
+        llm_record = None
+        try:
+            llm_record = DatabaseManager.get_instance().get_latest_analysis_by_code(stock_code)
+        except Exception as exc:  # LLM 取数失败不拖垮 markers
+            logger.warning("LLM 最新结论读取失败 code=%s err=%s", stock_code, exc)
+
+        trading_days_elapsed = _elapsed_trading_days(llm_record, rows)
+
+        # stale 阈值从 env 读取（与仓库 parse_env_int 入口一致）
+        stale_threshold = parse_env_int(
+            os.getenv("SIGNALS_STALE_TRADING_DAYS"),
+            STALE_TRADING_DAYS_DEFAULT,
+            field_name="SIGNALS_STALE_TRADING_DAYS",
+            minimum=1,
+        )
+
+        payload = build_signals_payload(
+            engine_result=engine_result,
+            rule_signal=rule_signal,
+            latest_bar_date=latest_bar_date,
+            latest_close=latest_close,
+            llm_record=llm_record,
+            trading_days_elapsed=trading_days_elapsed,
+            stale_threshold=stale_threshold,
+        )
+        return SignalsResponse(**payload)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取信号失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "internal_error",
+                "message": f"获取信号失败: {str(e)}",
+            },
+        )
+
+
+def _elapsed_trading_days(llm_record, rows: list) -> Optional[int]:
+    """统计 LLM 结论生成日之后、bar 序列中出现的交易日数（用于 stale 判定）。
+
+    用同源 bar 的日期序列计数（按交易 bar 数，而非自然日），
+    与价格基准契约"窗口按交易 bar 数"一致。
+    """
+    if llm_record is None:
+        return None
+    created_at = getattr(llm_record, "created_at", None)
+    if created_at is None:
+        return None
+    cutoff = created_at.strftime("%Y-%m-%d")
+    return sum(1 for r in rows if str(r.get("date")) > cutoff)
