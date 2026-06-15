@@ -245,6 +245,135 @@ def atr(df, period: int = 14) -> pd.Series:
     return pd.Series(atr_values, index=tr.index)
 
 
+# ---------------------------------------------------------------------------
+# Task 3: 量价八法穷尽互斥查表
+# 5 量档 × 3 价档 = 15 格，每格必有归类（信号或 neutral 兜底），无死区。
+# ---------------------------------------------------------------------------
+
+# 15-cell truth table: (vol_bucket, price_bucket) -> (signal_type, direction)
+# 量增价升（up/high × up）须叠加 body>0 或 range_pos>0.5 才确认 bullish，
+# 否则降级 neutral（"高开收阴放量" 派发陷阱）。
+_VFX_TABLE: dict[tuple[str, str], tuple[str, str]] = {
+    ("low",    "down"): ("vfx_shrink_down",  "bearish"),
+    ("low",    "flat"): ("vfx_dry_flat",      "neutral"),
+    ("low",    "up"):   ("vfx_shrink_up",     "bullish"),
+    ("shrink", "down"): ("vfx_shrink_down",   "neutral"),
+    ("shrink", "flat"): ("vfx_dry_flat",      "neutral"),
+    ("shrink", "up"):   ("vfx_shrink_up",     "neutral"),
+    ("normal", "down"): ("vfx_normal_down",   "neutral"),
+    ("normal", "flat"): ("vfx_normal_flat",   "neutral"),
+    ("normal", "up"):   ("vfx_normal_up",     "neutral"),
+    ("up",     "down"): ("vfx_expand_down",   "bearish"),
+    ("up",     "flat"): ("vfx_expand_flat",   "neutral"),
+    ("up",     "up"):   ("vfx_expand_up",     "bullish"),
+    ("high",   "down"): ("vfx_climax_down",   "bearish"),
+    ("high",   "flat"): ("vfx_climax_flat",   "neutral"),
+    ("high",   "up"):   ("vfx_climax_up",     "bullish"),
+}
+
+# 量增价升需要形态确认（body>0 或 range_pos>0.5），否则降级 neutral
+_VFX_NEEDS_CONFIRM: frozenset[tuple[str, str]] = frozenset({
+    ("up", "up"),
+    ("high", "up"),
+})
+
+
+def _volume_bucket(rel_vol, config: VPSConfig) -> str | None:
+    """将 rel_vol 映射到量档字符串（左闭右开，对称无缝）。
+
+    None / NaN -> None（调用方负责处理异常路径）。
+    边界：low<0.7 / shrink [0.7,0.8) / normal [0.8,1.2) / up [1.2,1.5) / high>=1.5
+    """
+    if rel_vol is None or (isinstance(rel_vol, float) and np.isnan(rel_vol)):
+        return None
+    if rel_vol < config.vol_low:
+        return "low"
+    if rel_vol < config.vol_shrink:
+        return "shrink"
+    if rel_vol < config.vol_up:
+        return "normal"
+    if rel_vol < config.vol_high:
+        return "up"
+    return "high"
+
+
+def _price_bucket(pct_chg, config: VPSConfig) -> str | None:
+    """将 pct_chg 映射到价档字符串。
+
+    None / NaN -> None（调用方负责处理异常路径）。
+    down: pct_chg < -eps / flat: |pct_chg| <= eps / up: pct_chg > eps
+    """
+    if pct_chg is None or (isinstance(pct_chg, float) and np.isnan(pct_chg)):
+        return None
+    if pct_chg < -config.eps:
+        return "down"
+    if pct_chg > config.eps:
+        return "up"
+    return "flat"
+
+
+def _classify_vfx(
+    *,
+    rel_vol,
+    pct_chg,
+    body,
+    range_pos,
+    config: VPSConfig,
+) -> VPSignal:
+    """量价八法分类（纯函数）。
+
+    穷尽且互斥：每个 (vol_bucket × price_bucket) 组合映射到唯一结果。
+    rel_vol 为 None/NaN 或 pct_chg 为 None/NaN -> vfx_undefined neutral + is_anomalous。
+    量增价升（up/high × up）需确认 body>0 或 range_pos>0.5，否则降级 neutral（派发陷阱）。
+    """
+    vbucket = _volume_bucket(rel_vol, config)
+    pbucket = _price_bucket(pct_chg, config)
+
+    # 异常路径：量比或涨跌幅不可用（vol_ma<=0/NaN 或一字板导致 pct_chg NaN）
+    if vbucket is None or pbucket is None:
+        return VPSignal(
+            timestamp=0,
+            price=0.0,
+            anchor="close",
+            direction="neutral",
+            signal_type="vfx_undefined",
+            confidence="low",
+            is_daily_approx=True,
+            is_anomalous=True,
+            reason="量比或涨跌幅不可用（vol_ma<=0/NaN 或一字板）",
+            threshold=None,
+            observed_value=float(rel_vol) if rel_vol is not None else None,
+        )
+
+    # 查表（_VFX_TABLE 覆盖全部 15 格，不会 KeyError）
+    signal_type, direction = _VFX_TABLE[(vbucket, pbucket)]
+
+    # 量增价升确认规则：需 body>0 或 range_pos>0.5，否则降级 neutral（派发）
+    if (vbucket, pbucket) in _VFX_NEEDS_CONFIRM:
+        body_ok = body is not None and body > 0
+        pos_ok = (
+            range_pos is not None
+            and not (isinstance(range_pos, float) and np.isnan(range_pos))
+            and range_pos > 0.5
+        )
+        if not (body_ok or pos_ok):
+            direction = "neutral"
+
+    return VPSignal(
+        timestamp=0,
+        price=0.0,
+        anchor="close",
+        direction=direction,
+        signal_type=signal_type,
+        confidence="medium",
+        is_daily_approx=True,
+        is_anomalous=False,
+        reason=f"量价八法：量档={vbucket}/价档={pbucket}",
+        threshold=None,
+        observed_value=float(rel_vol),
+    )
+
+
 def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSResult:
     """主入口：输入 OHLCV DataFrame，输出 VPSResult。"""
     cfg = config or VPSConfig()

@@ -22,6 +22,9 @@ from src.services.volume_price_signals import (
     _compute_primitives,
     _normalize,
     _to_epoch_ms_shanghai,
+    _volume_bucket,
+    _price_bucket,
+    _classify_vfx,
 )
 
 SH = ZoneInfo("Asia/Shanghai")
@@ -142,3 +145,61 @@ def test_atr_matches_wilder_manual():
     assert out.iloc[2] == pytest.approx(2.25)
     assert out.iloc[3] == pytest.approx(2.125)
     assert (out.dropna() > 0).all()
+
+
+# ---------------------------------------------------------------------------
+# Task 3: 量价八法穷尽互斥查表
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("rel_vol,expected", [
+    (0.69, "low"), (0.70, "shrink"), (0.79, "shrink"),
+    (0.80, "normal"), (1.19, "normal"),
+    (1.20, "up"), (1.49, "up"),
+    (1.50, "high"), (3.0, "high"),
+])
+def test_volume_bucket_boundaries(rel_vol, expected):
+    assert _volume_bucket(rel_vol, VPSConfig()) == expected
+
+
+@pytest.mark.parametrize("pct,expected", [
+    (-0.005, "down"), (-0.0041, "down"),
+    (-0.004, "flat"), (0.0, "flat"), (0.004, "flat"),
+    (0.0041, "up"), (0.02, "up"),
+])
+def test_price_bucket_boundaries(pct, expected):
+    assert _price_bucket(pct, VPSConfig()) == expected
+
+
+def test_vfx_truth_table_complete_no_dead_zone():
+    cfg = VPSConfig()
+    seen = set()
+    for rel in (0.5, 0.75, 1.0, 1.3, 2.0):
+        for pct in (-0.02, 0.0, 0.02):
+            sig = _classify_vfx(rel_vol=rel, pct_chg=pct, body=1.0, range_pos=0.8, config=cfg)
+            assert sig is not None
+            assert sig.signal_type.startswith("vfx_")
+            assert sig.direction in {"bullish", "bearish", "neutral"}
+            seen.add((rel, pct))
+    assert len(seen) == 15  # 5 量档 × 3 价档 全覆盖
+
+
+def test_vfx_expand_up_without_body_confirmation_degrades_to_neutral():
+    cfg = VPSConfig()
+    # 量增价升但收阴(body<0)、收在下半区 -> 派发，不得判 bullish
+    sig = _classify_vfx(rel_vol=1.3, pct_chg=0.02, body=-1.0, range_pos=0.2, config=cfg)
+    assert sig.signal_type == "vfx_expand_up"
+    assert sig.direction == "neutral"
+
+
+def test_vfx_expand_up_with_body_confirmation_is_bullish():
+    cfg = VPSConfig()
+    sig = _classify_vfx(rel_vol=1.3, pct_chg=0.02, body=1.0, range_pos=0.8, config=cfg)
+    assert sig.direction == "bullish"
+
+
+def test_vfx_none_rel_vol_is_anomalous_neutral():
+    cfg = VPSConfig()
+    sig = _classify_vfx(rel_vol=None, pct_chg=0.02, body=1.0, range_pos=0.8, config=cfg)
+    assert sig.signal_type == "vfx_undefined"
+    assert sig.direction == "neutral"
+    assert sig.is_anomalous is True
