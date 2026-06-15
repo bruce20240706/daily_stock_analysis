@@ -243,3 +243,17 @@ def test_build_price_lines_maps_levels_with_nullable_fields() -> None:
     assert empty.entry is None
     assert empty.stop is None
     assert empty.target is None
+
+
+def test_env_example_documents_price_level_tunables() -> None:
+    """Guard: .env.example must document the price-level tunable keys.
+
+    These keys are read at the /signals call site via parse_env_float;
+    this test prevents "config documented but inert" drift.
+    """
+    from pathlib import Path
+
+    env_example = Path(__file__).parents[1] / ".env.example"
+    text = env_example.read_text(encoding="utf-8")
+    assert "KLINE_PRICE_LEVEL_ATR_MULT" in text
+    assert "KLINE_PRICE_LEVEL_RR_TARGET" in text
