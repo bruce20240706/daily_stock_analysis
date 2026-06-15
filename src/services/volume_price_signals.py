@@ -170,16 +170,63 @@ def _compute_primitives(norm_df: pd.DataFrame, config: VPSConfig) -> pd.DataFram
     return prim
 
 
-# ---------------------------------------------------------------------------
-# 占位骨架（Task 2/4 替换真实逻辑）
-# ---------------------------------------------------------------------------
+def find_swing_pivots(series, k: int) -> list[Pivot]:
+    """左右各 k 根严格确认的摆动高低点；天然滞后 k，不含未来函数。
 
-def find_swing_pivots(series, k: int) -> list["Pivot"]:
-    raise NotImplementedError("implemented in Task 2")
+    pivot at index i is confirmed only when bars i+1 … i+k all exist and
+    are strictly lower (for high) / strictly higher (for low) than center.
+    The loop range(k, n-k) guarantees right-side bars always exist before
+    emitting a pivot — no lookahead.
+    """
+    values = pd.Series(series).astype(float).reset_index(drop=True)
+    n = len(values)
+    pivots: list[Pivot] = []
+    if n < 2 * k + 1 or k < 1:
+        return pivots
+    for i in range(k, n - k):
+        window = values.iloc[i - k:i + k + 1]
+        center = values.iloc[i]
+        left = window.iloc[:k]
+        right = window.iloc[k + 1:]
+        if center > left.max() and center > right.max():
+            pivots.append(Pivot(index=i, timestamp=0, price=float(center), kind="high"))
+        elif center < left.min() and center < right.min():
+            pivots.append(Pivot(index=i, timestamp=0, price=float(center), kind="low"))
+    return pivots
+
+
+def _attach_pivot_timestamps(pivots: list[Pivot], norm_df: pd.DataFrame) -> list[Pivot]:
+    """在拿到 norm_df 后将 find_swing_pivots 产出的 timestamp=0 回填为真实时间锚。"""
+    return [
+        Pivot(
+            index=p.index,
+            timestamp=_to_epoch_ms_shanghai(norm_df["date"].iloc[p.index]),
+            price=p.price,
+            kind=p.kind,
+        )
+        for p in pivots
+    ]
 
 
 def atr(df, period: int = 14) -> pd.Series:
-    raise NotImplementedError("implemented in Task 2")
+    """Wilder ATR（全仓唯一定义，M2b 复用）。
+
+    公式：TR = max(high-low, |high-prev_close|, |low-prev_close|)
+    平滑方式：EWM alpha=1/period，adjust=False，min_periods=1（Wilder 平滑）。
+    首行 prev_close 为 NaN，TR[0] = NaN；EWM seed 从 TR[1] 起。
+    """
+    frame = pd.DataFrame(df)
+    high = frame["high"].astype(float)
+    low = frame["low"].astype(float)
+    close = frame["close"].astype(float)
+    prev_close = close.shift(1)
+    # skipna=False: TR[0] = NaN（首行无前收价，True Range 未定义）；
+    # EWM 以 TR[1] 为 seed，与 Wilder 平滑定义一致。
+    tr = pd.concat(
+        [(high - low), (high - prev_close).abs(), (low - prev_close).abs()],
+        axis=1,
+    ).max(axis=1, skipna=False)
+    return tr.ewm(alpha=1.0 / period, adjust=False, min_periods=1).mean()
 
 
 def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSResult:

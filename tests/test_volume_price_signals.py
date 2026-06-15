@@ -90,3 +90,43 @@ def test_normalize_insufficient_window_returns_degraded_reason():
     result = compute_volume_price_signals(df, config=VPSConfig())
     assert result.status == "degraded"
     assert result.degraded_reason is not None and "insufficient" in result.degraded_reason.lower()
+
+
+def test_find_swing_pivots_lags_by_k_no_lookahead():
+    # V 形：低点在 index 3，k=2 需 index 5 才确认 -> pivot.index==3 但只有右侧 2 根确认后才产出
+    closes = [10, 9, 8, 5, 8, 9, 10]
+    s = pd.Series(closes)
+    pivots = find_swing_pivots(s, k=2)
+    lows = [p for p in pivots if p.kind == "low"]
+    assert any(p.index == 3 and p.price == 5 for p in lows)
+    # 最后 k 根不可能成为已确认 pivot（右侧确认不足）
+    assert all(p.index <= len(closes) - 1 - 2 for p in pivots)
+
+
+def test_find_swing_pivots_micro_new_high_is_not_pivot():
+    # 每日微创新高（单调上升）-> 无 swing high pivot（永远没有右侧更低确认）
+    s = pd.Series([float(i) for i in range(20)])
+    pivots = find_swing_pivots(s, k=3)
+    assert [p for p in pivots if p.kind == "high"] == []
+
+
+def test_find_swing_pivots_detects_high_and_low():
+    closes = [1, 2, 3, 2, 1, 2, 3, 4, 3, 2]
+    pivots = find_swing_pivots(pd.Series(closes), k=2)
+    highs = [p for p in pivots if p.kind == "high"]
+    lows = [p for p in pivots if p.kind == "low"]
+    assert any(p.index == 2 for p in highs)
+    assert any(p.index == 4 for p in lows)
+
+
+def test_atr_matches_wilder_manual():
+    df = pd.DataFrame({
+        "high": [10, 12, 13, 14],
+        "low": [8, 9, 11, 12],
+        "close": [9, 11, 12, 13],
+    })
+    out = atr(df, period=2)
+    # TR1 NaN(no prev close); TR2=max(12-9,|12-9|,|9-9|)=3; TR3=max(13-11,|13-11|,|11-11|)=2
+    assert out.iloc[1] == pytest.approx(3.0)  # first available (rolling/ewm seed)
+    assert out.notna().iloc[-1]
+    assert (out.dropna() > 0).all()
