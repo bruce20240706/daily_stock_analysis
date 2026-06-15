@@ -251,6 +251,101 @@ def atr(df, period: int = 14) -> pd.Series:
 
 
 # ---------------------------------------------------------------------------
+# M2b-1: 价位反算器（entry / stop / target / risk_reward）
+# ---------------------------------------------------------------------------
+
+# 可配项（对应 .env.example 中的 VPS_ATR_MULT / VPS_RR_TARGET）
+_DEFAULT_ATR_MULT = 1.5
+_DEFAULT_RR_TARGET = 2.0
+_PRICE_LEVEL_WINDOW = 20
+
+
+@dataclass
+class PriceLevels:
+    """Back-calculated long-setup price levels (single authority, source=rule).
+
+    entry        最贴近现价的支撑参考（MA20 与近20日低点中取较高的那个，且 <= 现价）
+    stop         entry - atr_mult * ATR
+    target       entry + rr_target * (entry - stop)
+    risk_reward  (target - entry) / (entry - stop)，理论上等于 rr_target
+    """
+
+    entry: float | None
+    stop: float | None
+    target: float | None
+    risk_reward: float | None
+
+
+def _last_finite(series) -> float | None:
+    """取 Series 末值并转 float；NaN / None / 空 Series 返回 None。"""
+    if series is None or len(series) == 0:
+        return None
+    value = series.iloc[-1]
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if value != value:  # NaN guard（不依赖 math.isnan，兼容更广）
+        return None
+    return value
+
+
+def derive_price_levels(
+    df,
+    *,
+    atr_mult: float = _DEFAULT_ATR_MULT,
+    rr_target: float = _DEFAULT_RR_TARGET,
+) -> PriceLevels:
+    """Derive entry/stop/target/risk_reward from MA20 / 20-bar swing low / ATR.
+
+    复用 M1 canonical atr()，与图上规则信号同源（同一 OHLCV DataFrame）。
+    任何子项无法计算（窗口不足、ATR 为 NaN）时返回 None，不抛异常。
+
+    公式：
+      entry      = MA20 与 近20日低点中较高者（贴近现价的支撑）；需 <= 现价
+      stop       = entry - atr_mult * ATR
+      target     = entry + rr_target * (entry - stop)
+      risk_reward = (target - entry) / (entry - stop)  [理论上 == rr_target]
+    """
+    if df is None or getattr(df, "empty", True) or "close" not in df.columns:
+        return PriceLevels(entry=None, stop=None, target=None, risk_reward=None)
+
+    close = df["close"].astype(float)
+    current_price = _last_finite(close)
+
+    # MA20：窗口不足时末值为 NaN，_last_finite 返回 None
+    ma20 = _last_finite(close.rolling(_PRICE_LEVEL_WINDOW).mean())
+
+    # 近20日最低点：需要 low 列且行数足够
+    swing_low: float | None = None
+    if "low" in df.columns and len(df) >= _PRICE_LEVEL_WINDOW:
+        swing_low = _last_finite(df["low"].astype(float).rolling(_PRICE_LEVEL_WINDOW).min())
+
+    # entry = 支撑候选中 <= 现价的最高值（最贴近现价的支撑）
+    entry_candidates = [c for c in (ma20, swing_low) if c is not None]
+    if current_price is not None:
+        below = [c for c in entry_candidates if c <= current_price]
+        entry = max(below) if below else (min(entry_candidates) if entry_candidates else None)
+    else:
+        entry = max(entry_candidates) if entry_candidates else None
+
+    # ATR：复用 M1 canonical atr()，窗口不足时末值为 NaN
+    last_atr = _last_finite(atr(df))
+    if entry is None or last_atr is None or last_atr <= 0:
+        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
+
+    stop = entry - atr_mult * last_atr
+    risk = entry - stop  # == atr_mult * last_atr，恒 > 0
+    if risk <= 0:
+        # 防御：理论上不可达，但 float 精度问题时不产出无意义价位
+        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
+
+    target = entry + rr_target * risk
+    risk_reward = (target - entry) / risk
+    return PriceLevels(entry=entry, stop=stop, target=target, risk_reward=risk_reward)
+
+
+# ---------------------------------------------------------------------------
 # Task 3: 量价八法穷尽互斥查表
 # 5 量档 × 3 价档 = 15 格，每格必有归类（信号或 neutral 兜底），无死区。
 # ---------------------------------------------------------------------------
