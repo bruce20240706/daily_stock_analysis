@@ -243,14 +243,25 @@ def test_obv_top_divergence_when_price_high_obv_not():
 
 
 def test_breakout_excludes_current_day():
-    # 当日收盘恰等于此前窗口最高；shift(1) 不含当日 -> 视为突破（>= 历史 max）
+    # 判别性场景：close == 过去 N 日 high（pad 全部为 100），但当日盘中有更高 wick（high=110）。
+    # 正确 shift(1) 实现：prior_max 不含当日 wick -> prior_max=100；close=100>=100 -> 突破触发。
+    # 有 bug 的 no-shift 实现：prior_max 含当日 wick=110 -> prior_max=110；close=100<110 -> 无突破。
+    # 因此此处断言突破触发，能有效鉴别 shift(1) 正确与否。
     pad = [_bar(100, 100.0, 99.0, 100, 1000) for _ in range(30)]
-    breakout = _bar(100, 105.0, 100.0, 105.0, 5000)  # close 105 >= 此前 high max 100, rel_vol 高
+    # close=100 == prior 20-day high=100；intraday wick high=110 创当日新高但不影响突破判断
+    breakout = _bar(100, 110.0, 99.0, 100.0, 5000)  # rel_vol=5000/1000=5.0 >= 2.0
     df = _make_df(pad + [breakout])
     res = compute_volume_price_signals(df, config=VPSConfig(breakout_window=20, breakout_rel_vol=2.0))
     bks = [m for m in res.markers if m.signal_type == "volume_breakout"]
-    assert len(bks) == 1
+    # 正确实现：prior_max=100，close=100 >= 100 -> 1 个突破信号
+    assert len(bks) == 1, (
+        f"期望 1 个 volume_breakout，实际 {len(bks)} 个；"
+        "若为 0，说明 prior_max 包含了当日 wick（未 shift(1)）"
+    )
     assert bks[0].timestamp == _to_epoch_ms_shanghai(df["date"].iloc[-1])
+    # 辅助：pad 段不得产生突破（无放量，price 无变化）
+    non_breakout_ts = {_to_epoch_ms_shanghai(df["date"].iloc[i]) for i in range(len(pad))}
+    assert all(m.timestamp not in non_breakout_ts for m in bks)
 
 
 def test_breakout_requires_rel_vol_threshold():
@@ -266,6 +277,58 @@ def test_anchored_vwap_only_anchors_confirmed_breakout_not_future_bottom():
     df = _trend_up_df(40)  # 平滑上行，无放量突破事件
     res = compute_volume_price_signals(df)
     assert all(not m.signal_type.startswith("anchored_vwap") for m in res.markers)
+
+
+def test_anchored_vwap_anchors_on_breakout_day_not_future_bottom():
+    # 判别性正向场景：确认放量突破日 -> 价格跌破 AVWAP -> 反弹重夺 AVWAP。
+    # 正确实现：锚定在突破日，跌破时产生 anchored_vwap_loss，重夺时产生 anchored_vwap_reclaim。
+    # 前向错误实现（如锚定在突破后底部）：底部出现之前没有 AVWAP，无法产生 vwap_loss 信号；
+    # 且从底部起算的 AVWAP 很低，close 始终在上方，reclaim 也不会在底部后第一根触发。
+    # 因此对 vwap_loss 信号的存在性断言能有效鉴别锚点是否为突破日。
+
+    # 30 根垫片：high=100，vol=1000；用于建立 vol_ma 窗口
+    pad = [_bar(100, 100.0, 99.0, 100, 1000) for _ in range(30)]
+
+    # 突破日（index 30）：close=108，high=110，先于盘中 wick，收盘 >100 = 过去 N 日 high
+    # shift(1) prior_max = max(pad highs) = 100.0；close=108 >= 100 -> 放量突破确认
+    # vol=5000，vol_ma = mean(pad vols) = 1000 -> rel_vol=5.0 >= 2.0
+    bk_bar = _bar(100, 110.0, 99.0, 108.0, 5000)
+
+    # 突破后 1 根（index 31）：价格从 108 快速跌回 101，跌破 AVWAP（~105.25）
+    # AVWAP 起点 = 突破日 typical=(110+99+108)/3=105.67，prev_delta=108-105.67>0
+    # 此根 close=101，AVWAP[1]≈105.25，curr_delta=101-105.25<0 -> vwap_loss 边缘穿越
+    dip_bar = _bar(106, 107.0, 100.0, 101.0, 800)
+
+    # 突破后 2 根（index 32）：价格仍低，AVWAP[2]≈104.85，close=100 仍在下方
+    low_bar = _bar(102, 104.0, 99.0, 100.0, 600)
+
+    # 突破后 3 根（index 33）：放量反弹至 107，超过 AVWAP[3]≈105.13 -> vwap_reclaim
+    reclaim_bar = _bar(104, 108.0, 103.0, 107.0, 2000)
+
+    df = _make_df(pad + [bk_bar, dip_bar, low_bar, reclaim_bar])
+    cfg = VPSConfig(breakout_window=20, breakout_rel_vol=2.0)
+    res = compute_volume_price_signals(df, config=cfg)
+
+    avwap_signals = [m for m in res.markers if m.signal_type.startswith("anchored_vwap")]
+    avwap_types = {m.signal_type for m in avwap_signals}
+
+    # 必须同时出现失守和重夺信号
+    assert "anchored_vwap_loss" in avwap_types, (
+        "未产生 anchored_vwap_loss；若锚点在未来底部则此信号不会出现（前向错误）"
+    )
+    assert "anchored_vwap_reclaim" in avwap_types, (
+        "未产生 anchored_vwap_reclaim；AVWAP 信号链不完整"
+    )
+
+    # 验证锚点在突破日：loss 信号应在突破后 1 根（index 31）
+    bk_date_ts = _to_epoch_ms_shanghai(df["date"].iloc[30])   # 突破日
+    dip_date_ts = _to_epoch_ms_shanghai(df["date"].iloc[31])  # 跌破日（loss 应发生在此）
+    loss_signals = [m for m in avwap_signals if m.signal_type == "anchored_vwap_loss"]
+    assert any(m.timestamp == dip_date_ts for m in loss_signals), (
+        f"vwap_loss 应发生在突破后第 1 根（{dip_date_ts}），"
+        f"实际时间戳为 {[m.timestamp for m in loss_signals]}；"
+        "若锚点不是突破日则 loss 时间戳将错位或缺失"
+    )
 
 
 def test_compute_degraded_on_short_window():
