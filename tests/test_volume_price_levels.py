@@ -223,3 +223,23 @@ def test_derive_price_levels_falls_back_to_atr_when_entry_above_current() -> Non
     assert levels.stop < levels.entry < levels.target
     # entry anchored on current price in fallback
     assert levels.entry == pytest.approx(float(df["close"].iloc[-1]), rel=1e-6)
+
+
+def test_build_price_lines_maps_levels_with_nullable_fields() -> None:
+    from api.v1.endpoints.stocks import build_price_lines
+    from src.services.volume_price_signals import PriceLevels
+
+    full = build_price_lines(PriceLevels(entry=100.0, stop=95.0, target=110.0, risk_reward=2.0))
+    assert full.entry == 100.0
+    assert full.stop == 95.0
+    assert full.target == 110.0
+
+    partial = build_price_lines(PriceLevels(entry=100.0, stop=None, target=None, risk_reward=None))
+    assert partial.entry == 100.0
+    assert partial.stop is None
+    assert partial.target is None
+
+    empty = build_price_lines(None)
+    assert empty.entry is None
+    assert empty.stop is None
+    assert empty.target is None

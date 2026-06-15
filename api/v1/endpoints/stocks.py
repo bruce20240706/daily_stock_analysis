@@ -24,6 +24,7 @@ from api.v1.schemas.stocks import (
     ExtractFromImageResponse,
     ExtractItem,
     KLineData,
+    PriceLines,
     SignalsResponse,
     StockHistoryResponse,
     StockQuote,
@@ -31,7 +32,7 @@ from api.v1.schemas.stocks import (
 from api.v1.schemas.history import WatchlistRequest, WatchlistResponse
 from api.v1.schemas.common import ErrorResponse
 from data_provider.base import normalize_stock_code
-from src.config import parse_env_int
+from src.config import parse_env_float, parse_env_int
 from src.services.image_stock_extractor import (
     ALLOWED_MIME,
     MAX_SIZE_BYTES,
@@ -45,13 +46,31 @@ from src.services.import_parser import (
 from src.services.signals_service import build_signals_payload, STALE_TRADING_DAYS_DEFAULT
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
-from src.services.volume_price_signals import compute_volume_price_signals
+from src.services.volume_price_signals import (
+    PriceLevels,
+    _DEFAULT_ATR_MULT,
+    _DEFAULT_RR_TARGET,
+    compute_volume_price_signals,
+    derive_price_levels,
+)
 from src.stock_analyzer import StockTrendAnalyzer
 from src.storage import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def build_price_lines(levels: "PriceLevels | None") -> PriceLines:
+    """Map back-calculated PriceLevels to the API PriceLines (each nullable).
+
+    Single price-line authority is the rule back-calculator; LLM SniperPoints
+    are not drawn as lines this milestone.
+    """
+    if levels is None:
+        return PriceLines(entry=None, stop=None, target=None)
+    return PriceLines(entry=levels.entry, stop=levels.stop, target=levels.target)
+
 
 # 须在 /{stock_code} 路由之前定义
 ALLOWED_MIME_STR = ", ".join(ALLOWED_MIME)
@@ -658,6 +677,21 @@ def get_stock_signals(
             trading_days_elapsed=trading_days_elapsed,
             stale_threshold=stale_threshold,
         )
+
+        # /signals 纯读：直接用反算器数值填 price_lines（无副作用、不写 price_position、不调护栏）。
+        # 护栏写入（price_position + stabilize_decision_with_structure）属分析主流程，不在此端点。
+        # 价位反算可配项真正从 env 读取，不配置时回落函数默认 1.5 / 2.0。
+        atr_mult = parse_env_float(
+            os.getenv("KLINE_PRICE_LEVEL_ATR_MULT"), _DEFAULT_ATR_MULT,
+            field_name="KLINE_PRICE_LEVEL_ATR_MULT", minimum=0.1,
+        )
+        rr_target = parse_env_float(
+            os.getenv("KLINE_PRICE_LEVEL_RR_TARGET"), _DEFAULT_RR_TARGET,
+            field_name="KLINE_PRICE_LEVEL_RR_TARGET", minimum=0.1,
+        )
+        price_levels = derive_price_levels(df, atr_mult=atr_mult, rr_target=rr_target)
+        payload["price_lines"] = build_price_lines(price_levels).model_dump()
+
         return SignalsResponse(**payload)
 
     except HTTPException:
