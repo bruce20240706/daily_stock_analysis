@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -342,7 +343,71 @@ def derive_price_levels(
 
     target = entry + rr_target * risk
     risk_reward = (target - entry) / risk
-    return PriceLevels(entry=entry, stop=stop, target=target, risk_reward=risk_reward)
+    candidate = PriceLevels(entry=entry, stop=stop, target=target, risk_reward=risk_reward)
+    if is_invalid_price_level(
+        entry=candidate.entry,
+        stop=candidate.stop,
+        target=candidate.target,
+        current_price=current_price,
+    ):
+        return _fallback_atr_levels(
+            current_price, last_atr, atr_mult=atr_mult, rr_target=rr_target
+        )
+    return candidate
+
+
+# ---------------------------------------------------------------------------
+# M2b-2: 价位合理性校验 + ATR 回退
+# ---------------------------------------------------------------------------
+
+
+def is_invalid_price_level(
+    *,
+    entry: float | None,
+    stop: float | None,
+    target: float | None,
+    current_price: float | None,
+) -> bool:
+    """Risk-sanity check for back-calculated long levels (NEW, not the
+    analyzer's internal _is_invalid_stop_loss closure).
+
+    Returns True (invalid) when any of the following hold:
+    - Any of entry/stop/target is None, non-finite, or <= 0
+    - Monotonic ordering violated: stop < entry < target is not satisfied
+    - entry > current_price (long entry cannot sit above current price)
+    """
+    for value in (entry, stop, target):
+        if value is None or not math.isfinite(value) or value <= 0:
+            return True
+    # long-setup ordering: stop < entry < target
+    if not (stop < entry < target):  # type: ignore[operator]
+        return True
+    # long entry must not sit above current price
+    if current_price is not None and entry > current_price:  # type: ignore[operator]
+        return True
+    return False
+
+
+def _fallback_atr_levels(
+    current_price: float | None,
+    last_atr: float | None,
+    *,
+    atr_mult: float,
+    rr_target: float,
+) -> PriceLevels:
+    """ATR 回退：以 current_price 为 entry，ATR 重算 stop/target。
+
+    ATR 不可用（None / <= 0）时 stop/target 置 None（隐藏价位线）。
+    """
+    if current_price is None or last_atr is None or last_atr <= 0:
+        return PriceLevels(entry=current_price, stop=None, target=None, risk_reward=None)
+    entry = current_price
+    stop = entry - atr_mult * last_atr
+    risk = entry - stop
+    if risk <= 0:
+        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
+    target = entry + rr_target * risk
+    return PriceLevels(entry=entry, stop=stop, target=target, risk_reward=(target - entry) / risk)
 
 
 # ---------------------------------------------------------------------------
