@@ -11,6 +11,7 @@ import { ApiErrorAlert, Button, EmptyState, InlineAlert } from '../components/co
 import { DashboardStateBlock } from '../components/dashboard';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { StockHistoryTrendDrawer, StockBar } from '../components/history';
+import { KLineDrawer } from '../components/kline';
 import { ReportMarkdownDrawer } from '../components/report/ReportMarkdownDrawer';
 import { MarketReviewReportView } from '../components/report/MarketReviewReportView';
 import { ReportSummary } from '../components/report/ReportSummary';
@@ -338,6 +339,17 @@ const HomePage: React.FC = () => {
   }, [clearMarketReviewState, selectHistoryItem]);
 
   const [isDeletingStock, setIsDeletingStock] = useState(false);
+
+  const [klineTarget, setKlineTarget] = useState<{ stockCode: string; stockName?: string } | null>(null);
+
+  const handleViewKline = useCallback((stockCode: string, stockName?: string) => {
+    setKlineTarget({ stockCode, stockName });
+  }, []);
+
+  const handleCloseKline = useCallback(() => {
+    setKlineTarget(null);
+  }, []);
+
   const handleDeleteStock = useCallback(async (stockCode: string) => {
     if (isDeletingStock) return;
     setIsDeletingStock(true);
@@ -582,6 +594,7 @@ const HomePage: React.FC = () => {
           selectedRecordId={selectedReport?.meta.id}
           onItemClick={handleHistoryItemClick}
           onDeleteStock={handleDeleteStock}
+          onViewKline={handleViewKline}
           isDeleting={isDeletingStock}
           className="flex-1 overflow-hidden"
         />
@@ -593,6 +606,7 @@ const HomePage: React.FC = () => {
       isLoadingStockBar,
       handleHistoryItemClick,
       handleDeleteStock,
+      handleViewKline,
       isDeletingStock,
       selectedReport?.meta.stockCode,
       selectedReport?.meta.id,
@@ -962,6 +976,15 @@ const HomePage: React.FC = () => {
           onClose={closeMarkdownDrawer}
         />
       ) : null}
+
+      {klineTarget && (
+        <KLineDrawer
+          stockCode={klineTarget.stockCode}
+          stockName={klineTarget.stockName}
+          isOpen={true}
+          onClose={handleCloseKline}
+        />
+      )}
 
     </div>
   );
