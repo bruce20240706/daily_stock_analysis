@@ -87,3 +87,6 @@ static/
 /apps/dsa-desktop/dist/
 /apps/dsa-desktop/node_modules/
 docs/specs/
+
+# Superpowers brainstorm local artifacts
+.superpowers/
