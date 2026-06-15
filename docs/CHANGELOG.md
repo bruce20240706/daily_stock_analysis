@@ -90,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] Web 回测页新增「仓位/模拟」列：透出做多/做空/空仓、资金费折算后的模拟收益与出场原因（perp 做空回测结果首次用户可见，旧数据降级显示 --）
 - [新功能] crypto 衍生品抓取新增 Binance fapi 整源兜底（OKX 全空才降级，source 标实际来源并动态进 prompt；回测资金费历史同享；新增 BINANCE_FAPI_BASE_URL 可换镜像，默认官方域名）
 - [新功能] perp 回测新增杠杆情景（CRYPTO_BACKTEST_LEVERAGE/API leverage，1-125x，含保守强平模拟与收益放大；结果按 engine_version 标签 v1-xN 与 1x 隔离共存，读 API 增 engine_version 查询参数；默认 1x 行为不变，每日自动回测固定 1x，仅 perp 生效）
+- [新功能] 新增量价信号引擎 volume_price_signals.py（量价八法/OBV 背离/放量突破/缩量回调/锚定 VWAP/VSA 降权）
 
 ## [3.20.0] - 2026-06-03
 

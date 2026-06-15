@@ -51,8 +51,13 @@ class VPSConfig:
             vol_up=parse_env_float(os.getenv("VPS_VOL_UP"), 1.2, field_name="VPS_VOL_UP", minimum=0.0),
             vol_high=parse_env_float(os.getenv("VPS_VOL_HIGH"), 1.5, field_name="VPS_VOL_HIGH", minimum=0.0),
             swing_k=int(parse_env_float(os.getenv("VPS_SWING_K"), 3.0, field_name="VPS_SWING_K", minimum=1.0)),
+            vol_ma_window=int(parse_env_float(os.getenv("VPS_VOL_MA_WINDOW"), 20.0, field_name="VPS_VOL_MA_WINDOW", minimum=5.0)),
             breakout_window=int(parse_env_float(os.getenv("VPS_BREAKOUT_WINDOW"), 20.0, field_name="VPS_BREAKOUT_WINDOW", minimum=2.0)),
             breakout_rel_vol=parse_env_float(os.getenv("VPS_BREAKOUT_REL_VOL"), 2.0, field_name="VPS_BREAKOUT_REL_VOL", minimum=1.0),
+            pullback_rel_vol=parse_env_float(os.getenv("VPS_PULLBACK_REL_VOL"), 0.9, field_name="VPS_PULLBACK_REL_VOL", minimum=0.0),
+            pullback_atr_mult=parse_env_float(os.getenv("VPS_PULLBACK_ATR_MULT"), 3.0, field_name="VPS_PULLBACK_ATR_MULT", minimum=0.5),
+            atr_period=int(parse_env_float(os.getenv("VPS_ATR_PERIOD"), 14.0, field_name="VPS_ATR_PERIOD", minimum=2.0)),
+            b_class_top_k=int(parse_env_float(os.getenv("VPS_B_CLASS_TOP_K"), 2.0, field_name="VPS_B_CLASS_TOP_K", minimum=1.0)),
         )
 
 
