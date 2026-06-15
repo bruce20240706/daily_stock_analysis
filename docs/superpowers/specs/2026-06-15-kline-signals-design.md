@@ -136,7 +136,7 @@ SignalMarker {
 
 **`consistency` 单一可执行定义**（解决"三密度+多信号投票"歧义）：
 - "规则代表方向" = **收敛后的 `_generate_signal` 单个 `BuySignal`**（最新 bar），**不**让 N 条量价 marker 直接投票。
-- 方向映射两张表：`BuySignal(7态) → {bullish/bearish/neutral}`；`operation_advice → {bullish/bearish/neutral}` **复用现有** `normalize_decision_action` / `infer_decision_type_from_advice`（`src/report_language.py:731`），未识别 → `neutral` 且标 `unknown`，不新建平行解析。
+- 方向映射两张表：`BuySignal(6态：STRONG_BUY/BUY/HOLD/WAIT/SELL/STRONG_SELL) → {bullish/bearish/neutral}`；`operation_advice → {bullish/bearish/neutral}` **复用现有** `normalize_decision_action` / `infer_decision_type_from_advice`（`src/report_language.py:731`），未识别 → `neutral` 且标 `unknown`，不新建平行解析。
 - consistency **只在"存在 LLM 点的 bar 邻域"计算**（本期即最新 1 点）；其余 bar 不参与。
 - **LLM 陈旧度**：`operation_advice` 取自 `AnalysisHistory` 最新一条（需新增 **latest-by-code 查询**，复用 `ix_analysis_code_time` 索引；现有 `get_latest_analysis_by_query_id` 需 `query_id` 不适用）；超过 N 个交易日则 consistency 标 `stale`/降级 `unknown`。
 
@@ -172,6 +172,7 @@ SignalMarker {
 ## 6. 价格基准契约与稳定性护栏
 
 - **价格基准契约（新增，核心）**：`/signals` 与 `/history` 必须来自**同一次拉取（同源、同复权）**，不允许 `/history` 用源A 而 `/signals` 重拉源B。量价引擎以**前复权连续序列**为输入前提；数据为未复权/跨源拼接 → 返回 `degraded` 而非出 marker。复权方式各源不一（A股 qfq / yfinance auto_adjust / longbridge history=ForwardAdjust 但实时=NoAdjust），且 `DataFetcherManager` 跨源 fallback。
+  - **本期范围（落地裁定）**：复权一致性**检测（detection）非本期范围**。本期"同源同复权"由**构造保证**——`/signals` 复用与 `/history` **同一 `get_history_data` 取数路径**（同 `days`、同丢未收盘规则、同 fallback），不重拉、不跨源拼接，故无需运行时检测复权漂移。因此后端本期**不产出特定的 `non_adjusted_series` 复权降级原因**；`degraded_reason` 为自由文本 string（取值如「无可用历史数据」/引擎窗口不足原因）。前端对**任意非空 `degraded_reason` / `status==='degraded'`** 一律按通用「有图无标注」降级，不依赖特定原因字面量。主动的复权不一致 detection（跨源拼接告警）留后续增强。
 - 除权日 / 停牌 / 涨跌停一字板列为**已知假信号源**，强制降权或剔除（一字板 `rel_vol` 极低会被误判"量减价升"，语义相反）。
 - 加密 7×24 的 `vol_ma(20)` 与 A/HK 日线 20 **不可跨市场直接比较**，在 confidence/降权体现。
 - 全部**追加字段 / 新端点**，保留旧 `sniper_points` 与 `/history` 现有行为。
