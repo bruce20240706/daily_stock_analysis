@@ -83,5 +83,30 @@ class SignalHitRateRepoTestCase(unittest.TestCase):
         self.assertEqual(rows[0].engine_version, "v1")
 
 
+class SignalHitVerifiedConfigTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        Config._instance = None
+
+    def tearDown(self) -> None:
+        os.environ.pop("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", None)
+        Config._instance = None
+
+    def test_default_falls_back_to_eval_window_days(self) -> None:
+        os.environ.pop("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", None)
+        # Config 经单例 + 惰性 _load_from_env 构造：reset 后 get_instance 才重读 env。
+        Config.reset_instance()
+        cfg = Config.get_instance()
+        self.assertEqual(
+            cfg.signal_hit_verified_min_sample,
+            cfg.backtest_eval_window_days,
+        )
+
+    def test_env_override(self) -> None:
+        os.environ["SIGNAL_HIT_VERIFIED_MIN_SAMPLE"] = "7"
+        Config.reset_instance()
+        cfg = Config.get_instance()
+        self.assertEqual(cfg.signal_hit_verified_min_sample, 7)
+
+
 if __name__ == "__main__":
     unittest.main()

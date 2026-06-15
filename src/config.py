@@ -892,6 +892,8 @@ class Config:
     backtest_min_age_days: int = 14
     backtest_engine_version: str = "v1"
     backtest_neutral_band_pct: float = 2.0
+    # 信号命中率回填(M2c)：hit_sample 达此阈值则 verified=true；缺省回落到 backtest_eval_window_days
+    signal_hit_verified_min_sample: int = 0
     
     # === 日志配置 ===
     log_dir: str = "./logs"  # 日志文件目录
@@ -1709,6 +1711,12 @@ class Config:
             save_context_snapshot=os.getenv('SAVE_CONTEXT_SNAPSHOT', 'true').lower() == 'true',
             backtest_enabled=os.getenv('BACKTEST_ENABLED', 'true').lower() == 'true',
             backtest_eval_window_days=parse_env_int(os.getenv('BACKTEST_EVAL_WINDOW_DAYS'), 10, field_name='BACKTEST_EVAL_WINDOW_DAYS', minimum=1),
+            signal_hit_verified_min_sample=parse_env_int(
+                os.getenv('SIGNAL_HIT_VERIFIED_MIN_SAMPLE'),
+                parse_env_int(os.getenv('BACKTEST_EVAL_WINDOW_DAYS'), 10, field_name='BACKTEST_EVAL_WINDOW_DAYS', minimum=1),
+                field_name='SIGNAL_HIT_VERIFIED_MIN_SAMPLE',
+                minimum=1,
+            ),
             backtest_min_age_days=parse_env_int(os.getenv('BACKTEST_MIN_AGE_DAYS'), 14, field_name='BACKTEST_MIN_AGE_DAYS', minimum=1),
             backtest_engine_version=os.getenv('BACKTEST_ENGINE_VERSION', 'v1'),
             backtest_neutral_band_pct=parse_env_float(
