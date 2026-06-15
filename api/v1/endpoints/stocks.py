@@ -44,6 +44,7 @@ from src.services.import_parser import (
     parse_import_from_text,
 )
 from src.services.signals_service import build_signals_payload, STALE_TRADING_DAYS_DEFAULT
+from src.services.signal_hit_rate import resolve_marker_hit_fields
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from src.services.volume_price_signals import (
@@ -676,6 +677,8 @@ def get_stock_signals(
             llm_record=llm_record,
             trading_days_elapsed=trading_days_elapsed,
             stale_threshold=stale_threshold,
+            code=stock_code,
+            hit_fields_resolver=resolve_marker_hit_fields,
         )
 
         # /signals 纯读：直接用反算器数值填 price_lines（无副作用、不写 price_position、不调护栏）。

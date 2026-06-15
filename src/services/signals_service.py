@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 from src.stock_analyzer import BuySignal
 from src.report_language import infer_decision_type_from_advice
@@ -117,14 +117,22 @@ def compute_consistency(
     return "divergent"
 
 
-def _marker_from_vpsignal(sig: Any) -> dict:
+def _marker_from_vpsignal(
+    sig: Any,
+    *,
+    code: Optional[str] = None,
+    hit_fields_resolver: Optional[Callable[[str, str], dict]] = None,
+) -> dict:
     """把 M1 VPSignal 映射为 SignalMarker dict（source=rule）。
 
     时间锚直接透传 M1 `VPSignal.timestamp`（epoch ms，Asia/Shanghai），
     不经 date_str_to_epoch_ms（VPSignal 无 .date 字段；date_str_to_epoch_ms
     仅供 LLM 点的 'YYYY-MM-DD' latest_bar_date 用）。
+
+    若提供 hit_fields_resolver 且有 code，则用其回填 hit_rate/hit_sample/verified
+    （M2c 命中率实证）；否则保留 M2a 默认（全 None / verified=False）。
     """
-    return {
+    marker = {
         "timestamp": int(sig.timestamp),
         "price": float(sig.price),
         "anchor": sig.anchor,
@@ -137,12 +145,24 @@ def _marker_from_vpsignal(sig: Any) -> dict:
         "reason": sig.reason,
         "threshold": sig.threshold,
         "observed_value": sig.observed_value,
-        # 以下 M2c 回填
+        # 以下默认值；rule marker 经 resolver 回填
         "hit_rate": None,
         "hit_sample": None,
         "verified": False,
         "as_of": None,
     }
+    if hit_fields_resolver is not None and code:
+        try:
+            fields = hit_fields_resolver(sig.signal_type, code)
+            marker["hit_rate"] = fields.get("hit_rate")
+            marker["hit_sample"] = fields.get("hit_sample")
+            marker["verified"] = bool(fields.get("verified", False))
+        except Exception:
+            logger.warning(
+                "resolve_marker_hit_fields 失败，跳过回填 signal_type=%s code=%s",
+                sig.signal_type, code,
+            )
+    return marker
 
 
 def _llm_marker(
@@ -189,6 +209,8 @@ def build_signals_payload(
     llm_record: Any,
     trading_days_elapsed: Optional[int],
     stale_threshold: int = STALE_TRADING_DAYS_DEFAULT,
+    code: Optional[str] = None,
+    hit_fields_resolver: Optional[Callable[[str, str], dict]] = None,
 ) -> dict:
     """
     组装 /signals 响应 dict（端点据此构造 SignalsResponse）。
@@ -198,7 +220,10 @@ def build_signals_payload(
     - consistency：用收敛后的单个 BuySignal 与 LLM 最新结论计算。
     - status/degraded_reason：透传引擎结果。
     """
-    markers: List[dict] = [_marker_from_vpsignal(s) for s in (engine_result.markers or [])]
+    markers: List[dict] = [
+        _marker_from_vpsignal(s, code=code, hit_fields_resolver=hit_fields_resolver)
+        for s in (engine_result.markers or [])
+    ]
 
     llm_advice = getattr(llm_record, "operation_advice", None) if llm_record is not None else None
     llm_created_at = getattr(llm_record, "created_at", None) if llm_record is not None else None

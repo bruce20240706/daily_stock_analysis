@@ -232,3 +232,25 @@ def test_signals_route_registered_on_stocks_router():
     paths = {route.path for route in router.routes}
     assert "/{stock_code:path}/signals" in paths
     assert "/{stock_code:path}/history" in paths  # 旧路由仍在
+
+
+# ─── M2c-5：端点 resolver 接线回归（verified 端到端可达）────────────────────────
+
+def test_signals_endpoint_backfills_verified_via_resolver(monkeypatch):
+    engine = SimpleNamespace(
+        markers=[_vpsignal(date_str_to_epoch_ms("2026-06-12"))],
+        status="ok", degraded_reason=None,
+    )
+    _patch_common(monkeypatch, engine_result=engine, rule_signal=BuySignal.BUY, llm_record=None)
+    # 端点内部用的 resolver 被替换为确定性桩，证明组装层确实调用了它
+    monkeypatch.setattr(
+        stocks_ep, "resolve_marker_hit_fields",
+        lambda signal_type, code: {"hit_rate": 0.7, "hit_sample": 30, "verified": True},
+    )
+
+    resp = stocks_ep.get_stock_signals(stock_code="600519", days=120)
+
+    rule_markers = [m for m in resp.markers if m.source == "rule"]
+    assert rule_markers[0].verified is True
+    assert rule_markers[0].hit_rate == 0.7
+    assert rule_markers[0].hit_sample == 30
