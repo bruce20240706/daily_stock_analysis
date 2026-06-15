@@ -170,3 +170,44 @@ def test_signals_endpoint_timestamp_anchored_to_bar(monkeypatch):
     resp = stocks_ep.get_stock_signals(stock_code="600519", days=120)
     rule_markers = [m for m in resp.markers if m.source == "rule"]
     assert rule_markers[0].timestamp == date_str_to_epoch_ms("2026-06-11")
+
+
+def test_signals_endpoint_llm_marker_price_anchored_to_latest_close(monkeypatch):
+    """LLM marker 的 price 必须等于最新 bar 的收盘价（而非 0.0 占位）。"""
+    # _patch_common 中 rows[-1] 的 close 是 1800.0（_bar("2026-06-12", 1800.0)）
+    engine = SimpleNamespace(
+        markers=[_vpsignal(date_str_to_epoch_ms("2026-06-11"))],
+        status="ok", degraded_reason=None,
+    )
+    # operation_advice="买入" → direction="bullish"，LLM 点会被生成
+    llm = SimpleNamespace(operation_advice="买入", created_at=datetime(2026, 6, 12))
+    _patch_common(monkeypatch, engine_result=engine, rule_signal=BuySignal.BUY, llm_record=llm)
+
+    resp = stocks_ep.get_stock_signals(stock_code="600519", days=120)
+
+    llm_markers = [m for m in resp.markers if m.source == "llm"]
+    assert len(llm_markers) == 1, "应有且仅有 1 个 LLM marker"
+    assert llm_markers[0].price == 1800.0, (
+        f"LLM marker.price 应锚到最新 bar 收盘 1800.0，实际为 {llm_markers[0].price}"
+    )
+
+
+def test_signals_endpoint_stale_when_llm_too_old(monkeypatch):
+    """当 LLM 结论超过 stale 阈值个交易日时，consistency 必须返回 'stale'。"""
+    engine = SimpleNamespace(
+        markers=[_vpsignal(date_str_to_epoch_ms("2026-06-11"))],
+        status="ok", degraded_reason=None,
+    )
+    # created_at=2026-06-10：bars 中 2026-06-11 和 2026-06-12 均 > cutoff
+    # → trading_days_elapsed=2；阈值设为 1 → 2 > 1 → stale
+    llm = SimpleNamespace(operation_advice="买入", created_at=datetime(2026, 6, 10))
+    _patch_common(monkeypatch, engine_result=engine, rule_signal=BuySignal.BUY, llm_record=llm)
+
+    # 将 stale 阈值降到 1，让 elapsed=2 触发 stale
+    monkeypatch.setenv("SIGNALS_STALE_TRADING_DAYS", "1")
+
+    resp = stocks_ep.get_stock_signals(stock_code="600519", days=120)
+
+    assert resp.consistency == "stale", (
+        f"期望 consistency='stale'，实际为 '{resp.consistency}'"
+    )

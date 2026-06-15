@@ -12,13 +12,14 @@
 """
 
 import logging
+import os
 from typing import Optional
 import re
 
+import pandas as pd
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, Depends
 
 from api.deps import get_system_config_service
-
 from api.v1.schemas.stocks import (
     ExtractFromImageResponse,
     ExtractItem,
@@ -29,6 +30,8 @@ from api.v1.schemas.stocks import (
 )
 from api.v1.schemas.history import WatchlistRequest, WatchlistResponse
 from api.v1.schemas.common import ErrorResponse
+from data_provider.base import normalize_stock_code
+from src.config import parse_env_int
 from src.services.image_stock_extractor import (
     ALLOWED_MIME,
     MAX_SIZE_BYTES,
@@ -39,17 +42,10 @@ from src.services.import_parser import (
     parse_import_from_bytes,
     parse_import_from_text,
 )
+from src.services.signals_service import build_signals_payload, STALE_TRADING_DAYS_DEFAULT
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
-from data_provider.base import normalize_stock_code
-
-import os
-
-import pandas as pd
-
-from src.config import parse_env_int, parse_env_float
 from src.services.volume_price_signals import compute_volume_price_signals
-from src.services.signals_service import build_signals_payload, STALE_TRADING_DAYS_DEFAULT
 from src.stock_analyzer import StockTrendAnalyzer
 from src.storage import DatabaseManager
 
