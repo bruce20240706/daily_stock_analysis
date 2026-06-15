@@ -12,6 +12,7 @@ interface StockBarItemProps {
   isViewing: boolean;
   onClick: (recordId: number) => void;
   onDelete?: (stockCode: string) => void;
+  onViewKline?: (stockCode: string, stockName?: string) => void;
   isDeleting?: boolean;
   isMarketReview?: boolean;
 }
@@ -21,6 +22,7 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
   isViewing,
   onClick,
   onDelete,
+  onViewKline,
   isDeleting = false,
   isMarketReview = false,
 }) => {
@@ -93,6 +95,22 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
                   {operationLabel} {item.sentimentScore}
                 </Badge>
               ) : null}
+              {onViewKline && !isMarketReview && (
+                <Button
+                  variant="ghost"
+                  size="xsm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onViewKline(item.stockCode, item.stockName);
+                  }}
+                  className="opacity-0 group-hover/item:opacity-100 transition-opacity h-6 w-6 p-0 flex items-center justify-center"
+                  aria-label={`查看 ${item.stockName || item.stockCode} K 线`}
+                >
+                  <svg className="h-3.5 w-3.5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18M7 14l3-4 3 3 4-6" />
+                  </svg>
+                </Button>
+              )}
               {onDelete && (
                 <Button
                   variant="ghost"
