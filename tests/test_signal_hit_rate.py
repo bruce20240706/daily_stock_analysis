@@ -8,6 +8,7 @@ from datetime import date
 
 from src.config import Config
 from src.repositories.backtest_repo import BacktestRepository
+from src.services.signal_hit_rate import HitRate, backfill_signal_hit_rate
 from src.storage import AnalysisHistory, BacktestResult, DatabaseManager
 
 
@@ -106,6 +107,73 @@ class SignalHitVerifiedConfigTestCase(unittest.TestCase):
         Config.reset_instance()
         cfg = Config.get_instance()
         self.assertEqual(cfg.signal_hit_verified_min_sample, 7)
+
+
+class BackfillSignalHitRateTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._db_path = os.path.join(self._temp_dir.name, "test_backfill.db")
+        os.environ["DATABASE_PATH"] = self._db_path
+        os.environ["BACKTEST_EVAL_WINDOW_DAYS"] = "4"
+        os.environ.pop("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", None)
+
+        Config._instance = None
+        DatabaseManager.reset_instance()
+        self.db = DatabaseManager.get_instance()
+
+    def tearDown(self) -> None:
+        DatabaseManager.reset_instance()
+        Config._instance = None
+        os.environ.pop("BACKTEST_EVAL_WINDOW_DAYS", None)
+        self._temp_dir.cleanup()
+
+    def _add(self, *, code, analysis_date, direction_correct, eval_status="completed"):
+        # 先落 AnalysisHistory 父行满足 BacktestResult.analysis_history_id（nullable=False FK）。
+        with self.db.get_session() as session:
+            history = AnalysisHistory(code=code, name=code, report_type="single")
+            session.add(history)
+            session.flush()
+            session.add(
+                BacktestResult(
+                    analysis_history_id=history.id,
+                    code=code,
+                    analysis_date=analysis_date,
+                    eval_status=eval_status,
+                    direction_correct=direction_correct,
+                    eval_window_days=10,
+                    engine_version="v1",
+                )
+            )
+            session.commit()
+
+    def test_aggregates_direction_hit_rate(self) -> None:
+        # 3 correct, 1 incorrect -> 0.75 over 4 samples
+        self._add(code="600519", analysis_date=date(2024, 1, 1), direction_correct=True)
+        self._add(code="600519", analysis_date=date(2024, 1, 2), direction_correct=True)
+        self._add(code="600519", analysis_date=date(2024, 1, 3), direction_correct=True)
+        self._add(code="600519", analysis_date=date(2024, 1, 4), direction_correct=False)
+
+        result = backfill_signal_hit_rate("rule_score", "600519")
+
+        self.assertIsInstance(result, HitRate)
+        self.assertEqual(result.hit_sample, 4)
+        self.assertAlmostEqual(result.hit_rate, 0.75)
+
+    def test_direction_correct_none_excluded_from_sample(self) -> None:
+        # completed but direction_correct None must not enter denominator
+        self._add(code="600519", analysis_date=date(2024, 1, 1), direction_correct=True)
+        self._add(code="600519", analysis_date=date(2024, 1, 2), direction_correct=None)
+
+        result = backfill_signal_hit_rate("rule_score", "600519")
+
+        self.assertEqual(result.hit_sample, 1)
+        self.assertAlmostEqual(result.hit_rate, 1.0)
+
+    def test_no_sample_returns_null_hit_rate(self) -> None:
+        result = backfill_signal_hit_rate("rule_score", "000002")
+
+        self.assertIsNone(result.hit_rate)
+        self.assertEqual(result.hit_sample, 0)
 
 
 if __name__ == "__main__":
