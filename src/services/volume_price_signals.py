@@ -374,8 +374,167 @@ def _classify_vfx(
     )
 
 
+def _obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """On-Balance Volume：方向 * 当日量的累积和。close.diff()==0 时贡献 0。"""
+    direction = np.sign(close.diff().fillna(0.0))
+    return (direction * volume).cumsum()
+
+
+def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
+    """OBV 顶底背离检测：仅对已确认 swing pivot 对比较，无未来函数。"""
+    close = prim["close"].astype(float).reset_index(drop=True)
+    obv_series = _obv(close, prim["volume"].astype(float).reset_index(drop=True))
+    pivots = _attach_pivot_timestamps(find_swing_pivots(close, config.swing_k), prim)
+    out: list[VPSignal] = []
+    for kind, sig_type, cmp_price, cmp_obv, direction in (
+        ("high", "obv_top_divergence",    lambda a, b: a > b, lambda a, b: a <= b, "bearish"),
+        ("low",  "obv_bottom_divergence", lambda a, b: a < b, lambda a, b: a >= b, "bullish"),
+    ):
+        same = [p for p in pivots if p.kind == kind]
+        for prev, curr in zip(same, same[1:]):
+            price_extreme = cmp_price(curr.price, prev.price)
+            obv_lagging = cmp_obv(float(obv_series.iloc[curr.index]), float(obv_series.iloc[prev.index]))
+            if price_extreme and obv_lagging:
+                out.append(VPSignal(
+                    timestamp=curr.timestamp,
+                    price=curr.price,
+                    anchor=kind,
+                    direction=direction,
+                    signal_type=sig_type,
+                    confidence="medium",
+                    is_daily_approx=True,
+                    is_anomalous=False,
+                    reason="价格创新极值但 OBV 未同步（形态背离）",
+                    threshold=float(obv_series.iloc[prev.index]),
+                    observed_value=float(obv_series.iloc[curr.index]),
+                ))
+    return out
+
+
+def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
+    """放量突破检测：close >= 过去 N 日 high 最大值（shift(1) 不含当日）且 rel_vol >= 阈值。"""
+    high = prim["high"].astype(float)
+    close = prim["close"].astype(float)
+    # shift(1): prior max excludes current bar — no self-reference
+    prior_max = high.rolling(config.breakout_window).max().shift(1)
+    rel_vol = prim["rel_vol"]
+    out: list[VPSignal] = []
+    for i in range(len(prim)):
+        pm = prior_max.iloc[i]
+        rv = rel_vol.iloc[i]
+        if pd.isna(pm) or pd.isna(rv):
+            continue
+        if close.iloc[i] >= pm and rv >= config.breakout_rel_vol:
+            out.append(VPSignal(
+                timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[i]),
+                price=float(close.iloc[i]),
+                anchor="close",
+                direction="bullish",
+                signal_type="volume_breakout",
+                confidence="high",
+                is_daily_approx=True,
+                is_anomalous=False,
+                reason=f"放量突破近{config.breakout_window}日高点（不含当日）",
+                threshold=float(pm),
+                observed_value=float(rv),
+            ))
+    return out
+
+
+def _detect_shrink_pullback(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
+    """缩量回调检测：上升趋势（ma5>ma20），最近确认 swing high 后缩量回调且幅度 < ATR 倍数。"""
+    close = prim["close"].astype(float).reset_index(drop=True)
+    ma5 = prim["ma5"]
+    ma20 = prim["ma20"]
+    rel_vol = prim["rel_vol"]
+    atr_series = atr(prim, config.atr_period).reset_index(drop=True)
+    highs = [
+        p for p in _attach_pivot_timestamps(find_swing_pivots(close, config.swing_k), prim)
+        if p.kind == "high"
+    ]
+    out: list[VPSignal] = []
+    if not highs:
+        return out
+    last_high = highs[-1]
+    i = len(prim) - 1
+    if pd.isna(ma5.iloc[i]) or pd.isna(ma20.iloc[i]) or ma5.iloc[i] <= ma20.iloc[i]:
+        return out  # 仅上升趋势
+    drawdown = last_high.price - float(close.iloc[i])
+    seg_rel = rel_vol.iloc[last_high.index + 1:i + 1].dropna()
+    atr_now = float(atr_series.iloc[i])
+    if (
+        drawdown > 0
+        and not seg_rel.empty
+        and (seg_rel < config.pullback_rel_vol).all()
+        and not np.isnan(atr_now)
+        and drawdown < config.pullback_atr_mult * atr_now
+    ):
+        out.append(VPSignal(
+            timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[i]),
+            price=float(close.iloc[i]),
+            anchor="close",
+            direction="bullish",
+            signal_type="shrink_pullback",
+            confidence="medium",
+            is_daily_approx=True,
+            is_anomalous=False,
+            reason=f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）",
+            threshold=config.pullback_atr_mult * atr_now,
+            observed_value=drawdown,
+        ))
+    return out
+
+
+def _avwap_signal(prim: pd.DataFrame, i: int, sig_type: str, direction: str, level: float) -> VPSignal:
+    return VPSignal(
+        timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[i]),
+        price=float(prim["close"].astype(float).iloc[i]),
+        anchor="close",
+        direction=direction,
+        signal_type=sig_type,
+        confidence="medium",
+        is_daily_approx=True,
+        is_anomalous=False,
+        reason="锚定突破日 AVWAP 的重夺/失守",
+        threshold=float(level),
+        observed_value=float(prim["close"].astype(float).iloc[i]),
+    )
+
+
+def _anchored_vwap_signals(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
+    """锚定 VWAP 信号：仅锚已确认放量突破日；重夺/失守按 edge-cross 当根触发。"""
+    breakouts = _detect_breakouts(prim, config)
+    if not breakouts:
+        return []
+    high = prim["high"].astype(float).reset_index(drop=True)
+    low = prim["low"].astype(float).reset_index(drop=True)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    volume = prim["volume"].astype(float).reset_index(drop=True)
+    typical = (high + low + close) / 3.0
+    ts = [_to_epoch_ms_shanghai(prim["date"].iloc[i]) for i in range(len(prim))]
+    out: list[VPSignal] = []
+    for b in breakouts:
+        start = ts.index(b.timestamp)
+        cum_pv = 0.0
+        cum_v = 0.0
+        vwap: list[float] = []
+        for j in range(start, len(prim)):
+            cum_pv += float(typical.iloc[j]) * float(volume.iloc[j])
+            cum_v += float(volume.iloc[j])
+            vwap.append(cum_pv / cum_v if cum_v > 0 else float("nan"))
+        for off in range(1, len(vwap)):
+            j = start + off
+            prev_delta = float(close.iloc[j - 1]) - vwap[off - 1]
+            curr_delta = float(close.iloc[j]) - vwap[off]
+            if prev_delta < 0 <= curr_delta:
+                out.append(_avwap_signal(prim, j, "anchored_vwap_reclaim", "bullish", vwap[off]))
+            elif prev_delta >= 0 > curr_delta:
+                out.append(_avwap_signal(prim, j, "anchored_vwap_loss", "bearish", vwap[off]))
+    return out
+
+
 def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSResult:
-    """主入口：输入 OHLCV DataFrame，输出 VPSResult。"""
+    """主入口：输入 OHLCV DataFrame，输出 VPSResult，串联 A 类量价信号。"""
     cfg = config or VPSConfig()
     norm, reason = _normalize(df, cfg)
     if reason is not None:
@@ -383,4 +542,17 @@ def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSR
     window_reason = _check_sufficient_window(norm, cfg)
     if window_reason is not None:
         return VPSResult(markers=[], status="degraded", degraded_reason=window_reason)
-    return VPSResult(markers=[], status="ok", degraded_reason=None)
+    prim = _compute_primitives(norm, cfg)
+
+    degraded_reason = None
+    if prim["rel_vol"].isna().all():
+        degraded_reason = "rel_vol unavailable for all bars (vol_ma<=0/NaN)"
+
+    markers: list[VPSignal] = []
+    markers.extend(_detect_obv_divergence(prim, cfg))
+    markers.extend(_detect_breakouts(prim, cfg))
+    markers.extend(_detect_shrink_pullback(prim, cfg))
+    markers.extend(_anchored_vwap_signals(prim, cfg))
+
+    status = "degraded" if degraded_reason else "ok"
+    return VPSResult(markers=markers, status=status, degraded_reason=degraded_reason)

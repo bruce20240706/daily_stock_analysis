@@ -203,3 +203,81 @@ def test_vfx_none_rel_vol_is_anomalous_neutral():
     assert sig.signal_type == "vfx_undefined"
     assert sig.direction == "neutral"
     assert sig.is_anomalous is True
+
+
+# ---------------------------------------------------------------------------
+# Task 4: A 类信号：OBV 背离 + 放量突破 + 缩量回调 + Anchored VWAP
+# ---------------------------------------------------------------------------
+
+def _trend_up_df(n: int = 40, step: float = 1.0, base_vol: float = 1000.0) -> pd.DataFrame:
+    rows = []
+    price = 100.0
+    for _ in range(n):
+        o = price
+        c = price + step
+        rows.append(_bar(o, c + 0.5, o - 0.5, c, base_vol))
+        price = c
+    return _make_df(rows)
+
+
+def test_micro_new_high_does_not_trigger_obv_top_divergence():
+    # 价格每日微创新高 + 量同步 -> OBV 同步创高，不应误报顶背离
+    df = _trend_up_df(60)
+    res = compute_volume_price_signals(df)
+    assert all(m.signal_type != "obv_top_divergence" for m in res.markers)
+
+
+def test_obv_top_divergence_when_price_high_obv_not():
+    # 构造两个已确认 swing high：第二个价更高但量持续萎缩 -> OBV 未跟 -> 顶背离
+    rows = []
+    # 第一峰
+    seq = [100, 103, 106, 103, 100, 103, 108, 104, 100]
+    vols = [2000, 2200, 2400, 1500, 1400, 1600, 900, 800, 700]  # 第二峰量明显小
+    for p, v in zip(seq, vols):
+        rows.append(_bar(p, p + 0.5, p - 0.5, p, v))
+    # 垫满窗口
+    pad = [_bar(100, 100.5, 99.5, 100, 1000) for _ in range(30)]
+    df = _make_df(pad + rows)
+    res = compute_volume_price_signals(df, config=VPSConfig(swing_k=2))
+    assert any(m.signal_type == "obv_top_divergence" for m in res.markers)
+
+
+def test_breakout_excludes_current_day():
+    # 当日收盘恰等于此前窗口最高；shift(1) 不含当日 -> 视为突破（>= 历史 max）
+    pad = [_bar(100, 100.0, 99.0, 100, 1000) for _ in range(30)]
+    breakout = _bar(100, 105.0, 100.0, 105.0, 5000)  # close 105 >= 此前 high max 100, rel_vol 高
+    df = _make_df(pad + [breakout])
+    res = compute_volume_price_signals(df, config=VPSConfig(breakout_window=20, breakout_rel_vol=2.0))
+    bks = [m for m in res.markers if m.signal_type == "volume_breakout"]
+    assert len(bks) == 1
+    assert bks[0].timestamp == _to_epoch_ms_shanghai(df["date"].iloc[-1])
+
+
+def test_breakout_requires_rel_vol_threshold():
+    pad = [_bar(100, 100.0, 99.0, 100, 1000) for _ in range(30)]
+    breakout_lowvol = _bar(100, 105.0, 100.0, 105.0, 1000)  # 价突破但量不足
+    df = _make_df(pad + [breakout_lowvol])
+    res = compute_volume_price_signals(df, config=VPSConfig(breakout_rel_vol=2.0))
+    assert all(m.signal_type != "volume_breakout" for m in res.markers)
+
+
+def test_anchored_vwap_only_anchors_confirmed_breakout_not_future_bottom():
+    # 一个非突破的局部低点不得被 AVWAP 提前锚定；仅突破日产 AVWAP 相关 marker
+    df = _trend_up_df(40)  # 平滑上行，无放量突破事件
+    res = compute_volume_price_signals(df)
+    assert all(not m.signal_type.startswith("anchored_vwap") for m in res.markers)
+
+
+def test_compute_degraded_on_short_window():
+    df = _flat_series(5)
+    res = compute_volume_price_signals(df)
+    assert res.status == "degraded"
+    assert res.markers == []
+    assert res.degraded_reason is not None
+
+
+def test_compute_ok_status_on_sufficient_window():
+    df = _trend_up_df(40)
+    res = compute_volume_price_signals(df)
+    assert res.status == "ok"
+    assert all(isinstance(m, VPSignal) for m in res.markers)
