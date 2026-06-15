@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] Web 个股栏新增 K 线抽屉入口：渲染日线蜡烛 + 成交量副图，支持十字光标、缩放与红涨绿跌/绿涨红跌切换（klinecharts 懒加载，仅在打开抽屉时引入，不影响首屏）。
+- [改进] `GET /api/v1/stocks/{code}/history` 端点 `days` 默认由 30 放宽至 120（上限保持 365），为 K 线抽屉提供更长回看窗口；alert 取数与 data_tools 的 365 上限常量未改动。
 - [新功能] crypto 现货分析注入对应永续合约指标（资金费率/标记价/未平仓量；OKX 公开接口，免费无 key，并发，presence-only，默认开，仅注入分析 prompt）
 - [文档] 文档化并以端到端测试锁定 crypto 回测支持（沿用现有回测引擎与 crypto 日线数据源，无新增运行时/配置）
 - [新功能] 加密货币大盘复盘新增宏观指标（BTC/ETH 主导率、加密总市值含 24h 变化、恐贪指数；CoinGecko /global + alternative.me，免费无 key，presence-only，默认开，注入复盘 prompt）
