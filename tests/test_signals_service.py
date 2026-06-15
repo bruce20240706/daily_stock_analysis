@@ -218,3 +218,24 @@ def test_consistency_rule_direction_from_buysignal_not_b_class_markers():
     rule_markers = [m for m in payload["markers"] if m["source"] == "rule"]
     assert len(rule_markers) == 2
     assert {m["direction"] for m in rule_markers} == {"bearish"}
+
+
+def test_build_payload_llm_marker_price_uses_latest_close_when_provided():
+    """N1 fix: LLM marker 的 price 应等于 latest_close，而非默认 0.0。"""
+    engine = _engine_result([])  # 无 rule markers，隔离 LLM 路径
+    llm_record = SimpleNamespace(
+        operation_advice="买入",
+        created_at=datetime(2026, 6, 12),
+    )
+    payload = build_signals_payload(
+        engine_result=engine,
+        rule_signal=BuySignal.BUY,
+        latest_bar_date="2026-06-12",
+        llm_record=llm_record,
+        trading_days_elapsed=0,
+        latest_close=150.0,
+    )
+
+    llm_markers = [m for m in payload["markers"] if m["source"] == "llm"]
+    assert len(llm_markers) == 1
+    assert llm_markers[0]["price"] == 150.0
