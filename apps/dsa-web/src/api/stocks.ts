@@ -13,6 +13,9 @@ export type ExtractFromImageResponse = {
   rawText?: string;
 };
 
+/** K 线抽屉默认回看天数，与后端 /history 端点 Query 默认对齐。 */
+export const KLINE_DEFAULT_DAYS = 120;
+
 export const stocksApi = {
   async extractFromImage(file: File): Promise<ExtractFromImageResponse> {
     const formData = new FormData();
@@ -51,6 +54,23 @@ export const stocksApi = {
       return { codes: data.codes ?? [], items: data.items };
     }
     throw new Error('请提供文件或粘贴文本');
+  },
+
+  /**
+   * 拉取日线 K 线，映射为 klinecharts 所需的 KLine[]。
+   * 与 /signals 同源同 days（M0 暂只用 /history）；不复用 api/history.ts（分析记录域）。
+   * code 经 encodeURIComponent 以兼容带 '/' 的 crypto 代码（后端 {code:path} 路由）。
+   */
+  async getKlineHistory(code: string, days: number = KLINE_DEFAULT_DAYS): Promise<KLine[]> {
+    const response = await apiClient.get(
+      `/api/v1/stocks/${encodeURIComponent(code)}/history`,
+      { params: { days } },
+    );
+    const data = response.data as { data?: KLineDataRaw[] };
+    const rows = data.data ?? [];
+    return rows
+      .map(mapKLineDataToKLine)
+      .sort((a, b) => a.timestamp - b.timestamp);
   },
 };
 
