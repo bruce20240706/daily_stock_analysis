@@ -354,17 +354,36 @@ def _b_class(markers):
     return [m for m in markers if m.signal_type.startswith("vsa_") or m.signal_type in {"upthrust", "spring"}]
 
 
+def _no_demand_df() -> pd.DataFrame:
+    """构造能触发至少 1 个 B 类（vsa_no_demand）marker 的 fixture。
+
+    No Demand 条件：rel_vol < vol_shrink(0.8) AND body > 0 AND range_pos < 0.5
+    - pad 25 根：vol=1000，建立 vol_ma 基线；vol_ma_window=20，shift(1) 后 index 25+ 均有有效量比
+    - no_demand 3 根：open=100, high=103, low=100, close=101
+        body = 101-100 = 1 > 0
+        range_pos = (101-100)/(103-100) = 1/3 ≈ 0.33 < 0.5
+        vol = 200, vol_ma ≈ 1000, rel_vol ≈ 0.2 < vol_shrink(0.8)  -> No Demand 触发
+    """
+    pad = [_bar(100, 101, 99, 100, 1000) for _ in range(25)]
+    no_demand = [_bar(100, 103, 100, 101, 200) for _ in range(3)]
+    return _make_df(pad + no_demand)
+
+
 def test_b_class_confidence_always_low():
-    df = _trend_up_df(50)
+    df = _no_demand_df()
     res = compute_volume_price_signals(df)
-    for m in _b_class(res.markers):
+    b = _b_class(res.markers)
+    assert len(b) > 0, "fixture 必须产出至少 1 个 B 类 marker（vsa_no_demand）"
+    for m in b:
         assert m.confidence == "low"
 
 
 def test_b_class_is_daily_approx_always_true():
-    df = _trend_up_df(50)
+    df = _no_demand_df()
     res = compute_volume_price_signals(df)
-    for m in _b_class(res.markers):
+    b = _b_class(res.markers)
+    assert len(b) > 0, "fixture 必须产出至少 1 个 B 类 marker（vsa_no_demand）"
+    for m in b:
         assert m.is_daily_approx is True
 
 
