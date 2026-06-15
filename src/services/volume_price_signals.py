@@ -1,0 +1,194 @@
+# -*- coding: utf-8 -*-
+"""量价信号引擎（M1）：纯函数，输入 OHLCV DataFrame，输出 VPSResult。
+
+设计要点：
+- 所有滚动量基元统一 shift(1)，防未来函数。
+- swing pivot 左右各 k 根确认，天然滞后 k，OBV 背离 / VSA 高低点全部复用。
+- 八法为穷尽且互斥的二维查表，每格必有归类（信号或 neutral 兜底）。
+- B 类（VSA/Upthrust/Spring）强制降权：不进 consistency 投票、不驱动 price_lines、置信 <= low、top-k 限流。
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import numpy as np
+import pandas as pd
+
+from src.config import parse_env_float
+from src.services.alert_indicators import normalize_ohlcv
+
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
+_REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
+
+
+@dataclass(frozen=True)
+class VPSConfig:
+    eps: float = 0.004                  # 价档 flat 判定半带宽（pct_chg 绝对值 <= eps）
+    vol_low: float = 0.7                # 量档 low 上界（< vol_low）
+    vol_shrink: float = 0.8             # shrink 上界
+    vol_up: float = 1.2                 # normal 上界
+    vol_high: float = 1.5               # up 上界 / high 下界（>= vol_high）
+    swing_k: int = 3                    # swing pivot 左右确认根数
+    vol_ma_window: int = 20             # 量基准窗口（交易 bar 数）
+    breakout_window: int = 20           # 放量突破 high.rolling 窗口 N
+    breakout_rel_vol: float = 2.0       # 放量突破 rel_vol 阈值
+    pullback_rel_vol: float = 0.9       # 缩量回调段内 rel_vol 上界
+    pullback_atr_mult: float = 3.0      # 缩量回调最大回撤 = ATR * 倍数
+    atr_period: int = 14
+    b_class_top_k: int = 2              # B 类每结果集限流 top-k
+    b_class_confidence: str = "low"     # B 类置信硬上限
+
+    @classmethod
+    def from_env(cls) -> "VPSConfig":
+        return cls(
+            eps=parse_env_float(os.getenv("VPS_PRICE_EPS"), 0.004, field_name="VPS_PRICE_EPS", minimum=0.0),
+            vol_low=parse_env_float(os.getenv("VPS_VOL_LOW"), 0.7, field_name="VPS_VOL_LOW", minimum=0.0),
+            vol_shrink=parse_env_float(os.getenv("VPS_VOL_SHRINK"), 0.8, field_name="VPS_VOL_SHRINK", minimum=0.0),
+            vol_up=parse_env_float(os.getenv("VPS_VOL_UP"), 1.2, field_name="VPS_VOL_UP", minimum=0.0),
+            vol_high=parse_env_float(os.getenv("VPS_VOL_HIGH"), 1.5, field_name="VPS_VOL_HIGH", minimum=0.0),
+            swing_k=int(parse_env_float(os.getenv("VPS_SWING_K"), 3.0, field_name="VPS_SWING_K", minimum=1.0)),
+            breakout_window=int(parse_env_float(os.getenv("VPS_BREAKOUT_WINDOW"), 20.0, field_name="VPS_BREAKOUT_WINDOW", minimum=2.0)),
+            breakout_rel_vol=parse_env_float(os.getenv("VPS_BREAKOUT_REL_VOL"), 2.0, field_name="VPS_BREAKOUT_REL_VOL", minimum=1.0),
+        )
+
+
+@dataclass(frozen=True)
+class Pivot:
+    index: int          # df 行号（已确认，滞后 k）
+    timestamp: int      # epoch ms (Asia/Shanghai)
+    price: float
+    kind: str           # 'high' | 'low'
+
+
+@dataclass(frozen=True)
+class VPSignal:
+    timestamp: int               # epoch ms (Asia/Shanghai)
+    price: float
+    anchor: str                  # 'low' | 'high' | 'close'
+    direction: str               # 'bullish' | 'bearish' | 'neutral'
+    signal_type: str
+    confidence: str              # 'high' | 'medium' | 'low'
+    is_daily_approx: bool
+    is_anomalous: bool
+    reason: str
+    threshold: float | None
+    observed_value: float | None
+
+
+@dataclass(frozen=True)
+class VPSResult:
+    markers: list[VPSignal]
+    status: str                  # 'ok' | 'degraded'
+    degraded_reason: str | None
+
+
+def _to_epoch_ms_shanghai(date_value) -> int:
+    """将日期值转换为 Asia/Shanghai 午夜的毫秒时间戳。"""
+    if isinstance(date_value, str):
+        dt = datetime.strptime(date_value[:10], "%Y-%m-%d")
+    elif isinstance(date_value, pd.Timestamp):
+        dt = date_value.to_pydatetime()
+    elif isinstance(date_value, datetime):
+        dt = date_value
+    else:
+        dt = pd.Timestamp(date_value).to_pydatetime()
+    if dt.tzinfo is None:
+        dt = dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=_SHANGHAI)
+    return int(dt.timestamp() * 1000)
+
+
+def _normalize(df, config: VPSConfig) -> tuple[pd.DataFrame, str | None]:
+    """包裹 normalize_ohlcv：捕获 ValueError（缺列）、空数据返回 degraded reason。
+
+    注意：窗口是否充足的检查在 compute_volume_price_signals 中执行，
+    而非此处，以便 _compute_primitives 在小样本单元测试中仍可调用。
+    """
+    try:
+        norm = normalize_ohlcv(df, required_columns=_REQUIRED_COLUMNS)
+    except ValueError as exc:
+        return pd.DataFrame(), str(exc)
+    if norm.empty:
+        return norm, "no closed daily data available"
+    return norm, None
+
+
+def _check_sufficient_window(norm: pd.DataFrame, config: VPSConfig) -> str | None:
+    """检查 norm df 行数是否足以支撑所有滚动窗口计算；不足返回 degraded reason。"""
+    min_bars = max(config.vol_ma_window, config.atr_period, config.breakout_window) + 1
+    if len(norm) < min_bars:
+        return f"insufficient window: need {min_bars} bars, got {len(norm)}"
+    return None
+
+
+def _compute_primitives(norm_df: pd.DataFrame, config: VPSConfig) -> pd.DataFrame:
+    """在 norm_df 基础上追加量价派生列，全部采用 shift(1) 防未来函数。
+
+    新增列：
+    - spread: high - low
+    - body: close - open
+    - is_limit_bar: spread <= 0（一字板）
+    - range_pos: (close - low) / spread，spread==0 时为 NaN
+    - vol_ma: volume 的 vol_ma_window 滚动均值 shift(1)（不含当根）
+    - rel_vol: volume / vol_ma，vol_ma<=0 或 NaN 时为 NaN
+    - pct_chg: close 的 pct_change
+    - ma5: close 的 5 日均值
+    - ma20: close 的 20 日均值
+    """
+    prim = norm_df.copy()
+    high = prim["high"].astype(float)
+    low = prim["low"].astype(float)
+    close = prim["close"].astype(float)
+    open_ = prim["open"].astype(float)
+    volume = prim["volume"].astype(float)
+
+    spread = high - low
+    prim["spread"] = spread
+    prim["body"] = close - open_
+
+    # 一字板：spread <= 0（涨跌停封板等）
+    prim["is_limit_bar"] = (spread <= 0)
+
+    # range_pos：spread==0 时不引入 eps 偏置，直接为 NaN（契约要求）
+    range_pos = (close - low) / spread.where(spread > 0)
+    prim["range_pos"] = range_pos
+
+    # vol_ma 使用 shift(1)：t 时刻的量均不包含 t 自身的成交量
+    vol_ma = volume.rolling(config.vol_ma_window).mean().shift(1)
+    prim["vol_ma"] = vol_ma
+
+    # rel_vol：vol_ma <= 0 或 NaN 时为 NaN（降权标记）
+    rel_vol = volume / vol_ma.where(vol_ma > 0)
+    prim["rel_vol"] = rel_vol
+
+    prim["pct_chg"] = close.pct_change()
+    prim["ma5"] = close.rolling(5).mean()
+    prim["ma20"] = close.rolling(20).mean()
+    return prim
+
+
+# ---------------------------------------------------------------------------
+# 占位骨架（Task 2/4 替换真实逻辑）
+# ---------------------------------------------------------------------------
+
+def find_swing_pivots(series, k: int) -> list["Pivot"]:
+    raise NotImplementedError("implemented in Task 2")
+
+
+def atr(df, period: int = 14) -> pd.Series:
+    raise NotImplementedError("implemented in Task 2")
+
+
+def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSResult:
+    """主入口：输入 OHLCV DataFrame，输出 VPSResult。"""
+    cfg = config or VPSConfig()
+    norm, reason = _normalize(df, cfg)
+    if reason is not None:
+        return VPSResult(markers=[], status="degraded", degraded_reason=reason)
+    window_reason = _check_sufficient_window(norm, cfg)
+    if window_reason is not None:
+        return VPSResult(markers=[], status="degraded", degraded_reason=window_reason)
+    return VPSResult(markers=[], status="ok", degraded_reason=None)
