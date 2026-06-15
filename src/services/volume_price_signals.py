@@ -209,24 +209,40 @@ def _attach_pivot_timestamps(pivots: list[Pivot], norm_df: pd.DataFrame) -> list
 
 
 def atr(df, period: int = 14) -> pd.Series:
-    """Wilder ATR（全仓唯一定义，M2b 复用）。
+    """Canonical Wilder ATR（全仓唯一定义，M2b 复用）。
 
-    公式：TR = max(high-low, |high-prev_close|, |low-prev_close|)
-    平滑方式：EWM alpha=1/period，adjust=False，min_periods=1（Wilder 平滑）。
-    首行 prev_close 为 NaN，TR[0] = NaN；EWM seed 从 TR[1] 起。
+    True Range 定义：
+      TR[0] = high[0] - low[0]（首根无前收，仅用 H-L）
+      TR[t] = max(high[t]-low[t], |high[t]-close[t-1]|, |low[t]-close[t-1]|)  for t >= 1
+
+    Wilder 平滑：
+      ATR[0 .. period-2] = NaN
+      ATR[period-1]      = mean(TR[0 .. period-1])  （SMA seed）
+      ATR[t]             = (ATR[t-1] * (period-1) + TR[t]) / period  for t >= period
     """
     frame = pd.DataFrame(df)
     high = frame["high"].astype(float)
     low = frame["low"].astype(float)
     close = frame["close"].astype(float)
     prev_close = close.shift(1)
-    # skipna=False: TR[0] = NaN（首行无前收价，True Range 未定义）；
-    # EWM 以 TR[1] 为 seed，与 Wilder 平滑定义一致。
+
+    # TR[0] = H-L（skipna 默认 True，使首行 NaN 分量被忽略，取 high-low）
     tr = pd.concat(
         [(high - low), (high - prev_close).abs(), (low - prev_close).abs()],
         axis=1,
-    ).max(axis=1, skipna=False)
-    return tr.ewm(alpha=1.0 / period, adjust=False, min_periods=1).mean()
+    ).max(axis=1)
+
+    # Wilder 平滑：SMA seed + 递推
+    n = len(tr)
+    atr_values = [float("nan")] * n
+    if n >= period:
+        # seed：前 period 根 TR 的均值
+        atr_values[period - 1] = float(tr.iloc[:period].mean())
+        # 递推
+        for t in range(period, n):
+            atr_values[t] = (atr_values[t - 1] * (period - 1) + float(tr.iloc[t])) / period
+
+    return pd.Series(atr_values, index=tr.index)
 
 
 def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSResult:

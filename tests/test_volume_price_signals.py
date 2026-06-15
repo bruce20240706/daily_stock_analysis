@@ -120,13 +120,25 @@ def test_find_swing_pivots_detects_high_and_low():
 
 
 def test_atr_matches_wilder_manual():
+    # Test data: H=[10,12,13,14], L=[8,9,11,12], C=[9,11,12,13], period=2
+    # TR  = [2.0, 3.0, 2.0, 2.0]
+    #   TR[0] = 10-8 = 2.0  (no prev close, use H-L only)
+    #   TR[1] = max(12-9, |12-9|, |9-9|) = max(3,3,0) = 3.0
+    #   TR[2] = max(13-11, |13-11|, |11-11|) = max(2,2,0) = 2.0
+    #   TR[3] = max(14-12, |14-12|, |12-12|) = max(2,2,0) = 2.0
+    # Canonical Wilder ATR (period=2):
+    #   ATR[0] = NaN
+    #   ATR[1] = (2.0+3.0)/2 = 2.5        (SMA seed)
+    #   ATR[2] = (2.5*1 + 2.0) / 2 = 2.25
+    #   ATR[3] = (2.25*1 + 2.0) / 2 = 2.125
     df = pd.DataFrame({
         "high": [10, 12, 13, 14],
         "low": [8, 9, 11, 12],
         "close": [9, 11, 12, 13],
     })
     out = atr(df, period=2)
-    # TR1 NaN(no prev close); TR2=max(12-9,|12-9|,|9-9|)=3; TR3=max(13-11,|13-11|,|11-11|)=2
-    assert out.iloc[1] == pytest.approx(3.0)  # first available (rolling/ewm seed)
-    assert out.notna().iloc[-1]
+    assert pd.isna(out.iloc[0])
+    assert out.iloc[1] == pytest.approx(2.5)
+    assert out.iloc[2] == pytest.approx(2.25)
+    assert out.iloc[3] == pytest.approx(2.125)
     assert (out.dropna() > 0).all()
