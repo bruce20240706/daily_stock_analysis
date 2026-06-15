@@ -211,3 +211,24 @@ def test_signals_endpoint_stale_when_llm_too_old(monkeypatch):
     assert resp.consistency == "stale", (
         f"期望 consistency='stale'，实际为 '{resp.consistency}'"
     )
+
+
+# ─── 向后兼容回归 + 路由注册校验（Task 6）────────────────────────────────────
+
+
+def test_history_schema_backward_compatible():
+    # 旧 schema 字段不变（追加 SignalMarker 不影响 KLineData/StockHistoryResponse）
+    from api.v1.schemas.stocks import KLineData, StockHistoryResponse
+
+    kline = KLineData(date="2026-06-12", open=1.0, high=2.0, low=0.5, close=1.5)
+    assert kline.volume is None
+    resp = StockHistoryResponse(stock_code="600519", period="daily")
+    assert resp.data == []
+
+
+def test_signals_route_registered_on_stocks_router():
+    from api.v1.endpoints.stocks import router
+
+    paths = {route.path for route in router.routes}
+    assert "/{stock_code:path}/signals" in paths
+    assert "/{stock_code:path}/history" in paths  # 旧路由仍在
