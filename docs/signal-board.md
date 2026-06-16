@@ -96,7 +96,7 @@ AlphaSift 接入说明见 `docs/alphasift-integration.md`。
 
 - **并发**：`build_board` 用 `ThreadPoolExecutor`，上界 `min(SIGNALS_BOARD_MAX_WORKERS, len(codes))`；逐 code 调 `build_signals_for_code`。每个 worker 经 `StockService` / `DatabaseManager` 各取所需 DB 访问（只读看板，并发安全）。
 - **降级**：单 code 计算失败仅降级该行——进 `unavailable` 桶（`status=degraded` + `degraded_reason`）并计入 `degraded_codes`，整盘继续、不被单源拖垮，整体仍 200。
-- **缓存**：进程内 TTL 缓存，键为 `(code, days)`，TTL = `SIGNALS_BOARD_CACHE_TTL_S` 秒；命中即返回，`refresh=true` 绕过。缓存读写加锁（`threading.Lock`）。
+- **缓存**：进程内 TTL 缓存，键为 `(code, days)`，TTL = `SIGNALS_BOARD_CACHE_TTL_S` 秒；命中即返回，`refresh=true` 绕过。缓存读写加锁（`threading.Lock`）。**仅缓存成功（`status=ok`）的单股结果**；degraded/失败（含瞬时取数失败）与无数据不写缓存，故下次非 refresh 加载会自动重试，瞬时故障可自愈（代价是永久无数据的标的每次非 refresh 都会重算/重取，自选池规模小可接受）。`SIGNALS_BOARD_CACHE_TTL_S=0` 表示完全关闭缓存：读与写都跳过，不会留下永不读取的死条目。
 - **请求语义**：单个 `GET /board` 为 barrier——等全部 code 算完一并返回，degraded 行与正常行同批返回；流式 / SSE 渐进渲染非本期。
 
 ## 6. 复用关系
@@ -127,6 +127,7 @@ AlphaSift 接入说明见 `docs/alphasift-integration.md`。
 
 - **data_provider 并发压力**：有界并发 + TTL 缓存 + 单 code 降级兜底缓解；超大自选首屏仍可能偏慢。
 - **多 worker 部署缓存不共享**：进程内缓存按 worker 各自维护，命中率有限、各 worker 各自重算（可接受）。
+- **永久无数据标的不缓存**：仅缓存成功（`status=ok`）结果，degraded/失败/无数据不写缓存以支持瞬时故障自愈；代价是长期无数据的标的每次非 refresh 加载都会重算/重取，自选池规模小可接受。
 - **命中率按 code 近似**：沿用 L3（M2c）口径，同一 code 各规则信号共享该 code 的历史方向命中率。
 - **无自动轮询刷新**：MVP 不含盘中自动刷新，靠手动「刷新」（`refresh=true`）强制重算。
 

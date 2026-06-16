@@ -51,7 +51,11 @@ def _infer_market(code: str) -> Optional[str]:
 
 def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
     """单股编排：取数（与 /history 同源）→ 引擎 → BuySignal → consistency → 命中率回填 → price_lines。"""
-    # 延迟导入，避免与 endpoint 层辅助函数的潜在循环（沿用 apply_price_levels_to_guard 先例）
+    # 延迟导入打破本特性自身引入的 endpoint↔service 循环：
+    # 抽出 build_signals_for_code 后，单股端点(stocks.py)反过来调用本模块，
+    # 而本编排又复用 stocks.py 的 build_price_lines/_elapsed_trading_days。
+    # 这两个 helper 与 endpoint 无实质耦合，后续可下沉到 service 层以消除循环
+    # (本次为控制改动面/避免 service→schema 依赖暂不迁移)。
     from api.v1.endpoints.stocks import build_price_lines, _elapsed_trading_days
 
     service = StockService()
@@ -188,8 +192,13 @@ def _compute_entry(code: str, *, days: int, refresh: bool, now_s: float, ttl_s: 
     except Exception as exc:
         logger.warning("看板单股计算失败 code=%s err=%s", code, exc)
         entry = _degraded_entry(code, "信号计算失败")
-    with _BOARD_CACHE_LOCK:
-        _BOARD_CACHE[cache_key] = (now_s, entry)
+    # 只缓存成功(ok)结果，且仅在缓存启用(ttl_s>0)时写入：
+    # - ttl_s==0 表示关闭缓存，不应留下永不读取的死条目；
+    # - degraded/失败(含瞬时取数失败)不缓存，确保下次非 refresh 加载会重试、自愈，
+    #   而不是把 unavailable 粘住一个 TTL。
+    if ttl_s > 0 and entry["status"] == "ok":
+        with _BOARD_CACHE_LOCK:
+            _BOARD_CACHE[cache_key] = (now_s, entry)
     return entry
 
 

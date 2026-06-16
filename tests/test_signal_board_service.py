@@ -1,8 +1,17 @@
 from datetime import datetime
 from types import SimpleNamespace
 
+import pytest
+
 from src.stock_analyzer import BuySignal
 import src.services.signal_board_service as sbs
+
+
+@pytest.fixture(autouse=True)
+def _clear_board_cache():
+    sbs._BOARD_CACHE.clear()
+    yield
+    sbs._BOARD_CACHE.clear()
 
 
 def _bar(date, close):
@@ -132,3 +141,40 @@ def test_build_board_cache_hit(monkeypatch):
     sbs.build_board(["AAA"], days=120, refresh=True)    # 计算并写缓存
     sbs.build_board(["AAA"], days=120, refresh=False)   # 命中缓存，不再算
     assert calls["n"] == 1
+
+
+def test_build_board_refresh_bypasses_populated_cache(monkeypatch):
+    calls = {"n": 0}
+    def fake_a(code, *, days=120):
+        calls["n"] += 1
+        return _bs("bullish")            # ok-status, action buy
+    monkeypatch.setattr(sbs, "build_signals_for_code", fake_a)
+    sbs.build_board(["AAA"], days=120, refresh=False)   # compute + cache
+    assert calls["n"] == 1
+    def fake_b(code, *, days=120):
+        calls["n"] += 1
+        return _bs("bearish")            # ok-status, action sell
+    monkeypatch.setattr(sbs, "build_signals_for_code", fake_b)
+    out = sbs.build_board(["AAA"], days=120, refresh=True)   # must recompute, NOT serve cached buy
+    assert calls["n"] == 2
+    assert out["entries"][0]["action_group"] == "sell"
+
+
+def test_build_board_ttl_zero_disables_cache_writes(monkeypatch):
+    monkeypatch.setenv("SIGNALS_BOARD_CACHE_TTL_S", "0")
+    monkeypatch.setattr(sbs, "build_signals_for_code", lambda code, *, days=120: _bs("bullish"))
+    sbs.build_board(["AAA"], days=120, refresh=False)
+    assert sbs._BOARD_CACHE == {}        # caching off → nothing stored
+
+
+def test_build_board_does_not_cache_degraded(monkeypatch):
+    calls = {"n": 0}
+    def fake(code, *, days=120):
+        calls["n"] += 1
+        raise RuntimeError("transient")
+    monkeypatch.setattr(sbs, "build_signals_for_code", fake)
+    sbs.build_board(["BAD"], days=120, refresh=False)        # degraded -> must NOT cache
+    out = sbs.build_board(["BAD"], days=120, refresh=False)  # cache miss -> retried
+    assert calls["n"] == 2
+    assert out["entries"][0]["action_group"] == "unavailable"
+    assert out["entries"][0]["status"] == "degraded"
