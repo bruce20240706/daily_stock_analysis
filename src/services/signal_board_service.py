@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Optional
 
@@ -112,3 +115,103 @@ def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
         rule_direction=buy_signal_to_direction(rule_signal) if rule_signal is not None else "neutral",
         latest_close=latest_close, name=name, market=market,
     )
+
+
+_ACTION_BY_DIRECTION = {"bullish": "buy", "bearish": "sell", "neutral": "hold"}
+_BOARD_CACHE: dict = {}                  # (code, days) -> (ts_seconds, BoardEntry-dict)
+_BOARD_CACHE_LOCK = threading.Lock()
+
+
+def _llm_direction_from_markers(markers: list) -> Optional[str]:
+    for m in markers:
+        if m.get("source") == "llm":
+            return m.get("direction")
+    return None
+
+
+def _key_signals_from_markers(markers: list) -> list:
+    seen, out = set(), []
+    for m in markers:
+        if m.get("source") == "rule":
+            st = m.get("signal_type")
+            if st and st not in seen:
+                seen.add(st)
+                out.append(st)
+    return out
+
+
+def _hit_fields_from_markers(markers: list) -> dict:
+    for m in markers:
+        if m.get("source") == "rule":
+            return {"hit_rate": m.get("hit_rate"), "hit_sample": m.get("hit_sample"),
+                    "verified": bool(m.get("verified", False))}
+    return {"hit_rate": None, "hit_sample": None, "verified": False}
+
+
+def _entry_from_board_signals(code: str, bs: "BoardSignals") -> dict:
+    payload = bs.signals_payload
+    markers = payload.get("markers", []) or []
+    action = "unavailable" if bs.rule_direction is None else _ACTION_BY_DIRECTION[bs.rule_direction]
+    return {
+        "code": code, "name": bs.name, "market": bs.market,
+        "action_group": action, "rule_direction": bs.rule_direction,
+        "llm_direction": _llm_direction_from_markers(markers),
+        "consistency": payload.get("consistency", "unknown"),
+        "key_signals": _key_signals_from_markers(markers),
+        "price_lines": payload.get("price_lines", {"entry": None, "stop": None, "target": None}),
+        "latest_close": bs.latest_close,
+        **_hit_fields_from_markers(markers),
+        "status": payload.get("status", "ok"), "degraded_reason": payload.get("degraded_reason"),
+    }
+
+
+def _degraded_entry(code: str, reason: str) -> dict:
+    return {
+        "code": code, "name": None, "market": _infer_market(code),
+        "action_group": "unavailable", "rule_direction": None, "llm_direction": None,
+        "consistency": "unknown", "key_signals": [],
+        "price_lines": {"entry": None, "stop": None, "target": None},
+        "latest_close": None, "hit_rate": None, "hit_sample": None, "verified": False,
+        "status": "degraded", "degraded_reason": reason,
+    }
+
+
+def _compute_entry(code: str, *, days: int, refresh: bool, now_s: float, ttl_s: int) -> dict:
+    cache_key = (code, days)
+    if not refresh and ttl_s > 0:
+        with _BOARD_CACHE_LOCK:
+            hit = _BOARD_CACHE.get(cache_key)
+            if hit and (now_s - hit[0]) < ttl_s:
+                return hit[1]
+    try:
+        entry = _entry_from_board_signals(code, build_signals_for_code(code, days=days))
+    except Exception as exc:
+        logger.warning("看板单股计算失败 code=%s err=%s", code, exc)
+        entry = _degraded_entry(code, "信号计算失败")
+    with _BOARD_CACHE_LOCK:
+        _BOARD_CACHE[cache_key] = (now_s, entry)
+    return entry
+
+
+def build_board(codes: list, *, days: int = 120, refresh: bool = False) -> dict:
+    ttl_s = parse_env_int(os.getenv("SIGNALS_BOARD_CACHE_TTL_S"), 300,
+                          field_name="SIGNALS_BOARD_CACHE_TTL_S", minimum=0)
+    max_workers = parse_env_int(os.getenv("SIGNALS_BOARD_MAX_WORKERS"), 8,
+                                field_name="SIGNALS_BOARD_MAX_WORKERS", minimum=1)
+    now_s = time.time()
+    entries: list = []
+    if codes:
+        workers = min(max_workers, len(codes))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="signal_board_") as ex:
+            entries = list(ex.map(
+                lambda c: _compute_entry(c, days=days, refresh=refresh, now_s=now_s, ttl_s=ttl_s),
+                codes,
+            ))
+    counts = {"buy": 0, "hold": 0, "sell": 0, "unavailable": 0}
+    degraded_codes = []
+    for e in entries:
+        counts[e["action_group"]] = counts.get(e["action_group"], 0) + 1
+        if e["status"] == "degraded":
+            degraded_codes.append(e["code"])
+    return {"as_of": int(now_s * 1000), "entries": entries, "counts": counts,
+            "degraded_codes": degraded_codes}

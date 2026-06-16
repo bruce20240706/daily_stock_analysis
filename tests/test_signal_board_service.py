@@ -54,3 +54,81 @@ def test_build_signals_for_code_no_data_is_unavailable(monkeypatch):
     assert bs.signals_payload["status"] == "degraded"
     assert bs.rule_direction is None
     assert bs.latest_close is None
+
+
+def _bs(direction, *, status="ok", markers=None):
+    return sbs.BoardSignals(
+        signals_payload={
+            "status": status, "markers": markers or [],
+            "price_lines": {"entry": None, "stop": None, "target": None},
+            "consistency": "consistent", "degraded_reason": None,
+        },
+        rule_direction=direction, latest_close=100.0, name="N", market="CN",
+    )
+
+
+def test_build_board_groups_and_counts(monkeypatch):
+    mapping = {"AAA": _bs("bullish"), "BBB": _bs("neutral"), "CCC": _bs("bearish")}
+    monkeypatch.setattr(sbs, "build_signals_for_code", lambda code, *, days=120: mapping[code])
+    out = sbs.build_board(["AAA", "BBB", "CCC"], days=120, refresh=True)
+    groups = {e["code"]: e["action_group"] for e in out["entries"]}
+    assert groups == {"AAA": "buy", "BBB": "hold", "CCC": "sell"}
+    assert out["counts"] == {"buy": 1, "hold": 1, "sell": 1, "unavailable": 0}
+    assert out["degraded_codes"] == []
+    assert isinstance(out["as_of"], int)
+
+
+def test_build_board_single_failure_degrades_only_that_row(monkeypatch):
+    def fake(code, *, days=120):
+        if code == "BAD":
+            raise RuntimeError("boom")
+        return _bs("bullish")
+    monkeypatch.setattr(sbs, "build_signals_for_code", fake)
+    out = sbs.build_board(["AAA", "BAD"], days=120, refresh=True)
+    bad = next(e for e in out["entries"] if e["code"] == "BAD")
+    assert bad["action_group"] == "unavailable" and bad["status"] == "degraded"
+    assert out["counts"]["buy"] == 1 and out["counts"]["unavailable"] == 1
+    assert "BAD" in out["degraded_codes"]
+    assert any(e["code"] == "AAA" and e["action_group"] == "buy" for e in out["entries"])
+
+
+def test_build_board_unavailable_when_rule_direction_none(monkeypatch):
+    monkeypatch.setattr(sbs, "build_signals_for_code",
+                        lambda code, *, days=120: _bs(None, status="degraded"))
+    out = sbs.build_board(["X"], days=120, refresh=True)
+    assert out["entries"][0]["action_group"] == "unavailable"
+    assert out["counts"]["unavailable"] == 1
+
+
+def test_build_board_maps_markers_to_entry_fields(monkeypatch):
+    markers = [
+        {"source": "rule", "signal_type": "volume_breakout", "direction": "bullish",
+         "hit_rate": 0.62, "hit_sample": 18, "verified": True},
+        {"source": "rule", "signal_type": "shrink_pullback", "direction": "bullish",
+         "hit_rate": 0.62, "hit_sample": 18, "verified": True},
+        {"source": "llm", "signal_type": "llm_advice", "direction": "bearish"},
+    ]
+    monkeypatch.setattr(sbs, "build_signals_for_code",
+                        lambda code, *, days=120: _bs("bullish", markers=markers))
+    e = sbs.build_board(["AAA"], days=120, refresh=True)["entries"][0]
+    assert e["key_signals"] == ["volume_breakout", "shrink_pullback"]   # rule 去重保序
+    assert e["llm_direction"] == "bearish"
+    assert e["hit_rate"] == 0.62 and e["hit_sample"] == 18 and e["verified"] is True
+    assert e["consistency"] == "consistent"
+
+
+def test_build_board_empty(monkeypatch):
+    out = sbs.build_board([], days=120, refresh=True)
+    assert out["entries"] == [] and out["counts"]["buy"] == 0
+
+
+def test_build_board_cache_hit(monkeypatch):
+    calls = {"n": 0}
+    def fake(code, *, days=120):
+        calls["n"] += 1
+        return _bs("bullish")
+    monkeypatch.setattr(sbs, "build_signals_for_code", fake)
+    sbs._BOARD_CACHE.clear()
+    sbs.build_board(["AAA"], days=120, refresh=True)    # 计算并写缓存
+    sbs.build_board(["AAA"], days=120, refresh=False)   # 命中缓存，不再算
+    assert calls["n"] == 1
