@@ -94,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 新增量价信号引擎 volume_price_signals.py（量价八法/OBV 背离/放量突破/缩量回调/锚定 VWAP/VSA 降权）
 - [新功能] 新增 GET /api/v1/stocks/{code}/signals 端点：返回与 /history 同源的规则量价信号（逐 bar）+ LLM 最新结论点 + 量价一致性（consistent/divergent/conflict/unknown/stale）+ 价位线占位（后续里程碑填值）；degraded 仍返回 200。
 - [新功能] 信号命中率回填(M2c)：复用 BacktestResult 历史方向命中率回填 SignalMarker 的 hit_rate/hit_sample，达样本阈值(沿用回测 eval_window_days 默认)置 verified，并接入 /signals 端点 rule marker（verified 不再恒 false）；新增 SIGNAL_HIT_VERIFIED_MIN_SAMPLE 配置
+- [新功能] K 线抽屉支持规则/LLM 双轨标注（合并/并排）、点击钻取依据、入/损/标价位线，/signals 失败降级有图无标注
 
 ## [3.20.0] - 2026-06-03
 
