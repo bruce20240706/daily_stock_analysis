@@ -155,6 +155,11 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
     stocksApi
       .getSignals(stockCode)
       .then((signals) => {
+        if (signals.status === 'degraded') {
+          // 有图无标注：后端降级（任意非空 degraded_reason）一律按通用降级，不画任何标注。
+          setSignalsAvailable(false);
+          return;
+        }
         setSignalsAvailable(true);
         registerSignalGlyphTemplate((markers) => setDrilldownMarkers(markers));
         for (const glyph of buildSignalGlyphs(signals.markers)) {

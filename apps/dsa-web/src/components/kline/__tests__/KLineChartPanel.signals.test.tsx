@@ -150,7 +150,41 @@ describe('KLineChartPanel signals layer', () => {
     }
   });
 
-  it('weakens degraded markers visually but still renders the chart', async () => {
+  it('falls back to 有图无标注 when /signals returns status=degraded with markers', async () => {
+    vi.resetModules();
+    setupChartMock();
+    vi.doMock('../../../api/stocks', () => ({
+      KLINE_DEFAULT_DAYS: 120,
+      stocksApi: {
+        getKlineHistory: vi.fn().mockResolvedValue([
+          { timestamp: 1718323200000, open: 1690, high: 1710, low: 1680, close: 1700, volume: 1000, turnover: 0 },
+        ]),
+        getSignals: vi.fn().mockResolvedValue({
+          ...okSignals,
+          status: 'degraded',
+          degradedReason: 'rel_vol unavailable for all bars',
+          markers: okSignals.markers,
+          priceLines: { entry: 1700.5, stop: 1620, target: 1850 },
+        }),
+      },
+    }));
+
+    await renderPanel();
+
+    expect(await screen.findByTestId('signals-unavailable')).toBeInTheDocument();
+    await waitFor(() => {
+      const glyphCalls = createOverlay.mock.calls.filter(([arg]) =>
+        typeof arg === 'object' && arg !== null && (arg as { name?: string }).name === 'signalGlyph',
+      );
+      expect(glyphCalls).toHaveLength(0);
+      const priceLineCalls = createOverlay.mock.calls.filter(([arg]) =>
+        typeof arg === 'object' && arg !== null && (arg as { name?: string }).name === 'priceLine',
+      );
+      expect(priceLineCalls).toHaveLength(0);
+    });
+  });
+
+  it('weakens B-class (is_daily_approx) markers via lower opacity', async () => {
     vi.resetModules();
     setupChartMock();
     vi.doMock('../../../api/stocks', () => ({
