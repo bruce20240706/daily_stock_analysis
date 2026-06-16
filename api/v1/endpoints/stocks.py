@@ -616,18 +616,7 @@ def get_stock_signals(
         # （signal_board_service 延迟导入本文件的 build_price_lines/_elapsed_trading_days）。
         from src.services.signal_board_service import build_signals_for_code
 
-        # 把本模块级符号作为可注入依赖传入，使端点对 stocks 模块的 monkeypatch
-        # （compute_volume_price_signals / StockTrendAnalyzer / resolve_marker_hit_fields
-        # / StockService / DatabaseManager）在薄壳化后仍生效，保持单股行为等价。
-        bs = build_signals_for_code(
-            stock_code,
-            days=days,
-            engine_fn=compute_volume_price_signals,
-            analyzer_cls=StockTrendAnalyzer,
-            hit_fields_resolver=resolve_marker_hit_fields,
-            stock_service_cls=StockService,
-            db_manager_cls=DatabaseManager,
-        )
+        bs = build_signals_for_code(stock_code, days=days)
         return SignalsResponse(**bs.signals_payload)
 
     except HTTPException:

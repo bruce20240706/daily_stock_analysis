@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 import api.v1.endpoints.stocks as stocks_ep
+import src.services.signal_board_service as sbs
 from api.v1.schemas.stocks import PriceLines, SignalMarker, SignalsResponse
 from src.stock_analyzer import BuySignal
 from src.services.signals_service import date_str_to_epoch_ms
@@ -97,7 +98,7 @@ def _patch_common(monkeypatch, *, engine_result, rule_signal, llm_record):
         lambda self, stock_code, period="daily", days=120: _fake_history_result(rows),
     )
     monkeypatch.setattr(
-        stocks_ep, "compute_volume_price_signals",
+        sbs, "compute_volume_price_signals",
         lambda df, config=None: engine_result,
     )
 
@@ -108,7 +109,7 @@ def _patch_common(monkeypatch, *, engine_result, rule_signal, llm_record):
         def analyze(self, df, code):
             return SimpleNamespace(buy_signal=rule_signal)
 
-    monkeypatch.setattr(stocks_ep, "StockTrendAnalyzer", _FakeAnalyzer)
+    monkeypatch.setattr(sbs, "StockTrendAnalyzer", _FakeAnalyzer)
 
     class _FakeDB:
         def get_latest_analysis_by_code(self, code):
@@ -244,7 +245,7 @@ def test_signals_endpoint_backfills_verified_via_resolver(monkeypatch):
     _patch_common(monkeypatch, engine_result=engine, rule_signal=BuySignal.BUY, llm_record=None)
     # 端点内部用的 resolver 被替换为确定性桩，证明组装层确实调用了它
     monkeypatch.setattr(
-        stocks_ep, "resolve_marker_hit_fields",
+        sbs, "resolve_marker_hit_fields",
         lambda signal_type, code: {"hit_rate": 0.7, "hit_sample": 30, "verified": True},
     )
 
@@ -274,7 +275,7 @@ def test_signals_endpoint_passes_vps_config_from_env(monkeypatch):
         stocks_ep.StockService, "get_history_data",
         lambda self, stock_code, period="daily", days=120: _fake_history_result(rows),
     )
-    monkeypatch.setattr(stocks_ep, "compute_volume_price_signals", _fake_engine)
+    monkeypatch.setattr(sbs, "compute_volume_price_signals", _fake_engine)
 
     class _FakeAnalyzer:
         def __init__(self, *a, **k):
@@ -283,7 +284,7 @@ def test_signals_endpoint_passes_vps_config_from_env(monkeypatch):
         def analyze(self, df, code):
             return SimpleNamespace(buy_signal=None)
 
-    monkeypatch.setattr(stocks_ep, "StockTrendAnalyzer", _FakeAnalyzer)
+    monkeypatch.setattr(sbs, "StockTrendAnalyzer", _FakeAnalyzer)
 
     class _FakeDB:
         def get_latest_analysis_by_code(self, code):
