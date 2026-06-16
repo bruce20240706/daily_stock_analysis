@@ -44,6 +44,28 @@ describe('SignalBoard', () => {
     expect(rows[0]).toHaveTextContent('H');   // higher hit rate first
   });
 
+  it('sinks no-sample (null hit-rate) rows to the bottom of a group', () => {
+    const entries = [
+      mk({ code: 'NOSAMPLE', name: 'NS', hitRate: null, hitSample: null }),
+      mk({ code: 'HASRATE', name: 'HR', hitRate: 0.5, hitSample: 10 }),
+    ];
+    render(<SignalBoard entries={entries} onRowClick={vi.fn()} />);
+    const buyGroup = screen.getByTestId('group-buy');
+    const rows = within(buyGroup).getAllByTestId('board-row');
+    expect(rows[0]).toHaveTextContent('HR');   // has a hit rate → on top
+    expect(rows[1]).toHaveTextContent('NS');   // no sample → sinks
+  });
+
+  it('surfaces degradedReason text for a degraded row', () => {
+    const entries = [
+      mk({ code: 'BAD', name: 'BAD名', actionGroup: 'unavailable', status: 'degraded',
+           ruleDirection: null, consistency: 'unknown', verified: false,
+           keySignals: [], degradedReason: '无可用历史数据' }),
+    ];
+    render(<SignalBoard entries={entries} onRowClick={vi.fn()} />);
+    expect(screen.getByText('无可用历史数据')).toBeInTheDocument();
+  });
+
   it('hides empty action groups (renders nothing for a group with no entries)', () => {
     render(<SignalBoard entries={[mk({ code: '600519', name: '贵州茅台', actionGroup: 'buy' })]} onRowClick={vi.fn()} />);
     expect(screen.queryByTestId('group-sell')).not.toBeInTheDocument();

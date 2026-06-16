@@ -37,7 +37,11 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
                 {e.ruleDirection ? dirLabel[e.ruleDirection] : '—'}</td>
               <td>{e.llmDirection ? dirLabel[e.llmDirection] : '—'}</td>
               <td className={cn(e.consistency === 'conflict' && 'text-danger')}>{consistencyLabel[e.consistency]}</td>
-              <td className="text-left text-secondary-text">{e.keySignals.join('·') || '—'}</td>
+              <td className="text-left text-secondary-text">
+                {e.status === 'degraded' && e.degradedReason
+                  ? e.degradedReason
+                  : (e.keySignals.join('·') || '—')}
+              </td>
               <td className="text-secondary-text">{fmt(e.priceLines.entry)}/{fmt(e.priceLines.stop)}/{fmt(e.priceLines.target)}</td>
               <td>
                 <span className="text-secondary-text">{fmtHit(e)}</span>{' '}
