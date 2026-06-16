@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 import pandas as pd
 
@@ -46,12 +46,33 @@ def _infer_market(code: str) -> Optional[str]:
     return "US"
 
 
-def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
-    """单股编排：取数（与 /history 同源）→ 引擎 → BuySignal → consistency → 命中率回填 → price_lines。"""
+def build_signals_for_code(
+    code: str,
+    *,
+    days: int = 120,
+    engine_fn=None,
+    analyzer_cls=None,
+    hit_fields_resolver=None,
+    stock_service_cls=None,
+    db_manager_cls=None,
+) -> BoardSignals:
+    """单股编排：取数（与 /history 同源）→ 引擎 → BuySignal → consistency → 命中率回填 → price_lines。
+
+    可选依赖注入（engine_fn / analyzer_cls / hit_fields_resolver / stock_service_cls /
+    db_manager_cls）默认回落到本模块导入的实现；薄壳端点把自身模块级符号注入进来，
+    使端点对 stocks 模块的 monkeypatch 仍生效，保持单股行为与抽取前等价。直接调用者
+    （如 /signals/board）无需传，沿用本模块默认即可。
+    """
     # 延迟导入，避免与 endpoint 层辅助函数的潜在循环（沿用 apply_price_levels_to_guard 先例）
     from api.v1.endpoints.stocks import build_price_lines, _elapsed_trading_days
 
-    service = StockService()
+    engine_fn = engine_fn or compute_volume_price_signals
+    analyzer_cls = analyzer_cls or StockTrendAnalyzer
+    hit_fields_resolver = hit_fields_resolver or resolve_marker_hit_fields
+    stock_service_cls = stock_service_cls or StockService
+    db_manager_cls = db_manager_cls or DatabaseManager
+
+    service = stock_service_cls()
     history = service.get_history_data(stock_code=code, period="daily", days=days)
     rows = history.get("data", []) or []
     name = history.get("stock_name")
@@ -71,18 +92,18 @@ def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
     _lc = rows[-1].get("close")
     latest_close = float(_lc) if _lc is not None else None
 
-    engine_result = compute_volume_price_signals(df, config=VPSConfig.from_env())
+    engine_result = engine_fn(df, config=VPSConfig.from_env())
 
     rule_signal = None
     try:
-        trend_result = StockTrendAnalyzer().analyze(df, code)
+        trend_result = analyzer_cls().analyze(df, code)
         rule_signal = getattr(trend_result, "buy_signal", None)
     except Exception as exc:
         logger.warning("规则代表方向计算失败 code=%s err=%s", code, exc)
 
     llm_record = None
     try:
-        llm_record = DatabaseManager.get_instance().get_latest_analysis_by_code(code)
+        llm_record = db_manager_cls.get_instance().get_latest_analysis_by_code(code)
     except Exception as exc:
         logger.warning("LLM 最新结论读取失败 code=%s err=%s", code, exc)
 
@@ -97,7 +118,7 @@ def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
         latest_bar_date=latest_bar_date, latest_close=latest_close,
         llm_record=llm_record, trading_days_elapsed=trading_days_elapsed,
         stale_threshold=stale_threshold, code=code,
-        hit_fields_resolver=resolve_marker_hit_fields,
+        hit_fields_resolver=hit_fields_resolver,
     )
 
     atr_mult = parse_env_float(os.getenv("KLINE_PRICE_LEVEL_ATR_MULT"), _DEFAULT_ATR_MULT,
