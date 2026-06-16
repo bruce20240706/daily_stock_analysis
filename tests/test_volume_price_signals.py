@@ -423,3 +423,107 @@ def test_upthrust_and_spring_reuse_swing_pivots():
     df = _make_df(pad + pivot_high + upthrust)
     res = compute_volume_price_signals(df, config=VPSConfig(swing_k=2))
     assert any(m.signal_type == "upthrust" and m.direction == "bearish" for m in res.markers)
+
+
+# ---------------------------------------------------------------------------
+# 终审 #3：OBV 背离 marker 锚定确认 bar（curr.index+swing_k），消除 k 根可视前视
+# ---------------------------------------------------------------------------
+
+def test_obv_divergence_marker_dated_at_confirmation_bar_not_pivot():
+    """OBV 背离 marker 的 timestamp 必须落在 pivot 确认 bar（curr.index+swing_k），
+    而非 pivot 自身的 bar——否则会在背离可知前 k 根就渲染（视觉前视）。"""
+    rows = []
+    seq = [100, 103, 106, 103, 100, 103, 108, 104, 100]
+    vols = [2000, 2200, 2400, 1500, 1400, 1600, 900, 800, 700]  # 第二峰量明显小
+    for p, v in zip(seq, vols):
+        rows.append(_bar(p, p + 0.5, p - 0.5, p, v))
+    pad = [_bar(100, 100.5, 99.5, 100, 1000) for _ in range(30)]
+    df = _make_df(pad + rows)
+    cfg = VPSConfig(swing_k=2)
+
+    # 复算引擎内部所用 prim/pivots，精确推出 curr 高点位置
+    norm, _ = _normalize(df, cfg)
+    prim = _compute_primitives(norm, cfg)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    highs = [p for p in find_swing_pivots(close, cfg.swing_k) if p.kind == "high"]
+    assert len(highs) >= 2, "fixture 必须至少有 2 个已确认 swing high"
+    curr = highs[-1]
+    conf_idx = curr.index + cfg.swing_k
+    assert conf_idx <= len(prim) - 1, "确认 bar 必须落在样本内"
+
+    pivot_bar_ts = _to_epoch_ms_shanghai(prim["date"].iloc[curr.index])
+    conf_bar_ts = _to_epoch_ms_shanghai(prim["date"].iloc[conf_idx])
+    assert pivot_bar_ts != conf_bar_ts, "fixture 须使 pivot bar 与确认 bar 日期不同"
+
+    res = compute_volume_price_signals(df, config=cfg)
+    top = [m for m in res.markers if m.signal_type == "obv_top_divergence"]
+    assert len(top) >= 1, "fixture 必须触发顶背离"
+    for m in top:
+        assert m.timestamp == conf_bar_ts, (
+            "OBV 背离 marker 必须锚定确认 bar(curr.index+swing_k)，而非 pivot bar"
+        )
+        assert m.timestamp != pivot_bar_ts, "marker 不得停留在 pivot 自身 bar（视觉前视）"
+        # y 锚（price）仍为枢轴极值，仅 x/时间锚移动到确认日
+        assert m.price == curr.price
+
+
+# ---------------------------------------------------------------------------
+# 终审 #2：VPS_* 环境配置端到端生效（from_env 真正接线）
+# ---------------------------------------------------------------------------
+
+def test_vps_env_config_honored_end_to_end(monkeypatch):
+    """VPS_BREAKOUT_REL_VOL 设高后，原本默认阈值(2.0)会触发的放量突破必须被抑制；
+    不传 config 的默认调用仍触发——证明 from_env() 的值端到端生效。"""
+    pad = [_bar(100, 100.0, 99.0, 100, 1000) for _ in range(30)]
+    # rel_vol = 3000/1000 = 3.0：>=2.0(默认)触发，>=5.0(env)不触发
+    breakout = _bar(100, 110.0, 99.0, 100.0, 3000)
+    df = _make_df(pad + [breakout])
+
+    # 默认（硬编码 2.0）：触发
+    res_default = compute_volume_price_signals(df)
+    assert any(m.signal_type == "volume_breakout" for m in res_default.markers), (
+        "默认 2.0 阈值下该 fixture 必须产出 volume_breakout"
+    )
+
+    # 经 env 拉高到 5.0：被抑制
+    monkeypatch.setenv("VPS_BREAKOUT_REL_VOL", "5.0")
+    res_env = compute_volume_price_signals(df, config=VPSConfig.from_env())
+    assert all(m.signal_type != "volume_breakout" for m in res_env.markers), (
+        "VPS_BREAKOUT_REL_VOL=5.0 必须端到端生效，抑制 rel_vol=3.0 的突破"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 终审 #4：量价八法落地——最新 bar 单点 B 类 marker
+# ---------------------------------------------------------------------------
+
+def _vfx_markers(markers):
+    return [m for m in markers if m.signal_type.startswith("vfx_")]
+
+
+def test_latest_vfx_marker_emitted_for_directional_last_bar():
+    """最新 bar 为放量下跌（rel_vol≈1.3 ∈ [1.2,1.5)，pct_chg<-eps）时，
+    须产出且仅产出 1 个 vfx_expand_down（bearish），且为 B 类降权（low + daily_approx）。"""
+    pad = [_bar(100, 101, 99, 100, 1000) for _ in range(25)]
+    expand_down = _bar(100, 100.5, 94.5, 95, 1300)  # 放量下跌
+    df = _make_df(pad + [expand_down])
+    res = compute_volume_price_signals(df)
+    vfx = _vfx_markers(res.markers)
+    assert len(vfx) == 1, f"应有且仅有 1 个 vfx marker，实际 {len(vfx)}"
+    m = vfx[0]
+    assert m.signal_type == "vfx_expand_down"
+    assert m.direction == "bearish"
+    assert m.confidence == "low"
+    assert m.is_daily_approx is True
+    assert m.is_anomalous is False
+    assert m.timestamp == _to_epoch_ms_shanghai(df["date"].iloc[-1])
+    assert m.price == 95.0
+
+
+def test_no_vfx_marker_for_neutral_last_bar():
+    """最新 bar 为平价常量（neutral）时，不产出 vfx marker（不逐 bar 刷屏）。"""
+    pad = [_bar(100, 101, 99, 100, 1000) for _ in range(25)]
+    neutral = _bar(100, 101, 99, 100, 1000)  # flat price + normal vol -> vfx_normal_flat neutral
+    df = _make_df(pad + [neutral])
+    res = compute_volume_price_signals(df)
+    assert _vfx_markers(res.markers) == []

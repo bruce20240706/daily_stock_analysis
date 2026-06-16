@@ -49,6 +49,7 @@ from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from src.services.volume_price_signals import (
     PriceLevels,
+    VPSConfig,
     _DEFAULT_ATR_MULT,
     _DEFAULT_RR_TARGET,
     compute_volume_price_signals,
@@ -641,7 +642,8 @@ def get_stock_signals(
         latest_close = float(_latest_close_raw) if _latest_close_raw is not None else None
 
         # M1 量价引擎（逐 bar markers + status/degraded）
-        engine_result = compute_volume_price_signals(df)
+        # 传 VPSConfig.from_env() 使 13 个 VPS_* 环境变量真正生效；不配置时回落硬编码默认。
+        engine_result = compute_volume_price_signals(df, config=VPSConfig.from_env())
 
         # 收敛后的单个 BuySignal 作"规则代表方向"
         rule_signal = None

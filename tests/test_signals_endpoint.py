@@ -254,3 +254,48 @@ def test_signals_endpoint_backfills_verified_via_resolver(monkeypatch):
     assert rule_markers[0].verified is True
     assert rule_markers[0].hit_rate == 0.7
     assert rule_markers[0].hit_sample == 30
+
+
+# ─── 终审 #2：端点把 VPSConfig.from_env() 真正传给引擎（非 None）───────────────
+
+def test_signals_endpoint_passes_vps_config_from_env(monkeypatch):
+    """/signals 端点必须以 config=VPSConfig.from_env() 调用引擎，
+    而非 config=None（否则 13 个 VPS_* 环境变量全部失效）。"""
+    from src.services.volume_price_signals import VPSConfig
+
+    recorded = {}
+
+    def _fake_engine(df, config=None):
+        recorded["config"] = config
+        return SimpleNamespace(markers=[], status="ok", degraded_reason=None)
+
+    rows = [_bar("2026-06-11", 1790.0), _bar("2026-06-12", 1800.0)]
+    monkeypatch.setattr(
+        stocks_ep.StockService, "get_history_data",
+        lambda self, stock_code, period="daily", days=120: _fake_history_result(rows),
+    )
+    monkeypatch.setattr(stocks_ep, "compute_volume_price_signals", _fake_engine)
+
+    class _FakeAnalyzer:
+        def __init__(self, *a, **k):
+            pass
+
+        def analyze(self, df, code):
+            return SimpleNamespace(buy_signal=None)
+
+    monkeypatch.setattr(stocks_ep, "StockTrendAnalyzer", _FakeAnalyzer)
+
+    class _FakeDB:
+        def get_latest_analysis_by_code(self, code):
+            return None
+
+    monkeypatch.setattr(
+        stocks_ep.DatabaseManager, "get_instance", classmethod(lambda cls: _FakeDB())
+    )
+
+    stocks_ep.get_stock_signals(stock_code="600519", days=120)
+
+    assert "config" in recorded, "引擎必须被调用"
+    assert isinstance(recorded["config"], VPSConfig), (
+        "端点应传 VPSConfig.from_env() 实例，而非 None（否则 VPS_* 配置失效）"
+    )

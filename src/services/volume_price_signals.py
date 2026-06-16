@@ -41,7 +41,6 @@ class VPSConfig:
     pullback_atr_mult: float = 3.0      # 缩量回调最大回撤 = ATR * 倍数
     atr_period: int = 14
     b_class_top_k: int = 2              # B 类每结果集限流 top-k
-    b_class_confidence: str = "low"     # B 类置信硬上限
 
     @classmethod
     def from_env(cls) -> "VPSConfig":
@@ -539,6 +538,47 @@ def _classify_vfx(
     )
 
 
+def _detect_latest_vfx(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
+    """最新 bar 量价八法落地：仅对当前 bar 出一个 B 类降权 vfx marker。
+
+    只在分类为方向性（非 neutral、非 undefined/异常）时产出，避免每根 bar
+    都挂一个低价值小点（不逐 bar 刷屏，仅surface 当前“识别一致/不一致”的量价态）。
+    强制 confidence='low' + is_daily_approx=True ⇒ B 类降权：前端低透明度渲染，
+    且不进 consistency 投票、不驱动 price_lines（consistency/price_lines 由收敛后的
+    BuySignal / 反算器单独计算，与 markers 无关）。
+    """
+    if prim.empty:
+        return []
+    i = len(prim) - 1
+    rel_vol = prim["rel_vol"].iloc[i]
+    pct_chg = prim["pct_chg"].iloc[i]
+    body = prim["body"].iloc[i]
+    range_pos = prim["range_pos"].iloc[i]
+    classified = _classify_vfx(
+        rel_vol=rel_vol,
+        pct_chg=pct_chg,
+        body=body,
+        range_pos=range_pos,
+        config=config,
+    )
+    # 跳过 neutral / undefined（异常）：只 surface 方向性量价态
+    if classified.direction == "neutral" or classified.is_anomalous:
+        return []
+    return [VPSignal(
+        timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[i]),
+        price=float(prim["close"].astype(float).iloc[i]),
+        anchor="close",
+        direction=classified.direction,
+        signal_type=classified.signal_type,
+        confidence="low",            # B 类降权硬上限
+        is_daily_approx=True,        # 日线近似
+        is_anomalous=False,
+        reason=classified.reason,
+        threshold=None,
+        observed_value=classified.observed_value,
+    )]
+
+
 def _obv(close: pd.Series, volume: pd.Series) -> pd.Series:
     """On-Balance Volume：方向 * 当日量的累积和。close.diff()==0 时贡献 0。"""
     direction = np.sign(close.diff().fillna(0.0))
@@ -560,8 +600,10 @@ def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSign
             price_extreme = cmp_price(curr.price, prev.price)
             obv_lagging = cmp_obv(float(obv_series.iloc[curr.index]), float(obv_series.iloc[prev.index]))
             if price_extreme and obv_lagging:
+                # x 锚定确认 bar(curr.index+swing_k，背离可知日)，y 锚定枢轴极值——消除 k 根可视前视。
+                conf_idx = curr.index + config.swing_k
                 out.append(VPSignal(
-                    timestamp=curr.timestamp,
+                    timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[conf_idx]),
                     price=curr.price,
                     anchor=kind,
                     direction=direction,
@@ -851,6 +893,9 @@ def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSR
     # B 类信号追加（A 类组装完毕后接入），top-k 限流防止图表过密
     b_markers = _detect_vsa_bars(prim, cfg) + _detect_upthrust_spring(prim, cfg)
     markers.extend(_limit_b_class(b_markers, cfg))
+
+    # 量价八法最新 bar 单点（B 类降权）：恰好 1 个 marker，不受 VSA top-k 限流约束
+    markers.extend(_detect_latest_vfx(prim, cfg))
 
     status = "degraded" if degraded_reason else "ok"
     return VPSResult(markers=markers, status=status, degraded_reason=degraded_reason)
