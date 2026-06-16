@@ -93,6 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] perp 回测新增杠杆情景（CRYPTO_BACKTEST_LEVERAGE/API leverage，1-125x，含保守强平模拟与收益放大；结果按 engine_version 标签 v1-xN 与 1x 隔离共存，读 API 增 engine_version 查询参数；默认 1x 行为不变，每日自动回测固定 1x，仅 perp 生效）
 - [新功能] 新增量价信号引擎 volume_price_signals.py（量价八法/OBV 背离/放量突破/缩量回调/锚定 VWAP/VSA 降权）
 - [新功能] 新增 GET /api/v1/stocks/{code}/signals 端点：返回与 /history 同源的规则量价信号（逐 bar）+ LLM 最新结论点 + 量价一致性（consistent/divergent/conflict/unknown/stale）+ 价位线占位（后续里程碑填值）；degraded 仍返回 200。
+- [新功能] 信号命中率回填(M2c)：复用 BacktestResult 历史方向命中率回填 SignalMarker 的 hit_rate/hit_sample，达样本阈值(沿用回测 eval_window_days 默认)置 verified，并接入 /signals 端点 rule marker（verified 不再恒 false）；新增 SIGNAL_HIT_VERIFIED_MIN_SAMPLE 配置
 
 ## [3.20.0] - 2026-06-03
 
