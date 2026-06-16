@@ -32,7 +32,7 @@
 | --- | --- | --- |
 | D1 | 定位 | 汇聚 + 动作枢纽 |
 | D2 | 与 A/首页边界 | 纯新增、共存；复用其组件，不改其页面 |
-| D3 | 布局 | B：K 线常驻顶部 + 下方 tab（信号/报告/历史/新闻/告警） |
+| D3 | 布局 | B：K 线常驻顶部 + 下方 tab（信号/报告/历史/告警）。**新闻并入「报告」**——`ReportSummary` 内置 `ReportNews`，单列新闻 tab 会重复取数，故不单设（计划期据真实组件确认） |
 | D4 | 动作集 | 自选 toggle、刷新分析、建告警、复制链接（全部复用现有端点） |
 | D5 | 后端 | v1 不新增端点；「最新报告」走 history 列表→最新 recordId→report 的 2 跳复用 |
 | D6 | 取数 | 首屏 eager 取 quote + history+signals；报告/历史/新闻/告警按 tab 首次打开懒取 |
@@ -53,12 +53,11 @@
 
 1. **行情头（sticky）**：返回链接、名称 + 代码 + 市场徽章、实时行情（复用 `GET /stocks/{code}/quote`）、四动作按钮（见 §7）。
 2. **K 线区（全宽，常驻顶部）**：**直接复用 `KLineChartPanel`**（A 抽屉内同一组件，不经 `KLineDrawer`）——K 线 + 双轨买卖标注 + 价位线，数据来自 `GET /stocks/{code}/history` + `GET /stocks/{code}/signals`。
-3. **下方 tab 面板**（默认开「信号」）：
-   - **信号**：marker 列表 + 命中率/一致性（复用 `SignalDrilldownPanel`；数据即第 2 步 /signals 结果，无需再取）。
-   - **报告**：该股最新 LLM 分析（复用 `ReportSummary` 及其子组件 `ReportOverview`/`ReportStrategy`/`ReportDetails`）。
-   - **历史**：该股历史分析列表（复用 `HistoryList`/`HistoryItem`）；点条目查看该条旧报告（在「报告」区切换显示）。
-   - **新闻**：最新分析记录的资讯（复用 `ReportNews`）。
-   - **告警**：该股告警规则列表 + 快捷新建（复用 alerts 组件/端点，表单预填 `code`）。
+3. **下方 tab 面板**（4 个，默认开「信号」）：
+   - **信号**：consistency + 价位线 + marker 列表（命中率/方向/来源）；数据自取 `/signals`（轻量只读面板）。
+   - **报告**：该股最新 LLM 分析（复用 `ReportSummary`——其内部已含 `ReportOverview`/`ReportStrategy`/`ReportDetails`/`ReportNews`，故新闻随报告一并呈现，不单设新闻 tab）。
+   - **历史**：该股历史分析列表（轻量只读列表；点条目把该条加载进「报告」区并切到报告 tab）。`HistoryList` 为管理型（多选/删除）不直接复用，仅复用 `HistoryItem` 类型与 `historyApi`。
+   - **告警**：该股告警规则列表 + 快捷新建（复用 `AlertRuleForm`，为其加可选 `lockedTarget` 预填锁定本股；列表为本股规则只读视图 + 去告警页管理链接）。
 
 新增小组件（B 私有）：`StockWorkstationHeader`（行情头 + 动作）、`WorkstationTabs`（tab 容器 + 懒挂载）。其余均为复用。
 
