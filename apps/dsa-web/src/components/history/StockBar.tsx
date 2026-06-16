@@ -12,6 +12,7 @@ interface StockBarProps {
   selectedRecordId?: number;
   onItemClick: (recordId: number) => void;
   onDeleteStock?: (stockCode: string) => Promise<void> | void;
+  onViewKline?: (stockCode: string, stockName?: string) => void;
   isDeleting?: boolean;
   className?: string;
 }
@@ -27,6 +28,7 @@ export const StockBar: React.FC<StockBarProps> = ({
   selectedRecordId,
   onItemClick,
   onDeleteStock,
+  onViewKline,
   isDeleting = false,
   className = '',
 }) => {
@@ -173,6 +175,7 @@ export const StockBar: React.FC<StockBarProps> = ({
                     isViewing={isSelected}
                     onClick={onItemClick}
                     onDelete={onDeleteStock}
+                    onViewKline={onViewKline}
                     isDeleting={isDeleting}
                     isMarketReview={isMarket}
                   />

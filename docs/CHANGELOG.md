@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 新增 K 线价位反算器（derive_price_levels），基于 MA20/近20日低/ATR 派生入场/止损/目标价，经 data_perspective.price_position 接入现有文案护栏，并填充 /signals 的 price_lines（各字段可空）
+- [新功能] Web 个股栏新增 K 线抽屉入口：渲染日线蜡烛 + 成交量副图，支持十字光标、缩放与红涨绿跌/绿涨红跌切换（klinecharts 懒加载，仅在打开抽屉时引入，不影响首屏）。
+- [改进] `GET /api/v1/stocks/{code}/history` 端点 `days` 默认由 30 放宽至 120（上限保持 365），为 K 线抽屉提供更长回看窗口；alert 取数与 data_tools 的 365 上限常量未改动。
 - [新功能] crypto 现货分析注入对应永续合约指标（资金费率/标记价/未平仓量；OKX 公开接口，免费无 key，并发，presence-only，默认开，仅注入分析 prompt）
 - [文档] 文档化并以端到端测试锁定 crypto 回测支持（沿用现有回测引擎与 crypto 日线数据源，无新增运行时/配置）
 - [新功能] 加密货币大盘复盘新增宏观指标（BTC/ETH 主导率、加密总市值含 24h 变化、恐贪指数；CoinGecko /global + alternative.me，免费无 key，presence-only，默认开，注入复盘 prompt）
@@ -88,6 +91,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] Web 回测页新增「仓位/模拟」列：透出做多/做空/空仓、资金费折算后的模拟收益与出场原因（perp 做空回测结果首次用户可见，旧数据降级显示 --）
 - [新功能] crypto 衍生品抓取新增 Binance fapi 整源兜底（OKX 全空才降级，source 标实际来源并动态进 prompt；回测资金费历史同享；新增 BINANCE_FAPI_BASE_URL 可换镜像，默认官方域名）
 - [新功能] perp 回测新增杠杆情景（CRYPTO_BACKTEST_LEVERAGE/API leverage，1-125x，含保守强平模拟与收益放大；结果按 engine_version 标签 v1-xN 与 1x 隔离共存，读 API 增 engine_version 查询参数；默认 1x 行为不变，每日自动回测固定 1x，仅 perp 生效）
+- [新功能] 新增量价信号引擎 volume_price_signals.py（量价八法/OBV 背离/放量突破/缩量回调/锚定 VWAP/VSA 降权）：量价八法落地为最新 bar 降权标注；OBV 背离标注锚定确认 bar，无 k 根可视前视；13 个 VPS_* 环境配置经 /signals 端点 from_env 接线真正生效
+- [新功能] 新增 GET /api/v1/stocks/{code}/signals 端点：返回与 /history 同源的规则量价信号（逐 bar）+ LLM 最新结论点 + 量价一致性（consistent/divergent/conflict/unknown/stale）+ 价位线占位（后续里程碑填值）；degraded 仍返回 200。
+- [新功能] 信号命中率回填(M2c)：复用 BacktestResult 历史方向命中率回填 SignalMarker 的 hit_rate/hit_sample，达样本阈值(沿用回测 eval_window_days 默认)置 verified，并接入 /signals 端点 rule marker（verified 不再恒 false）；命中率按 (分析, 评估窗口) 去重，杠杆 engine_version 变体不重复计样本；新增 SIGNAL_HIT_VERIFIED_MIN_SAMPLE 配置
+- [新功能] K 线抽屉支持规则/LLM 双轨标注（合并/并排）、点击钻取依据、入/损/标价位线，/signals 失败或 status=degraded 均降级为有图无标注
 
 ## [3.20.0] - 2026-06-03
 

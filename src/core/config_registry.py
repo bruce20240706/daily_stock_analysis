@@ -80,6 +80,9 @@ WEB_SETTINGS_HIDDEN_FROM_UI = {
     "USE_PROXY",
     "PROXY_HOST",
     "PROXY_PORT",
+    # K-line price-level back-calculator tuning constants (not web UI settings)
+    "KLINE_PRICE_LEVEL_ATR_MULT",
+    "KLINE_PRICE_LEVEL_RR_TARGET",
 }
 
 _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {

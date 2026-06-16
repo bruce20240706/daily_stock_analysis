@@ -9,7 +9,7 @@
 2. 定义历史 K 线数据模型
 """
 
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -104,5 +104,56 @@ class StockHistoryResponse(BaseModel):
             "stock_name": "贵州茅台",
             "period": "daily",
             "data": []
+        }
+    })
+
+
+class SignalMarker(BaseModel):
+    """图上买卖信号标注点（追加契约，不影响旧 SniperPoints）"""
+
+    timestamp: int = Field(..., description="epoch ms，唯一权威时间锚（前端按 timestamp 匹配蜡烛）")
+    price: float = Field(..., description="标注价位")
+    anchor: Literal["low", "high", "close"] = Field(..., description="price 锚定语义")
+    direction: Literal["bullish", "bearish", "neutral"] = Field(..., description="信号方向")
+    signal_type: str = Field(..., description="信号类型，如 volume_breakout / obv_top_divergence / llm_advice")
+    source: Literal["rule", "llm"] = Field(..., description="信号来源")
+    confidence: Literal["high", "medium", "low"] = Field(..., description="置信度（可排序，B 类<=low）")
+    is_daily_approx: bool = Field(..., description="是否日线近似（VSA 等 B 类为 True）")
+    is_anomalous: bool = Field(..., description="是否处于一字板/涨跌停等异常 bar")
+    reason: str = Field(..., description="触发依据文案（用于钻取）")
+    threshold: Optional[float] = Field(None, description="触发阈值，无则 null")
+    observed_value: Optional[float] = Field(None, description="实际观测值，无则 null")
+    hit_rate: Optional[float] = Field(None, description="历史方向命中率（M2c 回填），无样本则 null")
+    hit_sample: Optional[int] = Field(None, description="命中率样本数（M2c 回填），无则 null")
+    verified: bool = Field(False, description="hit_sample 达阈值则 True（M2c 回填）")
+    as_of: Optional[int] = Field(None, description="仅 source=llm：该 LLM 结论生成时间 epoch ms")
+
+
+class PriceLines(BaseModel):
+    """买卖价位线（M2a 全 null，M2b 由价位反算器填值）"""
+
+    entry: Optional[float] = Field(None, description="入场价位线，反算不出为 null")
+    stop: Optional[float] = Field(None, description="止损价位线，反算不出为 null")
+    target: Optional[float] = Field(None, description="目标价位线，反算不出为 null")
+
+
+class SignalsResponse(BaseModel):
+    """/signals 端点响应契约"""
+
+    status: Literal["ok", "degraded"] = Field(..., description="整体状态；degraded 仍返回 200 + 部分结果")
+    markers: List[SignalMarker] = Field(default_factory=list, description="信号标注点（rule 逐 bar + LLM 最新 1 点）")
+    price_lines: PriceLines = Field(default_factory=PriceLines, description="买卖价位线（子字段允许 null）")
+    consistency: Literal["consistent", "divergent", "conflict", "unknown", "stale"] = Field(
+        ..., description="量价/规则与 LLM 一致性，仅在 LLM 点邻域计算"
+    )
+    degraded_reason: Optional[str] = Field(None, description="status=degraded 时的原因说明")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "status": "ok",
+            "markers": [],
+            "price_lines": {"entry": None, "stop": None, "target": None},
+            "consistency": "consistent",
+            "degraded_reason": None,
         }
     })

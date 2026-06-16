@@ -1747,7 +1747,32 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 .limit(1)
             ).scalars().first()
             return result
-    
+
+    def get_latest_analysis_by_code(self, code: str) -> Optional[AnalysisHistory]:
+        """
+        根据股票代码查询最新一条分析历史记录
+
+        与 get_latest_analysis_by_query_id 不同，本方法按 code 检索，
+        用于 /signals 端点取 LLM 最新结论（无 query_id 上下文）。
+        复用 ix_analysis_code_time 复合索引（code, created_at）。
+
+        Args:
+            code: 股票代码
+
+        Returns:
+            AnalysisHistory 对象，不存在返回 None
+        """
+        if not code:
+            return None
+        with self.get_session() as session:
+            result = session.execute(
+                select(AnalysisHistory)
+                .where(AnalysisHistory.code == code)
+                .order_by(desc(AnalysisHistory.created_at))
+                .limit(1)
+            ).scalars().first()
+            return result
+
     def get_data_range(
         self, 
         code: str, 

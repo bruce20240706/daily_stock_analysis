@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { StockBarItemComponent } from '../StockBarItem';
 import type { StockBarItem } from '../../../types/analysis';
@@ -219,5 +219,57 @@ describe('StockBarItemComponent', () => {
     expect(within(actions).queryByText('回避 28')).not.toBeInTheDocument();
     expect(within(actions).queryByText('预警 28')).not.toBeInTheDocument();
     expect(within(actions).queryByText(/28/)).not.toBeInTheDocument();
+  });
+
+  it('renders a K线 entry button and invokes onViewKline with code and name', () => {
+    const onViewKline = vi.fn();
+    render(
+      <StockBarItemComponent
+        item={issue1600Item}
+        isViewing={false}
+        onClick={vi.fn()}
+        onViewKline={onViewKline}
+      />,
+    );
+
+    const actions = screen.getByTestId('history-card-actions');
+    const klineButton = within(actions).getByRole('button', { name: /查看 .* K 线/ });
+    fireEvent.click(klineButton);
+
+    expect(onViewKline).toHaveBeenCalledWith('600519', '贵州茅台股票股份有限公司');
+  });
+
+  it('does not render the K线 button when onViewKline is absent', () => {
+    render(
+      <StockBarItemComponent
+        item={issue1600Item}
+        isViewing={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(
+      within(screen.getByTestId('history-card-actions')).queryByRole('button', { name: /K 线/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not invoke the row onClick when the K线 button is clicked', () => {
+    const onClick = vi.fn();
+    const onViewKline = vi.fn();
+    render(
+      <StockBarItemComponent
+        item={issue1600Item}
+        isViewing={false}
+        onClick={onClick}
+        onViewKline={onViewKline}
+      />,
+    );
+
+    fireEvent.click(
+      within(screen.getByTestId('history-card-actions')).getByRole('button', { name: /查看 .* K 线/ }),
+    );
+
+    expect(onClick).not.toHaveBeenCalled();
+    expect(onViewKline).toHaveBeenCalledTimes(1);
   });
 });

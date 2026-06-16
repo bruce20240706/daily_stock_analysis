@@ -83,6 +83,35 @@ class BacktestRepository:
             session.add(result)
             session.commit()
 
+    def get_completed_results_for_code(
+        self,
+        code: str,
+        *,
+        eval_window_days: Optional[int] = None,
+        engine_version: Optional[str] = None,
+    ) -> List[BacktestResult]:
+        """Return completed BacktestResult rows for a single code.
+
+        仅取 eval_status == 'completed' 的行（direction_correct 才有意义）；
+        复用 ix_backtest_code_date 索引按 code 过滤。
+        """
+        with self.db.get_session() as session:
+            conditions = [
+                BacktestResult.code == code,
+                BacktestResult.eval_status == "completed",
+            ]
+            if eval_window_days is not None:
+                conditions.append(BacktestResult.eval_window_days == int(eval_window_days))
+            if engine_version is not None:
+                conditions.append(BacktestResult.engine_version == str(engine_version))
+
+            query = (
+                select(BacktestResult)
+                .where(and_(*conditions))
+                .order_by(desc(BacktestResult.analysis_date), desc(BacktestResult.evaluated_at))
+            )
+            return list(session.execute(query).scalars().all())
+
     def save_results_batch(self, results: List[BacktestResult], *, replace_existing: bool = False) -> int:
         if not results:
             return 0
