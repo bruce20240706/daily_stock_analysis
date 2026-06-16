@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../components/kline/KLineChartPanel', () => ({ KLineChartPanel: () => <div data-testid="chart" /> }));
 vi.mock('../../components/workstation/StockWorkstationHeader', () => ({ StockWorkstationHeader: (p: { code: string }) => <div data-testid="ws-header">{p.code}</div> }));
+vi.mock('../../hooks/useWatchlist', () => ({ useWatchlist: () => ({ isInWatchlist: () => false, toggleWatchlist: vi.fn(), isActioning: false, actionMessage: null, watchlistCodes: [], isLoading: false, addToWatchlist: vi.fn(), removeFromWatchlist: vi.fn(), refresh: vi.fn() }) }));
 
 import StockWorkstationPage from '../StockWorkstationPage';
 
