@@ -1,6 +1,9 @@
 import type React from 'react';
+import { Suspense } from 'react';
 import { useParams } from 'react-router-dom';
 import { AppPage, InlineAlert } from '../components/common';
+import { KLineChartPanel } from '../components/kline/KLineChartPanel';
+import { ChartErrorBoundary } from '../components/workstation/ChartErrorBoundary';
 import { StockWorkstationHeader } from '../components/workstation/StockWorkstationHeader';
 import { useWatchlist } from '../hooks/useWatchlist';
 
@@ -20,6 +23,13 @@ const StockWorkstationPage: React.FC = () => {
   return (
     <AppPage className="space-y-4 pb-12 pt-6">
       <StockWorkstationHeader code={code} watchlist={watchlist} onRefreshAnalysis={() => {}} onBuildAlert={() => {}} />
+      <section className="rounded-lg border border-border bg-card p-2">
+        <ChartErrorBoundary>
+          <Suspense fallback={<div className="h-64 animate-pulse rounded bg-hover" />}>
+            <KLineChartPanel stockCode={code} />
+          </Suspense>
+        </ChartErrorBoundary>
+      </section>
     </AppPage>
   );
 };

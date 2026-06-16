@@ -24,4 +24,9 @@ describe('StockWorkstationPage skeleton', () => {
     renderAt('/stock/' + encodeURIComponent('BTC/USDT'));
     expect(screen.getByTestId('ws-header')).toHaveTextContent('BTC/USDT');
   });
+
+  it('renders the K-line chart for the code', () => {
+    renderAt('/stock/600519');
+    expect(screen.getByTestId('chart')).toBeInTheDocument();
+  });
 });
