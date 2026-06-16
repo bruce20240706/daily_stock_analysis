@@ -16,3 +16,44 @@ export interface KLine {
   /** 成交额（元），来自后端 amount，缺失时归零。 */
   turnover: number;
 }
+
+// ============ Signals contract (mirrors api/v1/schemas/stocks.py SignalsResponse) ============
+
+export type SignalSource = 'rule' | 'llm';
+export type SignalDirection = 'bullish' | 'bearish' | 'neutral';
+export type SignalConfidence = 'high' | 'medium' | 'low';
+export type SignalAnchor = 'low' | 'high' | 'close';
+export type Consistency = 'consistent' | 'divergent' | 'conflict' | 'unknown' | 'stale';
+
+export interface SignalMarker {
+  timestamp: number; // epoch ms
+  price: number;
+  anchor: SignalAnchor;
+  direction: SignalDirection;
+  signalType: string;
+  source: SignalSource;
+  confidence: SignalConfidence;
+  isDailyApprox: boolean;
+  isAnomalous: boolean;
+  reason: string;
+  threshold: number | null;
+  observedValue: number | null;
+  hitRate: number | null;
+  hitSample: number | null;
+  verified: boolean;
+  asOf: number | null; // epoch ms, llm only
+}
+
+export interface PriceLines {
+  entry: number | null;
+  stop: number | null;
+  target: number | null;
+}
+
+export interface SignalsResponse {
+  status: 'ok' | 'degraded';
+  consistency: Consistency;
+  degradedReason: string | null;
+  priceLines: PriceLines;
+  markers: SignalMarker[];
+}

@@ -1,5 +1,6 @@
 import apiClient from './index';
 import type { KLine } from '../types/kline';
+import type { SignalMarker, SignalsResponse } from '../types/kline';
 
 export type ExtractItem = {
   code?: string | null;
@@ -15,6 +16,52 @@ export type ExtractFromImageResponse = {
 
 /** K 线抽屉默认回看天数，与后端 /history 端点 Query 默认对齐。 */
 export const KLINE_DEFAULT_DAYS = 120;
+
+type RawSignalMarker = {
+  timestamp: number;
+  price: number;
+  anchor: SignalMarker['anchor'];
+  direction: SignalMarker['direction'];
+  signal_type: string;
+  source: SignalMarker['source'];
+  confidence: SignalMarker['confidence'];
+  is_daily_approx: boolean;
+  is_anomalous: boolean;
+  reason: string;
+  threshold: number | null;
+  observed_value: number | null;
+  hit_rate: number | null;
+  hit_sample: number | null;
+  verified: boolean;
+  as_of: number | null;
+};
+
+type RawSignalsResponse = {
+  status: SignalsResponse['status'];
+  consistency: SignalsResponse['consistency'];
+  degraded_reason: string | null;
+  price_lines: { entry: number | null; stop: number | null; target: number | null } | null;
+  markers: RawSignalMarker[] | null;
+};
+
+const mapSignalMarker = (raw: RawSignalMarker): SignalMarker => ({
+  timestamp: raw.timestamp,
+  price: raw.price,
+  anchor: raw.anchor,
+  direction: raw.direction,
+  signalType: raw.signal_type,
+  source: raw.source,
+  confidence: raw.confidence,
+  isDailyApprox: raw.is_daily_approx,
+  isAnomalous: raw.is_anomalous,
+  reason: raw.reason,
+  threshold: raw.threshold ?? null,
+  observedValue: raw.observed_value ?? null,
+  hitRate: raw.hit_rate ?? null,
+  hitSample: raw.hit_sample ?? null,
+  verified: raw.verified,
+  asOf: raw.as_of ?? null,
+});
 
 export const stocksApi = {
   async extractFromImage(file: File): Promise<ExtractFromImageResponse> {
@@ -71,6 +118,34 @@ export const stocksApi = {
     return rows
       .map(mapKLineDataToKLine)
       .sort((a, b) => a.timestamp - b.timestamp);
+  },
+
+  /**
+   * 拉取量价信号（规则 + LLM 双轨），映射 snake_case → camelCase。
+   * 与 getKlineHistory 同源同 days；degraded/空数据保持后端形状，不静默吞错。
+   */
+  async getSignals(code: string, days?: number): Promise<SignalsResponse> {
+    const params: { days?: number } = {};
+    if (days !== undefined) {
+      params.days = days;
+    }
+    // code 经 encodeURIComponent 兼容带 '/' 的 crypto 代码（后端 {code:path} 路由），与 getKlineHistory 同源。
+    const response = await apiClient.get(
+      `/api/v1/stocks/${encodeURIComponent(code)}/signals`,
+      { params },
+    );
+    const data = response.data as RawSignalsResponse;
+    return {
+      status: data.status,
+      consistency: data.consistency,
+      degradedReason: data.degraded_reason ?? null,
+      priceLines: {
+        entry: data.price_lines?.entry ?? null,
+        stop: data.price_lines?.stop ?? null,
+        target: data.price_lines?.target ?? null,
+      },
+      markers: (data.markers ?? []).map(mapSignalMarker),
+    };
   },
 };
 
