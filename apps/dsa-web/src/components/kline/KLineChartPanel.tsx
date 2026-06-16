@@ -1,13 +1,21 @@
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
-import { dispose, init } from 'klinecharts';
-import type { Chart } from 'klinecharts';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { dispose, init, registerOverlay } from 'klinecharts';
+import type {
+  Chart,
+  OverlayCreateFiguresCallbackParams,
+  OverlayEvent,
+  OverlayFigure,
+} from 'klinecharts';
 import { stocksApi, KLINE_DEFAULT_DAYS } from '../../api/stocks';
-import type { KLine } from '../../types/kline';
+import type { KLine, SignalMarker } from '../../types/kline';
+import { buildSignalGlyphs, type SignalGlyph } from './klineOverlays';
+import { SignalDrilldownPanel } from './SignalDrilldownPanel';
 
 interface KLineChartPanelProps {
   stockCode: string;
   market?: string;
+  stockName?: string;
   days?: number;
 }
 
@@ -37,6 +45,94 @@ const buildCandleStyles = (upRedDownGreen: boolean) => {
   };
 };
 
+/** 依据 glyph 方向与弱化透明度生成 rgba 颜色：bullish 红、bearish 绿、neutral 灰。 */
+const rgbaForGlyph = (glyph: SignalGlyph): string => {
+  // 中式：bullish 红、bearish 绿；neutral 灰；alpha 由 B 类弱化决定
+  const base =
+    glyph.direction === 'bullish'
+      ? '239, 68, 68'
+      : glyph.direction === 'bearish'
+        ? '34, 197, 94'
+        : '148, 163, 184';
+  return `rgba(${base}, ${glyph.opacity})`;
+};
+
+/**
+ * 注册自绘 signalGlyph overlay 模板：实心/空心三角与圆点由 glyph.shape/filled 决定，
+ * 多轨冲突按 offsetSlot 横向错开；点击通过 extendData.glyph 钻取到对应 markers。
+ */
+const registerSignalGlyphTemplate = (onPick: (markers: SignalMarker[]) => void): void => {
+  registerOverlay({
+    name: 'signalGlyph',
+    totalStep: 1,
+    needDefaultPointFigure: false,
+    needDefaultXAxisFigure: false,
+    needDefaultYAxisFigure: false,
+    createPointFigures: (params: OverlayCreateFiguresCallbackParams): OverlayFigure[] => {
+      const point = params.coordinates[0];
+      const glyph = (params.overlay.extendData as { glyph?: SignalGlyph } | null)?.glyph;
+      if (!point || !glyph) return [];
+      const dir = glyph.shape === 'triangle-down' ? 1 : -1;
+      const x = point.x + glyph.offsetSlot * 10;
+      const size = 6;
+      const color = rgbaForGlyph(glyph);
+      if (glyph.shape === 'dot') {
+        return [{ type: 'circle', attrs: { x, y: point.y, r: 3 }, styles: { color } }];
+      }
+      return [
+        {
+          type: 'polygon',
+          attrs: {
+            coordinates: [
+              { x, y: point.y },
+              { x: x - size, y: point.y + dir * size * 1.6 },
+              { x: x + size, y: point.y + dir * size * 1.6 },
+            ],
+          },
+          styles: glyph.filled
+            ? { style: 'fill', color }
+            : { style: 'stroke', borderColor: color, color: 'transparent' },
+        },
+      ];
+    },
+    onClick: (event: OverlayEvent): boolean => {
+      const glyph = (event.overlay.extendData as { glyph?: SignalGlyph } | null)?.glyph;
+      if (glyph) onPick(glyph.drilldown.markers);
+      return true;
+    },
+  });
+};
+
+/** 为单个 glyph 创建 overlay：锚定 (timestamp, price)，extendData 携带 glyph 供钻取。 */
+const drawGlyphOverlay = (chart: Chart, glyph: SignalGlyph): void => {
+  chart.createOverlay({
+    name: 'signalGlyph',
+    points: [{ timestamp: glyph.timestamp, value: glyph.price }],
+    extendData: { glyph },
+    styles: { polygon: { color: rgbaForGlyph(glyph) } },
+  });
+};
+
+/** 绘制 entry/stop/target 价位线（内置 priceLine overlay），仅对非空值各画一条。 */
+const drawPriceLines = (
+  chart: Chart,
+  priceLines: { entry: number | null; stop: number | null; target: number | null },
+): void => {
+  const lines: Array<[number | null, string]> = [
+    [priceLines.entry, 'rgba(239, 68, 68, 0.9)'],
+    [priceLines.stop, 'rgba(148, 163, 184, 0.9)'],
+    [priceLines.target, 'rgba(34, 197, 94, 0.9)'],
+  ];
+  for (const [value, color] of lines) {
+    if (value === null) continue;
+    chart.createOverlay({
+      name: 'priceLine',
+      points: [{ value }],
+      styles: { line: { color } },
+    });
+  }
+};
+
 /**
  * klinecharts 重面板：唯一 import 'klinecharts' 处（仅经 KLineDrawer lazy 加载，
  * 不进同步路径，保证首屏不受影响）。渲染蜡烛 + 成交量副图，
@@ -50,6 +146,27 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
   const chartRef = useRef<Chart | null>(null);
   const [state, setState] = useState<LoadState>('loading');
   const [upRedDownGreen, setUpRedDownGreen] = useState(true);
+  const [signalsAvailable, setSignalsAvailable] = useState(true);
+  const [drilldownMarkers, setDrilldownMarkers] = useState<SignalMarker[] | null>(null);
+
+  const applySignalsLayer = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    stocksApi
+      .getSignals(stockCode)
+      .then((signals) => {
+        setSignalsAvailable(true);
+        registerSignalGlyphTemplate((markers) => setDrilldownMarkers(markers));
+        for (const glyph of buildSignalGlyphs(signals.markers)) {
+          drawGlyphOverlay(chart, glyph);
+        }
+        drawPriceLines(chart, signals.priceLines);
+      })
+      .catch((error) => {
+        console.error('Failed to load signals overlay:', error);
+        setSignalsAvailable(false);
+      });
+  }, [stockCode]);
 
   useEffect(() => {
     let disposed = false;
@@ -73,6 +190,8 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
         }
         chartRef.current?.applyNewData(klines as KLine[]);
         setState('ready');
+        // 信号层独立加载，其失败不影响纯 K 线渲染（catch 内仅降级标注）。
+        applySignalsLayer();
       } catch (error) {
         if (disposed) return;
         console.error('KLine history load failed:', error);
@@ -87,7 +206,7 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
       }
       chartRef.current = null;
     };
-  }, [stockCode, days]);
+  }, [stockCode, days, applySignalsLayer]);
 
   const toggleColors = () => {
     setUpRedDownGreen((prev) => {
@@ -124,6 +243,19 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
         {state === 'error' && (
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="text-sm text-danger">K 线加载失败</p>
+          </div>
+        )}
+        {!signalsAvailable && (
+          <div
+            data-testid="signals-unavailable"
+            className="absolute bottom-2 left-2 rounded-lg border border-border/50 bg-card/60 px-3 py-2 text-xs text-secondary-text"
+          >
+            信号标注暂不可用，已展示纯 K 线图。
+          </div>
+        )}
+        {drilldownMarkers && (
+          <div className="absolute right-2 top-2 z-10 w-72 max-w-[80%]">
+            <SignalDrilldownPanel markers={drilldownMarkers} onClose={() => setDrilldownMarkers(null)} />
           </div>
         )}
       </div>
