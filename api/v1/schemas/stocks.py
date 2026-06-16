@@ -157,3 +157,49 @@ class SignalsResponse(BaseModel):
             "degraded_reason": None,
         }
     })
+
+
+class BoardEntry(BaseModel):
+    """信号看板单行条目（容器 C / N1，追加契约）"""
+
+    code: str = Field(..., description="股票代码")
+    name: Optional[str] = Field(None, description="股票名称")
+    market: Optional[str] = Field(None, description="市场，如 A/HK/US")
+    action_group: Literal["buy", "hold", "sell", "unavailable"] = Field(
+        ..., description="动作分组（看板分栏依据）"
+    )
+    rule_direction: Optional[Literal["bullish", "bearish", "neutral"]] = Field(
+        None, description="规则/量价方向，无则 null"
+    )
+    llm_direction: Optional[Literal["bullish", "bearish", "neutral"]] = Field(
+        None, description="LLM 方向，无则 null"
+    )
+    consistency: Literal["consistent", "divergent", "conflict", "unknown", "stale"] = Field(
+        ..., description="规则与 LLM 一致性"
+    )
+    key_signals: List[str] = Field(default_factory=list, description="关键信号类型列表")
+    price_lines: PriceLines = Field(..., description="买卖价位线（子字段允许 null）")
+    latest_close: Optional[float] = Field(None, description="最新收盘价，无则 null")
+    hit_rate: Optional[float] = Field(None, description="历史方向命中率，无样本则 null")
+    hit_sample: Optional[int] = Field(None, description="命中率样本数，无则 null")
+    verified: bool = Field(False, description="hit_sample 达阈值则 True")
+    status: Literal["ok", "degraded"] = Field(..., description="单条状态")
+    degraded_reason: Optional[str] = Field(None, description="status=degraded 时的原因说明")
+
+
+class BoardCounts(BaseModel):
+    """看板各动作分组计数（容器 C / N1）"""
+
+    buy: int = Field(0, description="buy 分组数量")
+    hold: int = Field(0, description="hold 分组数量")
+    sell: int = Field(0, description="sell 分组数量")
+    unavailable: int = Field(0, description="unavailable 分组数量")
+
+
+class SignalsBoardResponse(BaseModel):
+    """信号看板端点响应契约（容器 C / N1）"""
+
+    as_of: int = Field(..., description="看板数据基准时间 epoch ms")
+    entries: List[BoardEntry] = Field(default_factory=list, description="看板条目列表")
+    counts: BoardCounts = Field(..., description="各动作分组计数")
+    degraded_codes: List[str] = Field(default_factory=list, description="降级的股票代码列表")
