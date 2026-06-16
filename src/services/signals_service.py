@@ -220,8 +220,24 @@ def build_signals_payload(
     - consistency：用收敛后的单个 BuySignal 与 LLM 最新结论计算。
     - status/degraded_reason：透传引擎结果。
     """
+    # 终审#9：按 code 复用 resolver，避免 N 个 rule marker 触发 N 个相同 SELECT。
+    # resolve_marker_hit_fields 的聚合源只取决于 code，signal_type 不改变聚合源
+    # （见其 docstring），故同一 code 的查询结果可复用。缓存仅存活于本次调用，
+    # 不用 module-level/lru_cache（否则会跨请求返回陈旧回测数据）。保留
+    # (signal_type, code) 调用签名以便后续按 signal_type 细分时前向兼容。
+    effective_resolver = hit_fields_resolver
+    if hit_fields_resolver is not None and code:
+        _per_call_cache: dict = {}
+
+        def effective_resolver(signal_type: str, resolver_code: str) -> dict:
+            if resolver_code in _per_call_cache:
+                return _per_call_cache[resolver_code]
+            fields = hit_fields_resolver(signal_type, resolver_code)
+            _per_call_cache[resolver_code] = fields
+            return fields
+
     markers: List[dict] = [
-        _marker_from_vpsignal(s, code=code, hit_fields_resolver=hit_fields_resolver)
+        _marker_from_vpsignal(s, code=code, hit_fields_resolver=effective_resolver)
         for s in (engine_result.markers or [])
     ]
 

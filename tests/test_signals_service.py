@@ -291,3 +291,43 @@ def test_build_payload_without_resolver_keeps_m2a_defaults():
     assert rule_marker["hit_rate"] is None
     assert rule_marker["hit_sample"] is None
     assert rule_marker["verified"] is False
+
+
+def test_build_payload_memoizes_resolver_per_code_across_markers():
+    """终审#9：signal_type 不改变命中率聚合源（统一取该 code 的 completed
+    BacktestResult）。多个 rule marker 时，单次 build_signals_payload 内对同一 code
+    的 resolver 只应调用一次（按 code 复用），避免 N+1 个相同 SELECT。"""
+    # 三个 rule marker，signal_type 各异，但 code 相同
+    engine = _engine_result([
+        _vpsignal(date_str_to_epoch_ms("2026-06-10"), signal_type="volume_breakout"),
+        _vpsignal(date_str_to_epoch_ms("2026-06-11"), signal_type="upthrust"),
+        _vpsignal(date_str_to_epoch_ms("2026-06-12"), signal_type="volume_breakout"),
+    ])
+
+    calls = []
+
+    def _resolver(signal_type, code):
+        calls.append((signal_type, code))
+        return {"hit_rate": 0.6, "hit_sample": 20, "verified": True}
+
+    payload = build_signals_payload(
+        engine_result=engine,
+        rule_signal=BuySignal.BUY,
+        latest_bar_date="2026-06-12",
+        llm_record=None,
+        trading_days_elapsed=None,
+        code="600519",
+        hit_fields_resolver=_resolver,
+    )
+
+    # 同一 code 只查一次，即便有 3 个 rule marker
+    assert len(calls) == 1
+    assert calls[0][1] == "600519"
+
+    # 所有 rule marker 仍都被回填
+    rule_markers = [m for m in payload["markers"] if m["source"] == "rule"]
+    assert len(rule_markers) == 3
+    for m in rule_markers:
+        assert m["hit_rate"] == 0.6
+        assert m["hit_sample"] == 20
+        assert m["verified"] is True
