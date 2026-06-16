@@ -40,15 +40,11 @@ from src.services.import_parser import (
     parse_import_from_bytes,
     parse_import_from_text,
 )
-from src.services.signal_hit_rate import resolve_marker_hit_fields
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from src.services.volume_price_signals import (
     PriceLevels,
-    compute_volume_price_signals,
 )
-from src.stock_analyzer import StockTrendAnalyzer
-from src.storage import DatabaseManager
 
 logger = logging.getLogger(__name__)
 

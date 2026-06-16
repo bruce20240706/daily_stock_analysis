@@ -94,7 +94,7 @@ def _vpsignal(timestamp):
 def _patch_common(monkeypatch, *, engine_result, rule_signal, llm_record):
     rows = [_bar("2026-06-11", 1790.0), _bar("2026-06-12", 1800.0)]
     monkeypatch.setattr(
-        stocks_ep.StockService, "get_history_data",
+        sbs.StockService, "get_history_data",
         lambda self, stock_code, period="daily", days=120: _fake_history_result(rows),
     )
     monkeypatch.setattr(
@@ -115,7 +115,7 @@ def _patch_common(monkeypatch, *, engine_result, rule_signal, llm_record):
         def get_latest_analysis_by_code(self, code):
             return llm_record
 
-    monkeypatch.setattr(stocks_ep.DatabaseManager, "get_instance", classmethod(lambda cls: _FakeDB()))
+    monkeypatch.setattr(sbs.DatabaseManager, "get_instance", classmethod(lambda cls: _FakeDB()))
 
 
 def test_signals_endpoint_ok_shape(monkeypatch):
@@ -152,7 +152,7 @@ def test_signals_endpoint_degraded_returns_200_payload(monkeypatch):
 
 def test_signals_endpoint_empty_history_is_degraded(monkeypatch):
     monkeypatch.setattr(
-        stocks_ep.StockService, "get_history_data",
+        sbs.StockService, "get_history_data",
         lambda self, stock_code, period="daily", days=120: _fake_history_result([]),
     )
     resp = stocks_ep.get_stock_signals(stock_code="600519", days=120)
@@ -272,7 +272,7 @@ def test_signals_endpoint_passes_vps_config_from_env(monkeypatch):
 
     rows = [_bar("2026-06-11", 1790.0), _bar("2026-06-12", 1800.0)]
     monkeypatch.setattr(
-        stocks_ep.StockService, "get_history_data",
+        sbs.StockService, "get_history_data",
         lambda self, stock_code, period="daily", days=120: _fake_history_result(rows),
     )
     monkeypatch.setattr(sbs, "compute_volume_price_signals", _fake_engine)
@@ -291,7 +291,7 @@ def test_signals_endpoint_passes_vps_config_from_env(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        stocks_ep.DatabaseManager, "get_instance", classmethod(lambda cls: _FakeDB())
+        sbs.DatabaseManager, "get_instance", classmethod(lambda cls: _FakeDB())
     )
 
     stocks_ep.get_stock_signals(stock_code="600519", days=120)
