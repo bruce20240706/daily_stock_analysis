@@ -153,7 +153,8 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
     const chart = chartRef.current;
     if (!chart) return;
     stocksApi
-      .getSignals(stockCode)
+      // 透传 days：保持 /signals 与 /history 同源同窗口（结构性保证，不依赖默认值巧合）
+      .getSignals(stockCode, days)
       .then((signals) => {
         if (signals.status === 'degraded') {
           // 有图无标注：后端降级（任意非空 degraded_reason）一律按通用降级，不画任何标注。
@@ -171,7 +172,7 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
         console.error('Failed to load signals overlay:', error);
         setSignalsAvailable(false);
       });
-  }, [stockCode]);
+  }, [stockCode, days]);
 
   useEffect(() => {
     let disposed = false;
