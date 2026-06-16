@@ -1,6 +1,7 @@
 import apiClient from './index';
 import type { KLine } from '../types/kline';
 import type { SignalMarker, SignalsResponse } from '../types/kline';
+import type { BoardEntry, SignalsBoardResponse } from '../types/kline';
 
 export type ExtractItem = {
   code?: string | null;
@@ -61,6 +62,30 @@ const mapSignalMarker = (raw: RawSignalMarker): SignalMarker => ({
   hitSample: raw.hit_sample ?? null,
   verified: raw.verified,
   asOf: raw.as_of ?? null,
+});
+
+type RawBoardEntry = {
+  code: string; name: string | null; market: string | null;
+  action_group: BoardEntry['actionGroup'];
+  rule_direction: BoardEntry['ruleDirection']; llm_direction: BoardEntry['llmDirection'];
+  consistency: BoardEntry['consistency']; key_signals: string[];
+  price_lines: { entry: number | null; stop: number | null; target: number | null };
+  latest_close: number | null; hit_rate: number | null; hit_sample: number | null;
+  verified: boolean; status: BoardEntry['status']; degraded_reason: string | null;
+};
+type RawBoardResponse = {
+  as_of: number; entries: RawBoardEntry[] | null;
+  counts: { buy: number; hold: number; sell: number; unavailable: number };
+  degraded_codes: string[] | null;
+};
+const mapBoardEntry = (r: RawBoardEntry): BoardEntry => ({
+  code: r.code, name: r.name ?? null, market: r.market ?? null,
+  actionGroup: r.action_group, ruleDirection: r.rule_direction ?? null,
+  llmDirection: r.llm_direction ?? null, consistency: r.consistency,
+  keySignals: r.key_signals ?? [],
+  priceLines: { entry: r.price_lines?.entry ?? null, stop: r.price_lines?.stop ?? null, target: r.price_lines?.target ?? null },
+  latestClose: r.latest_close ?? null, hitRate: r.hit_rate ?? null, hitSample: r.hit_sample ?? null,
+  verified: r.verified, status: r.status, degradedReason: r.degraded_reason ?? null,
 });
 
 export const stocksApi = {
@@ -145,6 +170,24 @@ export const stocksApi = {
         target: data.price_lines?.target ?? null,
       },
       markers: (data.markers ?? []).map(mapSignalMarker),
+    };
+  },
+
+  /**
+   * 拉取自选股信号看板（多股聚合），映射 snake_case → camelCase。
+   * days 透传至单股信号窗口；refresh=true 时跳过后端 TTL 缓存。
+   */
+  async getBoard(days?: number, refresh?: boolean): Promise<SignalsBoardResponse> {
+    const params: { days?: number; refresh?: boolean } = {};
+    if (days !== undefined) params.days = days;
+    if (refresh) params.refresh = true;
+    const response = await apiClient.get('/api/v1/signals/board', { params });
+    const data = response.data as RawBoardResponse;
+    return {
+      asOf: data.as_of,
+      entries: (data.entries ?? []).map(mapBoardEntry),
+      counts: data.counts,
+      degradedCodes: data.degraded_codes ?? [],
     };
   },
 };

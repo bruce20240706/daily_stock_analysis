@@ -57,3 +57,34 @@ export interface SignalsResponse {
   priceLines: PriceLines;
   markers: SignalMarker[];
 }
+
+// ============ Board contract (mirrors api/v1/schemas SignalsBoardResponse) ============
+
+export type ActionGroup = 'buy' | 'hold' | 'sell' | 'unavailable';
+
+export interface BoardEntry {
+  code: string;
+  name: string | null;
+  market: string | null;
+  actionGroup: ActionGroup;
+  ruleDirection: SignalDirection | null;
+  llmDirection: SignalDirection | null;
+  consistency: Consistency;
+  keySignals: string[];
+  priceLines: PriceLines;
+  latestClose: number | null;
+  hitRate: number | null;
+  hitSample: number | null;
+  verified: boolean;
+  status: 'ok' | 'degraded';
+  degradedReason: string | null;
+}
+
+export interface BoardCounts { buy: number; hold: number; sell: number; unavailable: number; }
+
+export interface SignalsBoardResponse {
+  asOf: number;
+  entries: BoardEntry[];
+  counts: BoardCounts;
+  degradedCodes: string[];
+}
