@@ -2,6 +2,7 @@ import apiClient from './index';
 import type { KLine } from '../types/kline';
 import type { SignalMarker, SignalsResponse } from '../types/kline';
 import type { BoardEntry, SignalsBoardResponse } from '../types/kline';
+import type { StockQuote } from '../types/kline';
 
 export type ExtractItem = {
   code?: string | null;
@@ -188,6 +189,26 @@ export const stocksApi = {
       entries: (data.entries ?? []).map(mapBoardEntry),
       counts: data.counts,
       degradedCodes: data.degraded_codes ?? [],
+    };
+  },
+
+  /**
+   * 拉取个股实时行情快照，映射 snake_case → camelCase。
+   * code 经 encodeURIComponent 兼容带 '/' 的 crypto 代码（后端 {code:path} 路由），与 getSignals 同源。
+   */
+  async getQuote(code: string): Promise<StockQuote> {
+    const response = await apiClient.get(`/api/v1/stocks/${encodeURIComponent(code)}/quote`);
+    const d = response.data as {
+      stock_code: string; stock_name: string | null; current_price: number;
+      change: number | null; change_percent: number | null; open: number | null;
+      high: number | null; low: number | null; prev_close: number | null;
+      volume: number | null; amount: number | null; update_time: string | null;
+    };
+    return {
+      stockCode: d.stock_code, stockName: d.stock_name ?? null, currentPrice: d.current_price,
+      change: d.change ?? null, changePercent: d.change_percent ?? null, open: d.open ?? null,
+      high: d.high ?? null, low: d.low ?? null, prevClose: d.prev_close ?? null,
+      volume: d.volume ?? null, amount: d.amount ?? null, updateTime: d.update_time ?? null,
     };
   },
 };

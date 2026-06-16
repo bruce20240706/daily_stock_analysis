@@ -88,3 +88,19 @@ export interface SignalsBoardResponse {
   counts: BoardCounts;
   degradedCodes: string[];
 }
+
+// ============ Quote（/stocks/{code}/quote 实时行情） ============
+export interface StockQuote {
+  stockCode: string;
+  stockName: string | null;
+  currentPrice: number;
+  change: number | null;
+  changePercent: number | null;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  prevClose: number | null;
+  volume: number | null;
+  amount: number | null;
+  updateTime: string | null;
+}
