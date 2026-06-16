@@ -72,7 +72,10 @@ const registerSignalGlyphTemplate = (onPick: (markers: SignalMarker[]) => void):
       const point = params.coordinates[0];
       const glyph = (params.overlay.extendData as { glyph?: SignalGlyph } | null)?.glyph;
       if (!point || !glyph) return [];
-      const dir = glyph.shape === 'triangle-down' ? 1 : -1;
+      // klinecharts canvas y 向下增长：apex 固定在 (x, point.y)，base 两点在 apex ± dir*size。
+      // 看多 triangle-up 需 apex 在上、base 在下（dir=+1，朝上 ▲）；
+      // 看空 triangle-down 需 apex 在下、base 在上（dir=-1，朝下 ▼）。
+      const dir = glyph.shape === 'triangle-down' ? -1 : 1;
       const x = point.x + glyph.offsetSlot * 10;
       const size = 6;
       const color = rgbaForGlyph(glyph);

@@ -72,6 +72,61 @@ describe('KLineChartPanel signals layer', () => {
     vi.resetModules();
   });
 
+  it('orients glyph triangles correctly: bullish apex on top (▲), bearish apex on bottom (▼)', async () => {
+    vi.resetModules();
+    setupChartMock();
+    vi.doMock('../../../api/stocks', () => ({
+      KLINE_DEFAULT_DAYS: 120,
+      stocksApi: {
+        getKlineHistory: vi.fn().mockResolvedValue([
+          { timestamp: 1718323200000, open: 1690, high: 1710, low: 1680, close: 1700, volume: 1000, turnover: 0 },
+        ]),
+        getSignals: vi.fn().mockResolvedValue(okSignals),
+      },
+    }));
+
+    await renderPanel();
+
+    await waitFor(() =>
+      expect(registerOverlay.mock.calls.some(([t]) => (t as { name: string }).name === 'signalGlyph')).toBe(true),
+    );
+    const template = registerOverlay.mock.calls.find(
+      ([t]) => (t as { name: string }).name === 'signalGlyph',
+    )![0] as {
+      createPointFigures: (p: unknown) => Array<{ type: string; attrs: { coordinates: Array<{ y: number }> } }>;
+    };
+
+    const apexY = 200;
+    const glyph = (shape: string) => ({
+      shape,
+      filled: true,
+      offsetSlot: 0,
+      direction: shape === 'triangle-up' ? 'bullish' : 'bearish',
+      opacity: 1,
+      source: 'rule',
+      drilldown: { markers: [] },
+    });
+    const baseY = (figs: Array<{ attrs: { coordinates: Array<{ y: number }> } }>) =>
+      figs[0].attrs.coordinates[1].y;
+
+    const up = template.createPointFigures({
+      overlay: { extendData: { glyph: glyph('triangle-up') } },
+      coordinates: [{ x: 100, y: apexY }],
+    });
+    const down = template.createPointFigures({
+      overlay: { extendData: { glyph: glyph('triangle-down') } },
+      coordinates: [{ x: 100, y: apexY }],
+    });
+
+    // klinecharts canvas y 向下增长，apex 固定在 (x, apexY)。
+    // 看多 triangle-up：base 在 apex 下方（baseY > apexY），apex 在顶 => ▲
+    expect(up[0].type).toBe('polygon');
+    expect(baseY(up)).toBeGreaterThan(apexY);
+    // 看空 triangle-down：base 在 apex 上方（baseY < apexY），apex 在底 => ▼
+    expect(down[0].type).toBe('polygon');
+    expect(baseY(down)).toBeLessThan(apexY);
+  });
+
   it('registers signal overlays and draws entry/stop/target price lines on ok response', async () => {
     vi.resetModules();
     setupChartMock();
