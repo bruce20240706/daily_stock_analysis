@@ -83,6 +83,9 @@ WEB_SETTINGS_HIDDEN_FROM_UI = {
     # K-line price-level back-calculator tuning constants (not web UI settings)
     "KLINE_PRICE_LEVEL_ATR_MULT",
     "KLINE_PRICE_LEVEL_RR_TARGET",
+    # Signal-board (container C) runtime tuning constants (not web UI settings)
+    "SIGNALS_BOARD_CACHE_TTL_S",
+    "SIGNALS_BOARD_MAX_WORKERS",
 }
 
 _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
