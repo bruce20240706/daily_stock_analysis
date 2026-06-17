@@ -1,5 +1,5 @@
 // apps/dsa-web/src/components/workstation/StockSignalsPanel.tsx
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type React from 'react';
 import { stocksApi } from '../../api/stocks';
 import type { SignalsResponse } from '../../types/kline';
@@ -17,21 +17,16 @@ export const StockSignalsPanel: React.FC<{ code: string }> = ({ code }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(false);
-    try {
-      setData(await stocksApi.getSignals(code));
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [code]);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    let alive = true;
+    void (async () => {
+      setLoading(true); setError(false);
+      try { const d = await stocksApi.getSignals(code); if (alive) setData(d); }
+      catch { if (alive) setError(true); }
+      finally { if (alive) setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [code]);
 
   if (loading) return <Loading label="正在加载信号" />;
   if (error || !data) return <div className="text-sm text-secondary-text">信号加载失败</div>;

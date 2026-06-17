@@ -26,4 +26,17 @@ describe('StockSignalsPanel', () => {
     render(<StockSignalsPanel code="600519" />);
     expect(await screen.findByText(/信号加载失败/)).toBeInTheDocument();
   });
+  it('renders empty state when markers array is empty', async () => {
+    getSignals.mockResolvedValueOnce(sig({ markers: [] }));
+    render(<StockSignalsPanel code="600519" />);
+    expect(await screen.findByText(/暂无量价信号/)).toBeInTheDocument();
+  });
+  it('renders 暂无样本 when hitRate and hitSample are null', async () => {
+    const baseMarker = { timestamp: 1, price: 1700, anchor: 'low', direction: 'bullish', signalType: 'volume_breakout',
+      source: 'rule', confidence: 'high', isDailyApprox: false, isAnomalous: false, reason: '放量突破',
+      threshold: null, observedValue: null, verified: true, asOf: null };
+    getSignals.mockResolvedValueOnce(sig({ markers: [{ ...baseMarker, hitRate: null, hitSample: null }] }));
+    render(<StockSignalsPanel code="600519" />);
+    expect(await screen.findByText('暂无样本')).toBeInTheDocument();
+  });
 });
