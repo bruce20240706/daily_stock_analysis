@@ -74,6 +74,24 @@ def test_evaluate_signal_outcomes_tags_market_and_signal_type():
     assert all(o.outcome in {"win", "loss", "expired"} for o in outs)
 
 
+def test_evaluate_signal_outcomes_exact_dedup_count():
+    """I3 去重计数守卫：fixture 在 bar 60 恰好触发 1 条 volume_breakout（每根 bar 最多产出 1 次）。
+
+    此测试在 signal_backtest._eval 的 `m.timestamp == last_bar_ts` 去重过滤被删除后
+    必定变红（若过滤删除导致多个相邻 bar 产生重复 volume_breakout，则 Counter 将 > 1）。
+    断言用精确计数，而非 > 0，以确保去重逻辑正确。
+    """
+    from collections import Counter
+    df = _make_history_with_signals()
+    outcomes = evaluate_signal_outcomes(df, market="cn", horizon=10)
+    vb_count = Counter(o.signal_type for o in outcomes)["volume_breakout"]
+    # fixture 的 bar 60 设计为唯一触发点，period 内恰好 1 条 volume_breakout
+    assert vb_count == 1, (
+        f"期望 volume_breakout 恰好 1 条，实际得到 {vb_count}；"
+        "若去重过滤（m.timestamp == last_bar_ts）被删除则此测试会在此处失败。"
+    )
+
+
 def test_evaluate_signal_outcomes_returns_list():
     """函数签名返回 list，即使无触发也不抛异常"""
     df = _make_history_with_signals()

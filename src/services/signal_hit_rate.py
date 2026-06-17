@@ -86,13 +86,14 @@ def resolve_marker_hit_fields(signal_type: str, code: str) -> dict:
     if market is None:
         return dict(_none)
 
-    stat = SignalStatsRepository().get(signal_type, market)
-    if stat is None or (stat.sample or 0) <= 0:
-        return dict(_none)
-
     cfg = get_config()
     min_sample = int(getattr(cfg, "signal_hit_verified_min_sample", 0) or 0) \
         or int(getattr(cfg, "backtest_eval_window_days", 10))
+    horizon = int(getattr(cfg, "signal_backtest_horizon_bars", 10))
+
+    stat = SignalStatsRepository().get(signal_type, market, horizon=horizon)
+    if stat is None or (stat.sample or 0) < min_sample:
+        return dict(_none)
 
     verified = bool(
         stat.sample >= min_sample

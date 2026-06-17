@@ -215,15 +215,20 @@ class ResolveMarkerHitFieldsTestCase(unittest.TestCase):
             self.assertTrue(fields["verified"])
             self.assertAlmostEqual(fields["hit_rate"], round(2/3, 4))
 
-    def test_sample_below_threshold_not_verified(self) -> None:
-        # sample=2 < min_sample=3 => verified=False
+    def test_sample_below_threshold_returns_all_none(self) -> None:
+        # spec §4.1: sample < min_sample → all-None（样本不足/null），而非 hit_rate 有值但 verified=False
         stat = self._make_stat(sample=2, win_rate=1.0, ci_low=0.55)
         with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
              patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
             Repo.return_value.get.return_value = stat
             fields = resolve_marker_hit_fields("rule_score", "600519")
-            self.assertEqual(fields["hit_sample"], 2)
+            # sample=2 < min_sample=3 → 返回全 None，不透出 hit_rate/hit_sample
+            self.assertIsNone(fields["hit_rate"])
+            self.assertIsNone(fields["hit_sample"])
             self.assertFalse(fields["verified"])
+            self.assertIsNone(fields["ci_low"])
+            self.assertIsNone(fields["ci_high"])
+            self.assertIsNone(fields["baseline_excess"])
 
     def test_no_sample_returns_null_fields_not_verified(self) -> None:
         with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
@@ -312,8 +317,9 @@ class DedupeSampleInflationTestCase(unittest.TestCase):
              _patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
             Repo.return_value.get.return_value = stat
             fields = resolve_marker_hit_fields("rule_score", "BTCUSDT")
-        # min_sample=3，stat.sample=1 → 不应判 verified
-        self.assertEqual(fields["hit_sample"], 1)
+        # min_sample=3，stat.sample=1 < min_sample → spec §4.1 返回全 None
+        self.assertIsNone(fields["hit_rate"])
+        self.assertIsNone(fields["hit_sample"])
         self.assertFalse(fields["verified"])
 
     def test_distinct_eval_windows_count_separately(self) -> None:
@@ -381,7 +387,7 @@ def test_resolve_reads_signal_stats_by_market_and_sets_verified_on_excess():
         assert f["hit_rate"] == 0.68 and f["hit_sample"] == 20
         assert f["ci_low"] == 0.55 and f["baseline_excess"] == 0.05
         assert f["verified"] is True   # 样本足 且 ci_low(0.55) > baseline(0.50)
-        Repo.return_value.get.assert_called_with("volume_breakout", "cn")
+        Repo.return_value.get.assert_called_with("volume_breakout", "cn", horizon=10)
 
 
 def test_resolve_not_verified_when_ci_low_below_baseline():
@@ -401,7 +407,7 @@ def test_resolve_missing_bucket_is_sample_insufficient():
 
 
 def test_resolve_stat_with_zero_sample_returns_all_none():
-    """Coverage 3 (A6): stat 对象存在但 sample==0 时覆盖 `(stat.sample or 0) <= 0` 分支。
+    """Coverage 3 (A6): stat 对象存在但 sample==0 时覆盖 `(stat.sample or 0) < min_sample` 分支。
 
     与 stat=None 分支（test_resolve_missing_bucket_is_sample_insufficient）不同，
     此处 repo 返回一个真实 stat 对象，只是 sample 值为 0（桶存在但无样本）。
@@ -416,3 +422,74 @@ def test_resolve_stat_with_zero_sample_returns_all_none():
         f = resolve_marker_hit_fields("volume_breakout", "600519")
         assert f == {"hit_rate": None, "hit_sample": None, "verified": False,
                      "ci_low": None, "ci_high": None, "baseline_excess": None}
+
+
+def test_resolve_marker_hit_fields_real_repo_roundtrip(tmp_path):
+    """Fix 4 (M7): resolver ↔ repo SQLite 真实读写 roundtrip，无 mock 路径。
+
+    验证 resolve_marker_hit_fields 能从真实落库的 SignalStatRow 读回正确的
+    hit_rate / hit_sample / verified / ci_low / ci_high / baseline_excess 值。
+    """
+    import os
+    import tempfile
+    from src.config import Config
+    from src.repositories.signal_stats_repo import SignalStatsRepository
+    from src.storage import DatabaseManager, SignalStatRow
+
+    # 1. 建隔离 SQLite 数据库
+    db_file = str(tmp_path / "roundtrip_test.db")
+    os.environ["DATABASE_PATH"] = db_file
+    Config._instance = None
+    # 设置 min_sample=5，horizon=10（默认），确保样本足
+    os.environ["SIGNAL_HIT_VERIFIED_MIN_SAMPLE"] = "5"
+    os.environ.pop("SIGNAL_BACKTEST_HORIZON_BARS", None)
+    Config.reset_instance()
+    DatabaseManager.reset_instance()
+
+    try:
+        db = DatabaseManager.get_instance()
+        repo = SignalStatsRepository(db)
+
+        # 2. 写入 SignalStatRow：sample(10) >= min_sample(5)，ci_low(0.60) > baseline(0.50)
+        row = SignalStatRow(
+            signal_type="volume_breakout",
+            market="cn",
+            interval="1d",
+            horizon=10,
+            win=7,
+            loss=3,
+            sample=10,
+            win_rate=0.70,
+            ci_low=0.60,
+            ci_high=0.82,
+            baseline_win_rate=0.50,
+            excess=0.10,
+        )
+        repo.save_batch([row])
+
+        # 3. 通过 resolve_marker_hit_fields 读回（monkeypatch get_market + SignalStatsRepository）
+        import src.services.signal_hit_rate as shr_mod
+        _orig_market = shr_mod.get_market_for_stock
+        _orig_repo_cls = shr_mod.SignalStatsRepository
+
+        shr_mod.get_market_for_stock = lambda code: "cn"  # type: ignore[assignment]
+        shr_mod.SignalStatsRepository = lambda db_mgr=None: SignalStatsRepository(db)  # type: ignore[assignment]
+
+        try:
+            fields = resolve_marker_hit_fields("volume_breakout", "600519")
+        finally:
+            shr_mod.get_market_for_stock = _orig_market
+            shr_mod.SignalStatsRepository = _orig_repo_cls
+
+        # 4. 校验字段与落库行完全一致
+        assert fields["hit_rate"] == 0.70, f"hit_rate mismatch: {fields['hit_rate']}"
+        assert fields["hit_sample"] == 10, f"hit_sample mismatch: {fields['hit_sample']}"
+        assert fields["verified"] is True, f"verified should be True: {fields['verified']}"
+        assert fields["ci_low"] == 0.60, f"ci_low mismatch: {fields['ci_low']}"
+        assert fields["ci_high"] == 0.82, f"ci_high mismatch: {fields['ci_high']}"
+        assert abs(fields["baseline_excess"] - 0.10) < 1e-9, \
+            f"baseline_excess mismatch: {fields['baseline_excess']}"
+    finally:
+        DatabaseManager.reset_instance()
+        Config._instance = None
+        os.environ.pop("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", None)
