@@ -66,9 +66,10 @@ def test_triple_barrier_exact_boundary_stop():
 # ---------------------------------------------------------------------------
 
 def test_evaluate_signal_outcomes_tags_market_and_signal_type():
-    """产出的 SignalOutcome 均携带正确 market 和合法 outcome 值"""
+    """产出的 SignalOutcome 均携带正确 market 和合法 outcome 值（fixture 保证 ≥1 bullish 触发）"""
     df = _make_history_with_signals()
     outs = evaluate_signal_outcomes(df, market="cn", horizon=10)
+    assert len(outs) > 0, "fixture 应至少触发 1 条 bullish 信号；请检查 _make_history_with_signals"
     assert all(isinstance(o, SignalOutcome) and o.market == "cn" for o in outs)
     assert all(o.outcome in {"win", "loss", "expired"} for o in outs)
 
@@ -81,12 +82,36 @@ def test_evaluate_signal_outcomes_returns_list():
 
 
 def test_evaluate_signal_outcomes_causal_no_future_leak():
-    """逐 bar 推进时，每根 bar 只使用 ≤t 数据（因果约束）。
-    通过截断前半段历史来验证：只有后半段才有足够窗口，不应触发 IndexError 或越界。"""
-    df = _make_history_with_signals()
-    outs = evaluate_signal_outcomes(df, market="cn", horizon=10, min_history=40)
-    # 只要正常完成即通过因果约束测试
-    assert isinstance(outs, list)
+    """因果约束：截断未来 bar 不改变已决定的早期结果。
+
+    若实现存在前瞻泄露（如用了 df.iloc[t:] 而非 df.iloc[:t+1]），则
+    在 full_df 下产出的早期信号可能与 df[:k] 的产出不一致，此测试会捕捉到。
+
+    策略：
+    - 用 df[:k] 和 full_df 分别运行 evaluate_signal_outcomes。
+    - k 取 full_df 长度的前 2/3，并留足 horizon 前瞻（=10）之外的空间。
+    - 对 df[:k] 中的所有 outcome，在 full_df 的产出中也必须存在
+      （因果下早期窗口等价于完整窗口的前缀，信号触发时机不会随未来数据改变）。
+    实际上此处验证"截断不多生成信号"：df[:k] 不应有在 full_df 中消失的记录。
+    """
+    full_df = _make_history_with_signals()
+    n = len(full_df)
+    horizon = 10
+    k = n * 2 // 3  # 取前 2/3，后 1/3 为"未来"
+
+    outs_truncated = evaluate_signal_outcomes(full_df.iloc[:k].copy(), market="cn", horizon=horizon)
+    outs_full = evaluate_signal_outcomes(full_df, market="cn", horizon=horizon)
+
+    # 早期触发的信号（在 df[:k] 中决定的）应是 full_df 产出的子集
+    # 若实现有前瞻泄露，早期信号的 outcome 会受后续 bar 影响，两边对不上。
+    from collections import Counter
+    trunc_counts = Counter((o.signal_type, o.outcome) for o in outs_truncated)
+    full_counts = Counter((o.signal_type, o.outcome) for o in outs_full)
+    for key, cnt in trunc_counts.items():
+        assert full_counts[key] >= cnt, (
+            f"因果泄露：df[:k] 产出 {key}×{cnt} 条，但 full_df 只有 {full_counts[key]} 条；"
+            "截断未来不应增加早期已触发信号数量。"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -94,11 +119,12 @@ def test_evaluate_signal_outcomes_causal_no_future_leak():
 # ---------------------------------------------------------------------------
 
 def test_baseline_uses_all_bars_not_only_triggers():
-    """baseline 用全体有效 bar 入场，数量 >= 信号触发点"""
+    """baseline 用全体有效 bar 入场，数量 >= 信号触发点（fixture 保证 sig ≥1）"""
     df = _make_history_with_signals()
     base = evaluate_baseline_outcomes(df, market="cn", horizon=10)
     sig = evaluate_signal_outcomes(df, market="cn", horizon=10)
     assert all(o.signal_type == "__baseline__" for o in base)
+    assert len(sig) > 0, "fixture 应至少触发 1 条 bullish 信号；请检查 _make_history_with_signals"
     assert len(base) >= len(sig)  # 全体 bar 入场点 ≥ 信号触发点
 
 
@@ -146,14 +172,39 @@ def test_signal_outcome_equality():
 # ---------------------------------------------------------------------------
 
 def _make_history_with_signals():
-    """构造足够长、含触发点的上升后回踩序列。"""
+    """构造含确定性 volume_breakout 触发点的历史数据。
+
+    结构：
+    - bar 0–59：平稳价格（100→101 缓涨），正常成交量 1_000_000，用于 VPS 预热窗口。
+    - bar 60（突破 bar）：close 明确超过前 20 bar high 的最大值，
+      volume = 2_500_000（≈2.5× 均值 1_000_000，超过 breakout_rel_vol=2.0 阈值）。
+    - bar 61–79：平稳收尾（价格轻微回落），提供 evaluate_signal_outcomes 所需前瞻序列。
+
+    VPSConfig 默认值：breakout_window=20，breakout_rel_vol=2.0，vol_ma_window=20。
+    本 fixture 在 bar 60 必然满足触发条件（rel_vol ≈ 2.5 ≥ 2.0，且 close > prior_max）。
+    调用方可用 compute_volume_price_signals 验证 ≥1 direction=='bullish' marker 存在。
+    """
     n = 80
-    close = list(np.linspace(100, 130, 40)) + list(np.linspace(130, 120, 40))
+    base_vol = 1_000_000
+
+    # 前 60 根：缓涨 100→101，单调递增便于 prior_max 稳定
+    flat_close = list(np.linspace(100.0, 101.0, 60))
+    # bar 60：突破价 = 前 20 bar high 最大值 * 1.05（绝对超过），成交量 2.5×
+    flat_high_max = max(c * 1.01 for c in flat_close[-20:])  # 前 20 bar high 的最大值
+    breakout_close = flat_high_max * 1.05  # 超过前 20 bar high 的最大值 5%
+    # bar 61–79：轻微回落，不触及止损（用于前瞻 bar 分类）
+    tail_close = list(np.linspace(breakout_close * 0.99, breakout_close * 0.98, 19))
+
+    close = flat_close + [breakout_close] + tail_close
+    assert len(close) == n
+
+    volume = [base_vol] * 60 + [int(base_vol * 2.5)] + [base_vol] * 19
+
     return pd.DataFrame({
         "date": pd.date_range("2026-01-01", periods=n).strftime("%Y-%m-%d"),
         "open": close,
         "high": [c * 1.01 for c in close],
         "low": [c * 0.99 for c in close],
         "close": close,
-        "volume": [1_000_000 + i * 10_000 for i in range(n)],
+        "volume": volume,
     })

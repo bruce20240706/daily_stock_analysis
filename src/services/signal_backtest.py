@@ -115,11 +115,12 @@ def _eval(
     Returns:
         SignalOutcome 列表。
     """
-    cfg = config or VPSConfig()
+    cfg = config or VPSConfig.from_env()
     df = df.reset_index(drop=True)
     out: List[SignalOutcome] = []
     n = len(df)
 
+    # 注意：末尾若干 bar 的前瞻窗口会被截断至剩余可用 bar 数（不补零）。
     for t in range(min_history, n - 1):  # 至少留 1 根前瞻 bar
         # 因果窗口：仅使用 ≤t 数据
         window = df.iloc[: t + 1]
