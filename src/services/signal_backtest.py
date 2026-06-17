@@ -233,3 +233,142 @@ def evaluate_baseline_outcomes(
         all_bars=True,
         min_history=min_history,
     )
+
+
+# ---------------------------------------------------------------------------
+# Task A2: 统计聚合 + Wilson CI + 基准超额（纯函数）
+# ---------------------------------------------------------------------------
+
+import math
+from collections import defaultdict
+
+
+@dataclass(frozen=True)
+class SignalStat:
+    """单个 (signal_type × market) 的聚合统计结果。
+
+    Attributes:
+        signal_type:        信号类型（与 SignalOutcome.signal_type 对应）。
+        market:             市场标识（与 SignalOutcome.market 对应）。
+        interval:           K 线周期标识（如 '1d'）。
+        horizon:            前瞻 bar 数（与回测 horizon 参数一致）。
+        win:                胜次数（outcome == 'win'）。
+        loss:               败次数（outcome == 'loss'）。
+        sample:             有效样本数 = win + loss（expired 不计入）。
+        win_rate:           胜率 = win / sample；sample == 0 时为 None。
+        ci_low:             Wilson 95% CI 下界；sample == 0 时为 None。
+        ci_high:            Wilson 95% CI 上界；sample == 0 时为 None。
+        baseline_win_rate:  同市场全体 bar 基准胜率；无基准数据时为 None。
+        excess:             超额 = ci_low - baseline_win_rate；任一为 None 时为 None。
+    """
+
+    signal_type: str
+    market: str
+    interval: str
+    horizon: int
+    win: int
+    loss: int
+    sample: int
+    win_rate: Optional[float]
+    ci_low: Optional[float]
+    ci_high: Optional[float]
+    baseline_win_rate: Optional[float]
+    excess: Optional[float]
+
+
+def wilson_ci(wins: int, n: int, z: float = 1.96) -> tuple:
+    """计算 Wilson score 95% 置信区间。
+
+    Args:
+        wins: 成功次数（0 <= wins <= n）。
+        n:    总样本数。
+        z:    正态分布临界值，默认 1.96（95% 双尾）。
+
+    Returns:
+        (ci_low, ci_high)，均 clamped 至 [0, 1]；n == 0 → (0.0, 0.0)。
+    """
+    if n <= 0:
+        return (0.0, 0.0)
+    p = wins / n
+    denom = 1 + z * z / n
+    center = (p + z * z / (2 * n)) / denom
+    half = (z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / denom
+    return (max(0.0, center - half), min(1.0, center + half))
+
+
+def _winrate(wins: int, n: int) -> Optional[float]:
+    """返回 wins/n，n == 0 时返回 None（避免 ZeroDivisionError）。"""
+    return wins / n if n > 0 else None
+
+
+def aggregate_signal_stats(
+    outcomes: List[SignalOutcome],
+    baseline_outcomes: List[SignalOutcome],
+    *,
+    horizon: int,
+    interval: str = "1d",
+) -> List[SignalStat]:
+    """按 (signal_type × market) 聚合回测结果，附 Wilson CI 与基准超额。
+
+    Args:
+        outcomes:          信号触发结果列表（来自 evaluate_signal_outcomes）。
+        baseline_outcomes: 全体 bar 基准结果列表（来自 evaluate_baseline_outcomes 或手工构造）。
+                           signal_type 应为 BASELINE_SIGNAL_TYPE（'__baseline__'）。
+        horizon:           前瞻 bar 数，透传至 SignalStat.horizon。
+        interval:          K 线周期标识，透传至 SignalStat.interval，默认 '1d'。
+
+    Returns:
+        每个 (signal_type × market) 对应一个 SignalStat 的列表。
+        不包含 __baseline__ 自身的 SignalStat（仅作为基准参考）。
+    """
+    # Step 1: 计算各市场基准胜率（expired 排除在分母外）
+    base_w: dict = defaultdict(int)
+    base_n: dict = defaultdict(int)
+    for o in baseline_outcomes:
+        if o.outcome == "expired":
+            continue
+        base_n[o.market] += 1
+        if o.outcome == "win":
+            base_w[o.market] += 1
+    baseline_rate = {m: _winrate(base_w[m], base_n[m]) for m in base_n}
+
+    # Step 2: 按 (signal_type, market) 分桶统计（expired 排除在分母外）
+    buckets: dict = defaultdict(lambda: {"win": 0, "loss": 0})
+    for o in outcomes:
+        if o.outcome == "expired":
+            continue
+        buckets[(o.signal_type, o.market)][o.outcome] += 1
+
+    # Step 3: 构造 SignalStat 列表
+    stats: List[SignalStat] = []
+    for (sig_type, market), wl in buckets.items():
+        win = wl["win"]
+        loss = wl["loss"]
+        sample = win + loss
+        wr = _winrate(win, sample)
+        if sample > 0:
+            ci_low, ci_high = wilson_ci(win, sample)
+        else:
+            ci_low, ci_high = None, None
+        base = baseline_rate.get(market)
+        if ci_low is not None and base is not None:
+            excess: Optional[float] = ci_low - base
+        else:
+            excess = None
+        stats.append(
+            SignalStat(
+                signal_type=sig_type,
+                market=market,
+                interval=interval,
+                horizon=horizon,
+                win=win,
+                loss=loss,
+                sample=sample,
+                win_rate=wr,
+                ci_low=ci_low,
+                ci_high=ci_high,
+                baseline_win_rate=base,
+                excess=excess,
+            )
+        )
+    return stats
