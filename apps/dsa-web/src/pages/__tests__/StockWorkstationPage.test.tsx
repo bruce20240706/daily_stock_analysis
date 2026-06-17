@@ -1,15 +1,18 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../components/kline/KLineChartPanel', () => ({ KLineChartPanel: () => <div data-testid="chart" /> }));
-vi.mock('../../components/workstation/StockWorkstationHeader', () => ({ StockWorkstationHeader: (p: { code: string }) => <div data-testid="ws-header">{p.code}</div> }));
+vi.mock('../../components/workstation/StockWorkstationHeader', () => ({ StockWorkstationHeader: (p: { code: string; onRefreshAnalysis: () => void }) => <div data-testid="ws-header">{p.code}<button onClick={p.onRefreshAnalysis}>刷新分析</button></div> }));
 vi.mock('../../hooks/useWatchlist', () => ({ useWatchlist: () => ({ isInWatchlist: () => false, toggleWatchlist: vi.fn(), isActioning: false, actionMessage: null, watchlistCodes: [], isLoading: false, addToWatchlist: vi.fn(), removeFromWatchlist: vi.fn(), refresh: vi.fn() }) }));
 vi.mock('../../components/workstation/StockSignalsPanel', () => ({ StockSignalsPanel: () => <div data-testid="sig-panel" /> }));
 vi.mock('../../components/workstation/StockHistoryPanel', () => ({ StockHistoryPanel: (p: { onSelect: (id: number) => void }) => <button data-testid="hist-row" onClick={() => p.onSelect(7)}>hist</button> }));
 vi.mock('../../components/report/ReportSummary', () => ({ ReportSummary: (p: { data: { meta: { id?: number } } }) => <div data-testid="report">{p.data.meta.id}</div> }));
+vi.mock('../../components/workstation/StockAlertsPanel', () => ({ StockAlertsPanel: () => <div data-testid="alerts-panel" /> }));
 const { getList, getDetail } = vi.hoisted(() => ({ getList: vi.fn(), getDetail: vi.fn() }));
 vi.mock('../../api/history', () => ({ historyApi: { getList, getDetail } }));
+const { analyzeAsync, getStatus } = vi.hoisted(() => ({ analyzeAsync: vi.fn(), getStatus: vi.fn() }));
+vi.mock('../../api/analysis', () => ({ analysisApi: { analyzeAsync, getStatus }, DuplicateTaskError: class extends Error { existingTaskId = 'T1'; } }));
 
 import StockWorkstationPage from '../StockWorkstationPage';
 
@@ -40,6 +43,8 @@ describe('StockWorkstationPage tabs', () => {
   beforeEach(() => {
     getList.mockClear();
     getDetail.mockClear();
+    analyzeAsync.mockClear();
+    getStatus.mockClear();
   });
 
   it('shows signals tab by default and switches to report (lazy 2-hop fetch)', async () => {
@@ -70,5 +75,21 @@ describe('StockWorkstationPage tabs', () => {
     fireEvent.click(screen.getByTestId('hist-row'));
     expect(await screen.findByTestId('report')).toHaveTextContent('7');
     expect(getDetail).toHaveBeenCalledWith(7);
+  });
+
+  it('refresh analysis triggers analyze + polls + reloads report', async () => {
+    analyzeAsync.mockResolvedValueOnce({ taskId: 'T1', status: 'processing' });
+    getStatus.mockResolvedValueOnce({ taskId: 'T1', status: 'completed', result: { report: { meta: { id: 9, stockCode: '600519', stockName: 'x', queryId: 'q', reportType: 'detailed', createdAt: 'x' }, summary: {} } } });
+    renderAt('/stock/600519');
+    fireEvent.click(screen.getByRole('button', { name: /刷新分析/ }));
+    await waitFor(() => expect(analyzeAsync).toHaveBeenCalledWith(expect.objectContaining({ stockCode: '600519', forceRefresh: true })));
+    await waitFor(() => expect(getStatus).toHaveBeenCalledWith('T1'));
+    expect(await screen.findByTestId('report')).toHaveTextContent('9');
+  });
+
+  it('alerts tab renders the alerts panel', () => {
+    renderAt('/stock/600519');
+    fireEvent.click(screen.getByRole('tab', { name: /告警/ }));
+    expect(screen.getByTestId('alerts-panel')).toBeInTheDocument();
   });
 });

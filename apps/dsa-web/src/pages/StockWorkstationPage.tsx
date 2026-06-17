@@ -1,11 +1,13 @@
 import type React from 'react';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { analysisApi, DuplicateTaskError } from '../api/analysis';
 import { historyApi } from '../api/history';
 import { AppPage, InlineAlert, Loading } from '../components/common';
 import { KLineChartPanel } from '../components/kline/KLineChartPanel';
 import { ReportSummary } from '../components/report/ReportSummary';
 import { ChartErrorBoundary } from '../components/workstation/ChartErrorBoundary';
+import { StockAlertsPanel } from '../components/workstation/StockAlertsPanel';
 import { StockHistoryPanel } from '../components/workstation/StockHistoryPanel';
 import { StockSignalsPanel } from '../components/workstation/StockSignalsPanel';
 import { StockWorkstationHeader } from '../components/workstation/StockWorkstationHeader';
@@ -30,6 +32,7 @@ const StockWorkstationPage: React.FC = () => {
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // 记录已为哪个 code 完成过自动取报告，避免空记录死循环
   const reportLoadedForRef = useRef<string | null>(null);
@@ -66,6 +69,43 @@ const StockWorkstationPage: React.FC = () => {
     void loadReport(recordId);
   }, [loadReport]);
 
+  const pollUntilDone = useCallback(async (taskId: string) => {
+    for (let i = 0; i < 30; i += 1) {
+      const st = await analysisApi.getStatus(taskId);
+      if (st.status === 'completed') {
+        if (st.result?.report) setReport(st.result.report);
+        setTab('report');
+        return;
+      }
+      if (st.status === 'failed') {
+        setReportError(st.error ?? '分析失败');
+        setTab('report');
+        return;
+      }
+      await new Promise<void>((r) => { window.setTimeout(r, 2000); });
+    }
+  }, []);
+
+  const runAnalysis = useCallback(async () => {
+    // 提前标记 sentinel，防止切到 report tab 后自动 2-hop fetch 覆盖分析结果
+    reportLoadedForRef.current = code;
+    setRefreshing(true);
+    try {
+      const resp = await analysisApi.analyzeAsync({ stockCode: code, reportType: 'detailed', forceRefresh: true });
+      const taskId = 'taskId' in resp ? resp.taskId : undefined;
+      if (taskId) await pollUntilDone(taskId);
+    } catch (e) {
+      if (e instanceof DuplicateTaskError) {
+        await pollUntilDone(e.existingTaskId);
+      } else {
+        setReportError('发起分析失败');
+        setTab('report');
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, [code, pollUntilDone]);
+
   if (!code) {
     return (
       <AppPage className="space-y-4 pb-12 pt-6">
@@ -76,7 +116,13 @@ const StockWorkstationPage: React.FC = () => {
 
   return (
     <AppPage className="space-y-4 pb-12 pt-6">
-      <StockWorkstationHeader code={code} watchlist={watchlist} onRefreshAnalysis={() => {}} onBuildAlert={() => {}} />
+      <StockWorkstationHeader
+        code={code}
+        watchlist={watchlist}
+        onRefreshAnalysis={() => void runAnalysis()}
+        onBuildAlert={() => setTab('alerts')}
+        refreshing={refreshing}
+      />
       <section className="rounded-lg border border-border bg-card p-2">
         <ChartErrorBoundary>
           <Suspense fallback={<div className="h-64 animate-pulse rounded bg-hover" />}>
@@ -127,7 +173,7 @@ const StockWorkstationPage: React.FC = () => {
                 : <div data-testid="report-empty" className="text-sm text-secondary-text">尚无分析，点上方「刷新分析」生成。</div>
         )}
         {tab === 'history' && <StockHistoryPanel code={code} onSelect={onSelectHistory} />}
-        {tab === 'alerts' && <div data-testid="alerts-slot" />}
+        {tab === 'alerts' && <StockAlertsPanel code={code} />}
       </div>
     </AppPage>
   );
