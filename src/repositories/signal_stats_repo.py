@@ -68,4 +68,7 @@ class SignalStatsRepository:
                 .where(and_(*cond))
                 .order_by(desc(SignalStatRow.computed_at))
             )
-            return session.execute(q).scalars().first()
+            row = session.execute(q).scalars().first()
+            if row is not None:
+                session.expunge(row)
+            return row
