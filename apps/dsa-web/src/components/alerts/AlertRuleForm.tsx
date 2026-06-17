@@ -113,7 +113,7 @@ function optionsForScope(scope: AlertTargetScope) {
 export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmitting = false, lockedTarget }) => {
   const isLocked = !!lockedTarget;
   const [name, setName] = useState('');
-  const [targetScope, setTargetScope] = useState<AlertTargetScope>(isLocked ? 'single_symbol' : 'single_symbol');
+  const [targetScope, setTargetScope] = useState<AlertTargetScope>('single_symbol');
   const [target, setTarget] = useState(isLocked ? lockedTarget : '');
   const [portfolioTarget, setPortfolioTarget] = useState('all');
   const [marketRegion, setMarketRegion] = useState<MarketRegion>('cn');

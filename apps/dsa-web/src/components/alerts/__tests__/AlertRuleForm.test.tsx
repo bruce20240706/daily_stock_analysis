@@ -298,7 +298,7 @@ describe('AlertRuleForm', () => {
       // scope selector should be visible
       expect(screen.getByLabelText('目标范围')).toBeInTheDocument();
       // no locked target display
-      expect(screen.queryByText(/标的[：:]/)).not.toBeInTheDocument();
+      expect(screen.queryByText('标的')).not.toBeInTheDocument();
     });
   });
 });
