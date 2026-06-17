@@ -527,3 +527,27 @@ def test_no_vfx_marker_for_neutral_last_bar():
     df = _make_df(pad + [neutral])
     res = compute_volume_price_signals(df)
     assert _vfx_markers(res.markers) == []
+
+
+# ---------------------------------------------------------------------------
+# M3-B1: CMF / MFI 量能指标纯函数
+# ---------------------------------------------------------------------------
+
+import numpy as np
+from src.services.volume_price_signals import _cmf, _mfi
+
+
+def test_cmf_all_closes_at_high_is_positive():
+    n = 30
+    df = pd.DataFrame({"high": [10]*n, "low": [8]*n, "close": [10]*n, "volume": [1000]*n})
+    s = _cmf(df["high"], df["low"], df["close"], df["volume"], window=20)
+    assert s.iloc[-1] > 0  # 收在最高 → 资金流为正
+
+
+def test_mfi_bounded_0_100():
+    n = 40
+    close = pd.Series(np.linspace(10, 20, n))
+    df = pd.DataFrame({"high": close*1.01, "low": close*0.99, "close": close, "volume": [1000]*n})
+    s = _mfi(df["high"], df["low"], df["close"], df["volume"], window=14)
+    v = s.dropna()
+    assert ((v >= 0) & (v <= 100)).all()

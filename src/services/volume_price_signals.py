@@ -592,6 +592,31 @@ def _obv(close: pd.Series, volume: pd.Series) -> pd.Series:
     return (direction * volume).cumsum()
 
 
+def _cmf(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, window: int) -> pd.Series:
+    """Chaikin Money Flow：rolling(MFV之和) / rolling(volume之和)。
+    high==low 时 MFM 无法计算，填 0（资金无方向），避免 NaN 传播到整窗口。
+    rolling volume 为零时返回 NaN。
+    """
+    rng = (high - low).where((high - low) != 0)            # high==low → NaN
+    mfm = ((close - low) - (high - close)) / rng           # Money Flow Multiplier
+    mfv = mfm.fillna(0.0) * volume                         # Money Flow Volume
+    roll_vol = volume.rolling(window).sum()
+    return mfv.rolling(window).sum() / roll_vol.where(roll_vol != 0)
+
+
+def _mfi(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, window: int) -> pd.Series:
+    """Money Flow Index：基于典型价格与成交量的动量摆荡指标，范围 [0, 100]。
+    neg flow 为零时（全为上涨 bar）返回 NaN；结果在 [0,100] 内。
+    """
+    tp = (high + low + close) / 3.0                        # typical price
+    rmf = tp * volume                                      # raw money flow
+    delta = tp.diff()
+    pos = rmf.where(delta > 0, 0.0).rolling(window).sum()
+    neg = rmf.where(delta < 0, 0.0).rolling(window).sum()
+    mr = pos / neg.where(neg != 0)                         # neg==0 → NaN
+    return 100 - (100 / (1 + mr))
+
+
 def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
     """OBV 顶底背离检测：仅对已确认 swing pivot 对比较，无未来函数。"""
     close = prim["close"].astype(float).reset_index(drop=True)
