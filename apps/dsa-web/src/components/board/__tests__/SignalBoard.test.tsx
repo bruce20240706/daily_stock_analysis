@@ -94,4 +94,15 @@ describe('SignalBoard', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/stock/600519');
     expect(onRowClick).not.toHaveBeenCalled();
   });
+
+  it('encodes crypto code (containing /) in workstation navigate call', () => {
+    mockNavigate.mockClear();
+    render(
+      <MemoryRouter>
+        <SignalBoard entries={[mk({ code: 'BTC/USDT', name: 'BTC/USDT' })]} onRowClick={vi.fn()} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /工作台/ }));
+    expect(mockNavigate).toHaveBeenCalledWith('/stock/BTC%2FUSDT');
+  });
 });

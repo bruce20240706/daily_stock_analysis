@@ -238,4 +238,14 @@ describe('ReportOverview', () => {
     const link = screen.getByRole('link', { name: /在工作台打开/ });
     expect(link).toHaveAttribute('href', '/stock/600519');
   });
+
+  it('encodes crypto code (containing /) in workstation link href', () => {
+    render(
+      <MemoryRouter>
+        <ReportOverview meta={{ ...baseMeta, stockCode: 'BTC/USDT' }} summary={baseSummary} />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole('link', { name: /在工作台打开/ });
+    expect(link).toHaveAttribute('href', '/stock/BTC%2FUSDT');
+  });
 });

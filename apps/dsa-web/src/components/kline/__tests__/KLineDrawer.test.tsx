@@ -98,4 +98,24 @@ describe('KLineDrawer', () => {
     fireEvent.click(link);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('encodes crypto code (containing /) in workstation link href', async () => {
+    vi.resetModules();
+    vi.doMock('../KLineChartPanel', () => ({
+      default: () => <div data-testid="kline-panel" />,
+    }));
+
+    const onClose = vi.fn();
+    const { KLineDrawer } = await import('../KLineDrawer');
+    render(
+      <MemoryRouter>
+        <KLineDrawer stockCode="BTC/USDT" stockName="BTC/USDT" isOpen onClose={onClose} />
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole('link', { name: /在工作台打开/ });
+    expect(link).toHaveAttribute('href', '/stock/BTC%2FUSDT');
+    fireEvent.click(link);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
