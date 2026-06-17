@@ -37,6 +37,13 @@ const StockWorkstationPage: React.FC = () => {
   // 记录已为哪个 code 完成过自动取报告，避免空记录死循环
   const reportLoadedForRef = useRef<string | null>(null);
 
+  // 卸载守卫：防止组件卸载后 setState 导致内存泄漏或状态污染
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   const loadReport = useCallback(async (recordId?: number) => {
     reportLoadedForRef.current = code;
     setReportLoading(true);
@@ -71,9 +78,11 @@ const StockWorkstationPage: React.FC = () => {
 
   const pollUntilDone = useCallback(async (taskId: string) => {
     for (let i = 0; i < 30; i += 1) {
+      if (!isMountedRef.current) return;
       const st = await analysisApi.getStatus(taskId);
       if (st.status === 'completed') {
         if (st.result?.report) setReport(st.result.report);
+        else setReportError('分析完成但未返回报告内容');
         setTab('report');
         return;
       }
@@ -83,6 +92,11 @@ const StockWorkstationPage: React.FC = () => {
         return;
       }
       await new Promise<void>((r) => { window.setTimeout(r, 2000); });
+    }
+    // 轮询耗尽（~60s）仍未完成，提示超时
+    if (isMountedRef.current) {
+      setReportError('分析超时，请稍后重试');
+      setTab('report');
     }
   }, []);
 
@@ -96,7 +110,8 @@ const StockWorkstationPage: React.FC = () => {
       if (taskId) await pollUntilDone(taskId);
     } catch (e) {
       if (e instanceof DuplicateTaskError) {
-        await pollUntilDone(e.existingTaskId);
+        try { await pollUntilDone(e.existingTaskId); }
+        catch { if (isMountedRef.current) { setReportError('分析失败'); setTab('report'); } }
       } else {
         setReportError('发起分析失败');
         setTab('report');

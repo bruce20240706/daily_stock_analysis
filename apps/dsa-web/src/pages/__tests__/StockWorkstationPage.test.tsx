@@ -92,4 +92,30 @@ describe('StockWorkstationPage tabs', () => {
     fireEvent.click(screen.getByRole('tab', { name: /告警/ }));
     expect(screen.getByTestId('alerts-panel')).toBeInTheDocument();
   });
+
+  it('failed status surfaces error message', async () => {
+    analyzeAsync.mockResolvedValueOnce({ taskId: 'T1', status: 'processing' });
+    getStatus.mockResolvedValueOnce({ taskId: 'T1', status: 'failed', error: '引擎错误' });
+    renderAt('/stock/600519');
+    fireEvent.click(screen.getByRole('button', { name: /刷新分析/ }));
+    expect(await screen.findByText('引擎错误')).toBeInTheDocument();
+  });
+
+  it('completed without report shows no-report message', async () => {
+    analyzeAsync.mockResolvedValueOnce({ taskId: 'T1', status: 'processing' });
+    getStatus.mockResolvedValueOnce({ taskId: 'T1', status: 'completed', result: undefined });
+    renderAt('/stock/600519');
+    fireEvent.click(screen.getByRole('button', { name: /刷新分析/ }));
+    expect(await screen.findByText('分析完成但未返回报告内容')).toBeInTheDocument();
+  });
+
+  it('DuplicateTaskError polls existing task and shows its report', async () => {
+    const { DuplicateTaskError } = await import('../../api/analysis');
+    analyzeAsync.mockRejectedValueOnce(new DuplicateTaskError());
+    getStatus.mockResolvedValueOnce({ taskId: 'T1', status: 'completed', result: { report: { meta: { id: 5, stockCode: '600519', stockName: 'x', queryId: 'q', reportType: 'detailed', createdAt: 'x' }, summary: {} } } });
+    renderAt('/stock/600519');
+    fireEvent.click(screen.getByRole('button', { name: /刷新分析/ }));
+    expect(await screen.findByTestId('report')).toHaveTextContent('5');
+    expect(getStatus).toHaveBeenCalledWith('T1');
+  });
 });
