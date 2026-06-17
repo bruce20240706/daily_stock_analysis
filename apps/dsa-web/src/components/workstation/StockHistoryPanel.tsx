@@ -30,7 +30,7 @@ export const StockHistoryPanel: React.FC<{ code: string; onSelect: (recordId: nu
           <button type="button" onClick={() => onSelect(it.id)}
             className="flex w-full items-center justify-between py-2 text-left hover:bg-hover">
             <span className="text-foreground">{it.operationAdvice ?? '—'}</span>
-            <span className="text-xs text-secondary-text">{it.createdAt?.slice(0, 10)}{it.sentimentScore != null ? ` · 情绪 ${it.sentimentScore}` : ''}</span>
+            <span className="text-xs text-secondary-text">{it.createdAt.slice(0, 10)}{it.sentimentScore != null ? ` · 情绪 ${it.sentimentScore}` : ''}</span>
           </button>
         </li>
       ))}

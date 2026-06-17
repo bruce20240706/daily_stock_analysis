@@ -23,4 +23,9 @@ describe('StockHistoryPanel', () => {
     render(<StockHistoryPanel code="600519" onSelect={vi.fn()} />);
     expect(await screen.findByText(/尚无分析/)).toBeInTheDocument();
   });
+  it('renders — fallback when operationAdvice is undefined', async () => {
+    getList.mockResolvedValueOnce({ total: 1, page: 1, limit: 20, items: [item({ operationAdvice: undefined })] });
+    render(<StockHistoryPanel code="600519" onSelect={vi.fn()} />);
+    expect(await screen.findByText('—')).toBeInTheDocument();
+  });
 });
