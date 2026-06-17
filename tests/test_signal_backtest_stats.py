@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Task A2: 统计聚合 + Wilson CI + 基准超额 测试。"""
-from src.services.signal_backtest import wilson_ci, aggregate_signal_stats, SignalOutcome, SignalStat
+from src.services.signal_backtest import wilson_ci, aggregate_signal_stats, SignalOutcome, SignalStat, _winrate
 
 
 def test_wilson_ci_bounds_within_0_1_and_low_below_high():
@@ -24,7 +24,11 @@ def test_aggregate_groups_by_type_and_market_excludes_expired_from_sample():
     assert s.win == 6 and s.loss == 2 and s.sample == 8        # expired 不计入
     assert abs(s.win_rate - 0.75) < 1e-9
     assert abs(s.baseline_win_rate - 0.5) < 1e-9
-    assert abs(s.excess - (s.ci_low - 0.5)) < 1e-9
+    # independent Wilson pin: ci_low must match wilson_ci(6,8) directly
+    lo, _ = wilson_ci(6, 8)
+    assert abs(s.ci_low - lo) < 1e-9
+    # excess is rounded: round(ci_low - baseline, 4)
+    assert abs(s.excess - round(lo - 0.5, 4)) < 1e-9
     assert s.interval == "1d" and s.horizon == 10
 
 
@@ -46,6 +50,7 @@ def test_wilson_ci_all_wins():
 
 
 def test_aggregate_returns_signal_stat_instances():
+    # fixture: 3 wins + 3 losses → win_rate=0.5; baseline 4w/10n → baseline_win_rate=0.4
     outs = [SignalOutcome("macd_cross", "us", "win")] * 3 + \
            [SignalOutcome("macd_cross", "us", "loss")] * 3
     base = [SignalOutcome("__baseline__", "us", "win")] * 4 + \
@@ -55,3 +60,11 @@ def test_aggregate_returns_signal_stat_instances():
     assert isinstance(s, SignalStat)
     assert s.interval == "1w" and s.horizon == 20
     assert s.sample == 6
+    # numeric pins
+    assert abs(s.win_rate - 0.5) < 1e-9
+    assert abs(s.baseline_win_rate - 0.4) < 1e-9
+    lo, hi = wilson_ci(3, 6)
+    assert abs(s.ci_low - lo) < 1e-9
+    assert abs(s.ci_high - hi) < 1e-9
+    assert s.excess is not None
+    assert abs(s.excess - round(lo - 0.4, 4)) < 1e-9

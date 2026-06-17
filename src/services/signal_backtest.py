@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+import math
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -239,9 +241,6 @@ def evaluate_baseline_outcomes(
 # Task A2: 统计聚合 + Wilson CI + 基准超额（纯函数）
 # ---------------------------------------------------------------------------
 
-import math
-from collections import defaultdict
-
 
 @dataclass(frozen=True)
 class SignalStat:
@@ -297,8 +296,8 @@ def wilson_ci(wins: int, n: int, z: float = 1.96) -> tuple:
 
 
 def _winrate(wins: int, n: int) -> Optional[float]:
-    """返回 wins/n，n == 0 时返回 None（避免 ZeroDivisionError）。"""
-    return wins / n if n > 0 else None
+    """返回 wins/n（保留 4 位小数），n == 0 时返回 None（避免 ZeroDivisionError）。"""
+    return round(wins / n, 4) if n > 0 else None
 
 
 def aggregate_signal_stats(
@@ -321,21 +320,21 @@ def aggregate_signal_stats(
         每个 (signal_type × market) 对应一个 SignalStat 的列表。
         不包含 __baseline__ 自身的 SignalStat（仅作为基准参考）。
     """
-    # Step 1: 计算各市场基准胜率（expired 排除在分母外）
+    # Step 1: 计算各市场基准胜率（expired 及未知 outcome 排除在分母外）
     base_w: dict = defaultdict(int)
     base_n: dict = defaultdict(int)
     for o in baseline_outcomes:
-        if o.outcome == "expired":
+        if o.outcome not in ("win", "loss"):
             continue
         base_n[o.market] += 1
         if o.outcome == "win":
             base_w[o.market] += 1
     baseline_rate = {m: _winrate(base_w[m], base_n[m]) for m in base_n}
 
-    # Step 2: 按 (signal_type, market) 分桶统计（expired 排除在分母外）
+    # Step 2: 按 (signal_type, market) 分桶统计（expired 及未知 outcome 排除在分母外）
     buckets: dict = defaultdict(lambda: {"win": 0, "loss": 0})
     for o in outcomes:
-        if o.outcome == "expired":
+        if o.outcome not in ("win", "loss"):
             continue
         buckets[(o.signal_type, o.market)][o.outcome] += 1
 
@@ -352,7 +351,7 @@ def aggregate_signal_stats(
             ci_low, ci_high = None, None
         base = baseline_rate.get(market)
         if ci_low is not None and base is not None:
-            excess: Optional[float] = ci_low - base
+            excess: Optional[float] = round(ci_low - base, 4)
         else:
             excess = None
         stats.append(
