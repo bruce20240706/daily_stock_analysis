@@ -5,6 +5,7 @@ import { stocksApi } from '../../api/stocks';
 import type { SignalsResponse } from '../../types/kline';
 import { Loading } from '../common';
 import { cn } from '../../utils/cn';
+import { formatHitRate } from '../../utils/credibility';
 
 const consistencyLabel: Record<string, string> = {
   consistent: '一致', divergent: '分歧', conflict: '冲突', unknown: '未知', stale: '过期',
@@ -43,7 +44,7 @@ export const StockSignalsPanel: React.FC<{ code: string }> = ({ code }) => {
               <td className="py-1 text-left">{m.signalType}</td>
               <td className={cn(m.direction === 'bullish' && 'text-danger', m.direction === 'bearish' && 'text-success')}>{dirLabel[m.direction]}</td>
               <td className="text-secondary-text">{m.source === 'llm' ? 'LLM' : '规则'}</td>
-              <td className="text-secondary-text">{m.hitRate === null || m.hitSample === null || m.hitSample <= 0 ? '暂无样本' : `${Math.round(m.hitRate * 100)}% · ${m.verified ? '已验证' : '未验证'}`}</td>
+              <td className="text-secondary-text">{formatHitRate(m)}</td>
             </tr>
           ))}
           {data.markers.length === 0 && <tr><td colSpan={4} className="py-2 text-secondary-text">暂无量价信号</td></tr>}

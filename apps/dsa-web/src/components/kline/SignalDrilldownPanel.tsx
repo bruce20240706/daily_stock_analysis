@@ -1,6 +1,7 @@
 import type React from 'react';
 import type { SignalMarker } from '../../types/kline';
 import { cn } from '../../utils/cn';
+import { formatHitRate } from '../../utils/credibility';
 
 interface SignalDrilldownPanelProps {
   markers: SignalMarker[];
@@ -9,14 +10,6 @@ interface SignalDrilldownPanelProps {
 
 const formatNumber = (value: number | null): string =>
   value === null || Number.isNaN(value) ? '—' : String(value);
-
-const formatHitRate = (marker: SignalMarker): string => {
-  if (marker.hitRate === null || marker.hitSample === null || marker.hitSample <= 0) {
-    return '暂无样本';
-  }
-  const pct = Math.round(marker.hitRate * 100);
-  return `命中率 ${pct}% · ${marker.hitSample} 样本`;
-};
 
 const formatAsOf = (asOf: number | null): string => {
   if (asOf === null) return '';
