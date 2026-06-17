@@ -41,6 +41,10 @@ class VPSConfig:
     pullback_atr_mult: float = 3.0      # 缩量回调最大回撤 = ATR * 倍数
     atr_period: int = 14
     b_class_top_k: int = 2              # B 类每结果集限流 top-k
+    # === 数字货币旁路阈值（M3-A）：不配置则回落到对应的日线口径默认值，非 crypto 行为字节一致 ===
+    crypto_breakout_window: int = 20    # VPS_CRYPTO_BREAKOUT_WINDOW（默认 = breakout_window）
+    crypto_atr_period: int = 14         # VPS_CRYPTO_ATR_PERIOD（默认 = atr_period）
+    crypto_breakout_rel_vol: float = 2.0  # VPS_CRYPTO_BREAKOUT_REL_VOL（默认 = breakout_rel_vol）
 
     @classmethod
     def from_env(cls) -> "VPSConfig":
@@ -58,6 +62,9 @@ class VPSConfig:
             pullback_atr_mult=parse_env_float(os.getenv("VPS_PULLBACK_ATR_MULT"), 3.0, field_name="VPS_PULLBACK_ATR_MULT", minimum=0.5),
             atr_period=int(parse_env_float(os.getenv("VPS_ATR_PERIOD"), 14.0, field_name="VPS_ATR_PERIOD", minimum=2.0)),
             b_class_top_k=int(parse_env_float(os.getenv("VPS_B_CLASS_TOP_K"), 2.0, field_name="VPS_B_CLASS_TOP_K", minimum=1.0)),
+            crypto_breakout_window=int(parse_env_float(os.getenv("VPS_CRYPTO_BREAKOUT_WINDOW"), 20.0, field_name="VPS_CRYPTO_BREAKOUT_WINDOW", minimum=2.0)),
+            crypto_atr_period=int(parse_env_float(os.getenv("VPS_CRYPTO_ATR_PERIOD"), 14.0, field_name="VPS_CRYPTO_ATR_PERIOD", minimum=2.0)),
+            crypto_breakout_rel_vol=parse_env_float(os.getenv("VPS_CRYPTO_BREAKOUT_REL_VOL"), 2.0, field_name="VPS_CRYPTO_BREAKOUT_REL_VOL", minimum=1.0),
         )
 
 
