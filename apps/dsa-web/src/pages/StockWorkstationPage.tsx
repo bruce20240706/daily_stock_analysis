@@ -1,10 +1,9 @@
 import type React from 'react';
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { analysisApi, DuplicateTaskError } from '../api/analysis';
 import { historyApi } from '../api/history';
 import { AppPage, InlineAlert, Loading } from '../components/common';
-import { KLineChartPanel } from '../components/kline/KLineChartPanel';
 import { ReportSummary } from '../components/report/ReportSummary';
 import { ChartErrorBoundary } from '../components/workstation/ChartErrorBoundary';
 import { StockAlertsPanel } from '../components/workstation/StockAlertsPanel';
@@ -14,6 +13,12 @@ import { StockWorkstationHeader } from '../components/workstation/StockWorkstati
 import { useWatchlist } from '../hooks/useWatchlist';
 import type { AnalysisReport } from '../types/analysis';
 import { cn } from '../utils/cn';
+
+// klinecharts 是重依赖，仅在 lazy 的 KLineChartPanel 内 import，保证页面首屏不受影响（对齐 KLineDrawer）。
+const KLineChartPanel = lazy(() => import('../components/kline/KLineChartPanel'));
+
+// 轮询预算：120 次 × 2s ≈ 240s，对齐 HomePage；detailed LLM 分析常超 60s。
+const POLL_MAX_ATTEMPTS = 120;
 
 type TabKey = 'signals' | 'report' | 'history' | 'alerts';
 const TABS: { key: TabKey; label: string }[] = [
@@ -26,6 +31,19 @@ const TABS: { key: TabKey; label: string }[] = [
 const StockWorkstationPage: React.FC = () => {
   const params = useParams<{ code: string }>();
   const code = params.code ?? '';
+  if (!code) {
+    return (
+      <AppPage className="space-y-4 pb-12 pt-6">
+        <InlineAlert variant="danger" message="未找到该标的（缺少代码）。" />
+      </AppPage>
+    );
+  }
+  // 用 key={code} 强制换股时整体重挂：重置全部页面状态并卸载子组件（取消其在途请求），
+  // 消除 React Router 复用实例导致的跨股状态泄漏 / 轮询把 A 的结果写进 B。
+  return <StockWorkstationView key={code} code={code} />;
+};
+
+const StockWorkstationView: React.FC<{ code: string }> = ({ code }) => {
   const watchlist = useWatchlist();
 
   const [tab, setTab] = useState<TabKey>('signals');
@@ -77,9 +95,27 @@ const StockWorkstationPage: React.FC = () => {
   }, [loadReport]);
 
   const pollUntilDone = useCallback(async (taskId: string) => {
-    for (let i = 0; i < 30; i += 1) {
+    let consecutiveFailures = 0;
+    for (let i = 0; i < POLL_MAX_ATTEMPTS; i += 1) {
       if (!isMountedRef.current) return;
-      const st = await analysisApi.getStatus(taskId);
+      let st: Awaited<ReturnType<typeof analysisApi.getStatus>>;
+      try {
+        st = await analysisApi.getStatus(taskId);
+      } catch {
+        // 单次瞬断不应中断整个任务（后端任务仍在跑）；连续失败到阈值才报错。
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 5) {
+          if (isMountedRef.current) {
+            setReportError('分析状态获取失败，请稍后重试');
+            setTab('report');
+          }
+          return;
+        }
+        await new Promise<void>((r) => { window.setTimeout(r, 2000); });
+        continue;
+      }
+      consecutiveFailures = 0;
+      if (!isMountedRef.current) return;
       if (st.status === 'completed') {
         if (st.result?.report) setReport(st.result.report);
         else setReportError('分析完成但未返回报告内容');
@@ -93,7 +129,7 @@ const StockWorkstationPage: React.FC = () => {
       }
       await new Promise<void>((r) => { window.setTimeout(r, 2000); });
     }
-    // 轮询耗尽（~60s）仍未完成，提示超时
+    // 轮询耗尽（~240s）仍未完成，提示超时
     if (isMountedRef.current) {
       setReportError('分析超时，请稍后重试');
       setTab('report');
@@ -104,6 +140,9 @@ const StockWorkstationPage: React.FC = () => {
     // 提前标记 sentinel，防止切到 report tab 后自动 2-hop fetch 覆盖分析结果
     reportLoadedForRef.current = code;
     setRefreshing(true);
+    // 分析期间报告区也进入 loading，避免切到「报告」tab 看到空态（finding #6）
+    setReportLoading(true);
+    setReportError(null);
     try {
       const resp = await analysisApi.analyzeAsync({ stockCode: code, reportType: 'detailed', forceRefresh: true });
       const taskId = 'taskId' in resp ? resp.taskId : undefined;
@@ -118,16 +157,9 @@ const StockWorkstationPage: React.FC = () => {
       }
     } finally {
       setRefreshing(false);
+      setReportLoading(false);
     }
   }, [code, pollUntilDone]);
-
-  if (!code) {
-    return (
-      <AppPage className="space-y-4 pb-12 pt-6">
-        <InlineAlert variant="danger" message="未找到该标的（缺少代码）。" />
-      </AppPage>
-    );
-  }
 
   return (
     <AppPage className="space-y-4 pb-12 pt-6">
