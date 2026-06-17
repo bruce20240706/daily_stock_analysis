@@ -533,7 +533,6 @@ def test_no_vfx_marker_for_neutral_last_bar():
 # M3-B1: CMF / MFI 量能指标纯函数
 # ---------------------------------------------------------------------------
 
-import numpy as np
 from src.services.volume_price_signals import _cmf, _mfi
 
 
@@ -545,9 +544,34 @@ def test_cmf_all_closes_at_high_is_positive():
 
 
 def test_mfi_bounded_0_100():
-    n = 40
-    close = pd.Series(np.linspace(10, 20, n))
-    df = pd.DataFrame({"high": close*1.01, "low": close*0.99, "close": close, "volume": [1000]*n})
+    """MFI 结果应在 [0, 100] 内；使用正弦波 zigzag 确保大多数窗口同时含上涨和下跌 bar，
+    断言是非空的（non-vacuous）——避免全上涨序列导致 dropna 结果为空。"""
+    n = 60
+    t = np.linspace(0, 4 * np.pi, n)
+    close = pd.Series(100.0 + 10.0 * np.sin(t))  # 正弦波，含上涨和下跌
+    df = pd.DataFrame({"high": close * 1.01, "low": close * 0.99, "close": close, "volume": [1000] * n})
     s = _mfi(df["high"], df["low"], df["close"], df["volume"], window=14)
     v = s.dropna()
-    assert ((v >= 0) & (v <= 100)).all()
+    assert len(v) > 0, "dropna 结果不得为空：MFI 必须在非单调序列上产出有效值"
+    assert ((v >= 0) & (v <= 100)).all(), f"MFI 值超出 [0,100]：{v[~((v >= 0) & (v <= 100))]}"
+
+
+def test_mfi_all_up_window_is_100():
+    """全上涨窗口（neg flow == 0, pos > 0）按标准 MFI 定义应返回 100.0，不得为 NaN。"""
+    n = 20
+    # 单调递增序列：每根 bar 的典型价格都高于前一根，neg flow 始终为 0
+    close = pd.Series([float(100 + i) for i in range(n)])
+    df = pd.DataFrame({"high": close + 1.0, "low": close - 1.0, "close": close, "volume": [1000] * n})
+    s = _mfi(df["high"], df["low"], df["close"], df["volume"], window=14)
+    # 最后一根落在全上涨窗口内，MFI 应为 100.0
+    last = s.iloc[-1]
+    assert last == pytest.approx(100.0), f"全上涨窗口 MFI 应为 100.0，实际 {last}"
+
+
+def test_mfi_flat_window_is_nan():
+    """完全平坦序列（pos == 0 且 neg == 0）：资金流向未定义，MFI 应保持 NaN。"""
+    n = 20
+    close = pd.Series([100.0] * n)
+    df = pd.DataFrame({"high": close + 1.0, "low": close - 1.0, "close": close, "volume": [1000] * n})
+    s = _mfi(df["high"], df["low"], df["close"], df["volume"], window=14)
+    assert s.dropna().empty, "完全平坦序列 MFI 应全为 NaN（资金流向未定义）"

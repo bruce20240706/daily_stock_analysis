@@ -606,15 +606,22 @@ def _cmf(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, w
 
 def _mfi(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, window: int) -> pd.Series:
     """Money Flow Index：基于典型价格与成交量的动量摆荡指标，范围 [0, 100]。
-    neg flow 为零时（全为上涨 bar）返回 NaN；结果在 [0,100] 内。
+
+    标准定义：neg flow == 0 且 pos > 0（全上涨窗口）→ money_ratio → ∞ → MFI = 100.0。
+    flat 窗口（pos == 0 且 neg == 0，无典型价格变化）→ MFI = NaN（流向未定义）。
+    结果在 [0, 100] 内，不产生 inf / NaN（flat 窗口除外）。
     """
     tp = (high + low + close) / 3.0                        # typical price
     rmf = tp * volume                                      # raw money flow
     delta = tp.diff()
     pos = rmf.where(delta > 0, 0.0).rolling(window).sum()
     neg = rmf.where(delta < 0, 0.0).rolling(window).sum()
-    mr = pos / neg.where(neg != 0)                         # neg==0 → NaN
-    return 100 - (100 / (1 + mr))
+    mr = pos / neg.where(neg != 0)                         # neg==0 → NaN（暂用于计算）
+    result = 100 - (100 / (1 + mr))
+    # 全上涨窗口（neg==0 且 pos>0）：标准 MFI 定义为 100；flat 窗口（pos==0 且 neg==0）保留 NaN
+    all_up = (neg == 0) & (pos > 0)
+    result = result.where(~all_up, 100.0)
+    return result
 
 
 def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
