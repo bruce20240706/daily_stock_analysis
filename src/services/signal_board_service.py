@@ -147,9 +147,16 @@ def _key_signals_from_markers(markers: list) -> list:
 def _hit_fields_from_markers(markers: list) -> dict:
     for m in markers:
         if m.get("source") == "rule":
-            return {"hit_rate": m.get("hit_rate"), "hit_sample": m.get("hit_sample"),
-                    "verified": bool(m.get("verified", False))}
-    return {"hit_rate": None, "hit_sample": None, "verified": False}
+            return {
+                "hit_rate": m.get("hit_rate"),
+                "hit_sample": m.get("hit_sample"),
+                "verified": bool(m.get("verified", False)),
+                "ci_low": m.get("ci_low"),
+                "ci_high": m.get("ci_high"),
+                "baseline_excess": m.get("baseline_excess"),
+            }
+    return {"hit_rate": None, "hit_sample": None, "verified": False,
+            "ci_low": None, "ci_high": None, "baseline_excess": None}
 
 
 def _entry_from_board_signals(code: str, bs: "BoardSignals") -> dict:
@@ -176,6 +183,7 @@ def _degraded_entry(code: str, reason: str) -> dict:
         "consistency": "unknown", "key_signals": [],
         "price_lines": {"entry": None, "stop": None, "target": None},
         "latest_close": None, "hit_rate": None, "hit_sample": None, "verified": False,
+        "ci_low": None, "ci_high": None, "baseline_excess": None,
         "status": "degraded", "degraded_reason": reason,
     }
 

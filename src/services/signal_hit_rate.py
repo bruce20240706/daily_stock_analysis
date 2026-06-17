@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
-"""信号历史方向命中率回填(M2c)。
+"""信号历史方向命中率回填(M2c/M3-A6)。
 
-最小切片：复用已落库的 BacktestResult.direction_correct（由 BacktestEngine 前向
+M2c 最小切片：复用已落库的 BacktestResult.direction_correct（由 BacktestEngine 前向
 N bar 评估写入）按 code 聚合历史方向命中率与样本数，回填 SignalMarker 的
 hit_rate / hit_sample / verified。命中率为历史统计，非未来保证；不做全量滚动回测。
+
+M3-A6 改源：resolve_marker_hit_fields 改读 signal_stats 表（聚合源变为
+(signal_type, market)），verified 增加 ci_low > baseline_win_rate 的超额判定，
+同时透传 ci_low / ci_high / baseline_excess 字段到 marker 契约。
 
 聚合口径严格对齐 src/core/backtest_engine.py 的现有规约：
   分母 = direction_correct is not None 的样本数
@@ -16,7 +20,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.config import get_config
+from src.core.trading_calendar import get_market_for_stock
 from src.repositories.backtest_repo import BacktestRepository
+from src.repositories.signal_stats_repo import SignalStatsRepository
 
 
 @dataclass(frozen=True)
@@ -65,24 +71,40 @@ def backfill_signal_hit_rate(signal_type: str, code: str) -> HitRate:
 
 
 def resolve_marker_hit_fields(signal_type: str, code: str) -> dict:
-    """把命中率聚合结果映射为 SignalMarker 的 hit_rate/hit_sample/verified 字段。
+    """把命中率聚合结果映射为 SignalMarker 的 6 个 hit 字段（M3-A6 改源）。
 
-    - 无样本：hit_rate=None, hit_sample=None（对齐 SignalMarker 契约「无样本则 null」），
-      verified=False。
-    - 有样本：hit_sample 达 signal_hit_verified_min_sample 阈值则 verified=True。
+    M3-A6 改源：读 signal_stats 表 by (signal_type, market(code))，
+    verified = sample >= min_sample AND ci_low > baseline_win_rate（超额判定）。
+    缺桶/无样本时返回全 None 的 all-None dict（与 M2c 旧"无样本"路径表现一致）。
+
+    返回 keys: hit_rate, hit_sample, verified, ci_low, ci_high, baseline_excess。
     """
-    rate = backfill_signal_hit_rate(signal_type, code)
+    _none = {"hit_rate": None, "hit_sample": None, "verified": False,
+             "ci_low": None, "ci_high": None, "baseline_excess": None}
 
-    if rate.hit_sample <= 0:
-        return {"hit_rate": None, "hit_sample": None, "verified": False}
+    market = get_market_for_stock(code)
+    if market is None:
+        return dict(_none)
 
-    config = get_config()
-    min_sample = int(getattr(config, "signal_hit_verified_min_sample", 0) or 0)
-    if min_sample <= 0:
-        min_sample = int(getattr(config, "backtest_eval_window_days", 10))
+    stat = SignalStatsRepository().get(signal_type, market)
+    if stat is None or (stat.sample or 0) <= 0:
+        return dict(_none)
 
+    cfg = get_config()
+    min_sample = int(getattr(cfg, "signal_hit_verified_min_sample", 0) or 0) \
+        or int(getattr(cfg, "backtest_eval_window_days", 10))
+
+    verified = bool(
+        stat.sample >= min_sample
+        and stat.ci_low is not None
+        and stat.baseline_win_rate is not None
+        and stat.ci_low > stat.baseline_win_rate
+    )
     return {
-        "hit_rate": rate.hit_rate,
-        "hit_sample": rate.hit_sample,
-        "verified": rate.hit_sample >= min_sample,
+        "hit_rate": stat.win_rate,
+        "hit_sample": stat.sample,
+        "verified": verified,
+        "ci_low": stat.ci_low,
+        "ci_high": stat.ci_high,
+        "baseline_excess": stat.excess,
     }

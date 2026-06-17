@@ -331,3 +331,39 @@ def test_build_payload_memoizes_resolver_per_code_across_markers():
         assert m["hit_rate"] == 0.6
         assert m["hit_sample"] == 20
         assert m["verified"] is True
+
+
+# ---------------------------------------------------------------------------
+# M3-A6：marker 透传 ci_low/ci_high/baseline_excess 字段
+# ---------------------------------------------------------------------------
+
+def _engine_with_one_rule_marker():
+    """构造含一个 bullish rule-type VPSignal 的 VPSResult (SimpleNamespace)。"""
+    sig = SimpleNamespace(
+        timestamp=date_str_to_epoch_ms("2026-06-16"),
+        price=1800.0,
+        anchor="close",
+        direction="bullish",
+        signal_type="volume_breakout",
+        confidence="high",
+        is_daily_approx=False,
+        is_anomalous=False,
+        reason="放量突破",
+        threshold=2.0,
+        observed_value=2.5,
+    )
+    return SimpleNamespace(markers=[sig], status="ok", degraded_reason=None)
+
+
+def test_marker_carries_ci_fields_from_resolver():
+    def resolver(signal_type, code):
+        return {"hit_rate": 0.68, "hit_sample": 20, "verified": True,
+                "ci_low": 0.55, "ci_high": 0.80, "baseline_excess": 0.05}
+
+    payload = build_signals_payload(
+        engine_result=_engine_with_one_rule_marker(), rule_signal=None,
+        latest_bar_date="2026-06-16", llm_record=None,
+        trading_days_elapsed=None, code="600519", hit_fields_resolver=resolver,
+    )
+    m = next(x for x in payload["markers"] if x["source"] == "rule")
+    assert m["ci_low"] == 0.55 and m["ci_high"] == 0.80 and m["baseline_excess"] == 0.05

@@ -181,67 +181,58 @@ class BackfillSignalHitRateTestCase(unittest.TestCase):
 
 
 class ResolveMarkerHitFieldsTestCase(unittest.TestCase):
-    def setUp(self) -> None:
-        self._temp_dir = tempfile.TemporaryDirectory()
-        self._db_path = os.path.join(self._temp_dir.name, "test_resolve.db")
-        os.environ["DATABASE_PATH"] = self._db_path
-        os.environ["SIGNAL_HIT_VERIFIED_MIN_SAMPLE"] = "3"
+    """M3-A6 改源后：resolve_marker_hit_fields 读 signal_stats by (signal_type, market)。
+    旧 per-code BacktestResult 路径已移走，测试改为 mock signal_stats 源。"""
 
+    def setUp(self) -> None:
+        os.environ["SIGNAL_HIT_VERIFIED_MIN_SAMPLE"] = "3"
         Config._instance = None
-        DatabaseManager.reset_instance()
-        self.db = DatabaseManager.get_instance()
 
     def tearDown(self) -> None:
-        DatabaseManager.reset_instance()
         Config._instance = None
         os.environ.pop("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", None)
-        self._temp_dir.cleanup()
 
-    def _add(self, *, code, analysis_date, direction_correct):
-        # 先落 AnalysisHistory 父行满足 BacktestResult.analysis_history_id（nullable=False FK）。
-        with self.db.get_session() as session:
-            history = AnalysisHistory(code=code, name=code, report_type="single")
-            session.add(history)
-            session.flush()
-            session.add(
-                BacktestResult(
-                    analysis_history_id=history.id,
-                    code=code,
-                    analysis_date=analysis_date,
-                    eval_status="completed",
-                    direction_correct=direction_correct,
-                    eval_window_days=10,
-                    engine_version="v1",
-                )
-            )
-            session.commit()
+    def _make_stat(self, *, sample, win_rate, ci_low, ci_high=0.80,
+                   baseline_win_rate=0.50, excess=None):
+        from unittest.mock import MagicMock
+        m = MagicMock()
+        m.sample = sample
+        m.win_rate = win_rate
+        m.ci_low = ci_low
+        m.ci_high = ci_high
+        m.baseline_win_rate = baseline_win_rate
+        m.excess = excess if excess is not None else (ci_low - baseline_win_rate)
+        return m
 
     def test_sample_at_threshold_sets_verified_true(self) -> None:
-        self._add(code="600519", analysis_date=date(2024, 1, 1), direction_correct=True)
-        self._add(code="600519", analysis_date=date(2024, 1, 2), direction_correct=True)
-        self._add(code="600519", analysis_date=date(2024, 1, 3), direction_correct=False)
-
-        fields = resolve_marker_hit_fields("rule_score", "600519")
-
-        self.assertEqual(fields["hit_sample"], 3)
-        self.assertTrue(fields["verified"])
-        self.assertAlmostEqual(fields["hit_rate"], round(2 / 3, 4))
+        # sample=3 >= min_sample=3, ci_low(0.55) > baseline(0.50) => verified=True
+        stat = self._make_stat(sample=3, win_rate=round(2/3, 4), ci_low=0.55)
+        with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+             patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+            Repo.return_value.get.return_value = stat
+            fields = resolve_marker_hit_fields("rule_score", "600519")
+            self.assertEqual(fields["hit_sample"], 3)
+            self.assertTrue(fields["verified"])
+            self.assertAlmostEqual(fields["hit_rate"], round(2/3, 4))
 
     def test_sample_below_threshold_not_verified(self) -> None:
-        self._add(code="600519", analysis_date=date(2024, 1, 1), direction_correct=True)
-        self._add(code="600519", analysis_date=date(2024, 1, 2), direction_correct=True)
-
-        fields = resolve_marker_hit_fields("rule_score", "600519")
-
-        self.assertEqual(fields["hit_sample"], 2)
-        self.assertFalse(fields["verified"])
+        # sample=2 < min_sample=3 => verified=False
+        stat = self._make_stat(sample=2, win_rate=1.0, ci_low=0.55)
+        with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+             patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+            Repo.return_value.get.return_value = stat
+            fields = resolve_marker_hit_fields("rule_score", "600519")
+            self.assertEqual(fields["hit_sample"], 2)
+            self.assertFalse(fields["verified"])
 
     def test_no_sample_returns_null_fields_not_verified(self) -> None:
-        fields = resolve_marker_hit_fields("rule_score", "000002")
-
-        self.assertIsNone(fields["hit_rate"])
-        self.assertIsNone(fields["hit_sample"])
-        self.assertFalse(fields["verified"])
+        with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+             patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+            Repo.return_value.get.return_value = None
+            fields = resolve_marker_hit_fields("rule_score", "000002")
+            self.assertIsNone(fields["hit_rate"])
+            self.assertIsNone(fields["hit_sample"])
+            self.assertFalse(fields["verified"])
 
 
 class DedupeSampleInflationTestCase(unittest.TestCase):
@@ -307,8 +298,21 @@ class DedupeSampleInflationTestCase(unittest.TestCase):
         self.assertEqual(result.hit_sample, 1)  # NOT 3
         self.assertAlmostEqual(result.hit_rate, 1.0)
 
-        fields = resolve_marker_hit_fields("rule_score", "BTCUSDT")
-        # min_sample=3，去重后仅 1 个独立样本 → 不应判 verified
+        # M3-A6：resolve_marker_hit_fields 现在读 signal_stats（not per-code BacktestResult）。
+        # 用 mock signal_stats 验证 min_sample 门限 (sample=1 < min_sample=3 → not verified)。
+        from unittest.mock import MagicMock, patch as _patch
+        stat = MagicMock()
+        stat.sample = 1
+        stat.win_rate = 1.0
+        stat.ci_low = 0.55
+        stat.ci_high = 0.80
+        stat.baseline_win_rate = 0.50
+        stat.excess = 0.05
+        with _patch("src.services.signal_hit_rate.get_market_for_stock", return_value="crypto"), \
+             _patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+            Repo.return_value.get.return_value = stat
+            fields = resolve_marker_hit_fields("rule_score", "BTCUSDT")
+        # min_sample=3，stat.sample=1 → 不应判 verified
         self.assertEqual(fields["hit_sample"], 1)
         self.assertFalse(fields["verified"])
 
@@ -350,3 +354,47 @@ class DedupeSampleInflationTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# M3-A6：resolve_marker_hit_fields 改读 signal_stats by (signal_type, market)
+# ---------------------------------------------------------------------------
+
+from unittest.mock import patch, MagicMock  # noqa: E402
+
+
+def _stat(**kw):
+    m = MagicMock()
+    d = dict(sample=20, win_rate=0.68, ci_low=0.55, ci_high=0.80,
+             baseline_win_rate=0.50, excess=0.05)
+    d.update(kw)
+    for k, v in d.items():
+        setattr(m, k, v)
+    return m
+
+
+def test_resolve_reads_signal_stats_by_market_and_sets_verified_on_excess():
+    with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+         patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+        Repo.return_value.get.return_value = _stat()
+        f = resolve_marker_hit_fields("volume_breakout", "600519")
+        assert f["hit_rate"] == 0.68 and f["hit_sample"] == 20
+        assert f["ci_low"] == 0.55 and f["baseline_excess"] == 0.05
+        assert f["verified"] is True   # 样本足 且 ci_low(0.55) > baseline(0.50)
+        Repo.return_value.get.assert_called_with("volume_breakout", "cn")
+
+
+def test_resolve_not_verified_when_ci_low_below_baseline():
+    with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+         patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+        Repo.return_value.get.return_value = _stat(ci_low=0.45, baseline_win_rate=0.50, excess=-0.05)
+        assert resolve_marker_hit_fields("x", "600519")["verified"] is False  # 无超额
+
+
+def test_resolve_missing_bucket_is_sample_insufficient():
+    with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+         patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+        Repo.return_value.get.return_value = None
+        f = resolve_marker_hit_fields("x", "600519")
+        assert f == {"hit_rate": None, "hit_sample": None, "verified": False,
+                     "ci_low": None, "ci_high": None, "baseline_excess": None}
