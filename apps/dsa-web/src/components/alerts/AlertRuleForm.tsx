@@ -92,6 +92,8 @@ const MAX_REQUESTED_DAYS = 365;
 interface AlertRuleFormProps {
   onSubmit: (payload: AlertRuleCreateRequest) => Promise<boolean | void> | boolean | void;
   isSubmitting?: boolean;
+  /** 预填并锁定单标的；设置后目标范围强制为 single_symbol，不可修改。默认 undefined，行为与原版完全一致。 */
+  lockedTarget?: string;
 }
 
 function isPortfolioScope(scope: AlertTargetScope): boolean {
@@ -108,10 +110,11 @@ function optionsForScope(scope: AlertTargetScope) {
   return scope === 'portfolio_account' ? PORTFOLIO_ALERT_TYPE_OPTIONS : SYMBOL_ALERT_TYPE_OPTIONS;
 }
 
-export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmitting = false }) => {
+export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmitting = false, lockedTarget }) => {
+  const isLocked = !!lockedTarget;
   const [name, setName] = useState('');
-  const [targetScope, setTargetScope] = useState<AlertTargetScope>('single_symbol');
-  const [target, setTarget] = useState('');
+  const [targetScope, setTargetScope] = useState<AlertTargetScope>(isLocked ? 'single_symbol' : 'single_symbol');
+  const [target, setTarget] = useState(isLocked ? lockedTarget : '');
   const [portfolioTarget, setPortfolioTarget] = useState('all');
   const [marketRegion, setMarketRegion] = useState<MarketRegion>('cn');
   const [accounts, setAccounts] = useState<PortfolioAccountItem[]>([]);
@@ -352,20 +355,29 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    let resolvedTarget = target.trim();
-    if (targetScope === 'single_symbol') {
-      const targetValidation = validateStockCode(target);
-      if (!targetValidation.valid) {
-        setFormError(targetValidation.message ?? '股票代码格式不正确');
-        return;
-      }
-      resolvedTarget = targetValidation.normalized;
-    } else if (targetScope === 'watchlist') {
-      resolvedTarget = 'default';
-    } else if (targetScope === 'market') {
-      resolvedTarget = marketRegion;
+    let resolvedTarget: string;
+    let resolvedScope: AlertTargetScope;
+
+    if (isLocked) {
+      resolvedTarget = lockedTarget;
+      resolvedScope = 'single_symbol';
     } else {
-      resolvedTarget = portfolioTarget;
+      resolvedTarget = target.trim();
+      resolvedScope = targetScope;
+      if (targetScope === 'single_symbol') {
+        const targetValidation = validateStockCode(target);
+        if (!targetValidation.valid) {
+          setFormError(targetValidation.message ?? '股票代码格式不正确');
+          return;
+        }
+        resolvedTarget = targetValidation.normalized;
+      } else if (targetScope === 'watchlist') {
+        resolvedTarget = 'default';
+      } else if (targetScope === 'market') {
+        resolvedTarget = marketRegion;
+      } else {
+        resolvedTarget = portfolioTarget;
+      }
     }
 
     const parameters = buildParameters();
@@ -374,7 +386,7 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
     setFormError(null);
     const submitted = await onSubmit({
       name: name.trim() || undefined,
-      targetScope,
+      targetScope: resolvedScope,
       target: resolvedTarget,
       alertType,
       parameters,
@@ -404,6 +416,16 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
   };
 
   const renderTargetControl = () => {
+    if (isLocked) {
+      return (
+        <div className="flex flex-col">
+          <span className="mb-2 text-sm font-medium text-foreground">标的</span>
+          <div className="flex h-11 items-center rounded-xl border bg-transparent px-4 text-sm text-foreground opacity-60">
+            {lockedTarget}
+          </div>
+        </div>
+      );
+    }
     if (targetScope === 'single_symbol') {
       return (
         <Input
@@ -461,13 +483,15 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
             placeholder="可选，例如 茅台价格突破"
             disabled={isSubmitting}
           />
-          <Select
-            label="目标范围"
-            value={targetScope}
-            options={TARGET_SCOPE_OPTIONS}
-            disabled={isSubmitting}
-            onChange={handleScopeChange}
-          />
+          {!isLocked && (
+            <Select
+              label="目标范围"
+              value={targetScope}
+              options={TARGET_SCOPE_OPTIONS}
+              disabled={isSubmitting}
+              onChange={handleScopeChange}
+            />
+          )}
           {renderTargetControl()}
           <Select
             label="规则类型"

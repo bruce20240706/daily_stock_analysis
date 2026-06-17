@@ -267,4 +267,38 @@ describe('AlertRuleForm', () => {
     expect(screen.getByLabelText('标的代码')).toHaveValue('aapl');
     expect(screen.getByLabelText('价格阈值')).toHaveValue(200);
   });
+
+  describe('lockedTarget prop', () => {
+    it('prefills and locks target when lockedTarget is set', async () => {
+      render(<AlertRuleForm onSubmit={onSubmit} lockedTarget="600519" />);
+
+      // lockedTarget=600519, default alertType=price_cross requires price > 0; fill it
+      fireEvent.change(screen.getByLabelText('价格阈值'), { target: { value: '1800' } });
+      fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
+
+      await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+      const payload = onSubmit.mock.calls[0][0];
+      expect(payload.target).toBe('600519');
+      expect(payload.targetScope).toBe('single_symbol');
+    });
+
+    it('hides scope selector and shows read-only target display when lockedTarget is set', () => {
+      render(<AlertRuleForm onSubmit={onSubmit} lockedTarget="600519" />);
+
+      // scope selector should not be visible
+      expect(screen.queryByLabelText('目标范围')).not.toBeInTheDocument();
+      // read-only label and value are shown (may be in separate elements)
+      expect(screen.getByText('标的')).toBeInTheDocument();
+      expect(screen.getByText('600519')).toBeInTheDocument();
+    });
+
+    it('does not render scope selector or target input when lockedTarget is absent (default path unchanged)', () => {
+      render(<AlertRuleForm onSubmit={onSubmit} />);
+
+      // scope selector should be visible
+      expect(screen.getByLabelText('目标范围')).toBeInTheDocument();
+      // no locked target display
+      expect(screen.queryByText(/标的[：:]/)).not.toBeInTheDocument();
+    });
+  });
 });
