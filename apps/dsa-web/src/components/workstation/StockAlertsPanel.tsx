@@ -1,5 +1,5 @@
 // apps/dsa-web/src/components/workstation/StockAlertsPanel.tsx
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { Link } from 'react-router-dom';
 import { alertsApi } from '../../api/alerts';
@@ -13,15 +13,16 @@ export const StockAlertsPanel: React.FC<{ code: string }> = ({ code }) => {
   const [created, setCreated] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const reqIdRef = useRef(0);
 
   const load = useCallback(async () => {
+    const myReq = (reqIdRef.current += 1);
     setLoadError(false);
     try {
       const r = await alertsApi.listRules({ target: code, targetScope: 'single_symbol' });
-      setRules(r.items);
+      if (reqIdRef.current === myReq) setRules(r.items);
     } catch {
-      setLoadError(true);
-      setRules([]);
+      if (reqIdRef.current === myReq) { setLoadError(true); setRules([]); }
     }
   }, [code]);
 

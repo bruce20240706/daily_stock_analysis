@@ -41,4 +41,10 @@ describe('StockAlertsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /创建/ }));
     expect(await screen.findByText('创建告警失败，请重试')).toBeInTheDocument();
   });
+
+  it('shows 告警规则加载失败 warning when listRules rejects', async () => {
+    listRules.mockRejectedValueOnce(new Error('boom'));
+    wrap(<StockAlertsPanel code="600519" />);
+    expect(await screen.findByText('告警规则加载失败')).toBeInTheDocument();
+  });
 });
