@@ -624,36 +624,114 @@ def _mfi(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, w
     return result
 
 
+_DIV_CMF_WINDOW: int = 14   # CMF/MFI rolling 窗口（背离检测专用，与 VPSConfig 解耦）
+_DIV_MFI_WINDOW: int = 14
+
+
+def _divergence_strength_grade(sources_diverging: int, rel_divs: list[float]) -> str:
+    """根据共振源数与平均相对背离幅度映射强度档（weak / medium / strong）。
+
+    rel_divs: 每个背离源的相对背离量（均已归一到 [0, ∞)，越大越背离）。
+    规则：
+      - k == 3 且平均幅度 > 0.15 → strong
+      - k >= 2 且平均幅度 > 0.05 → medium
+      - 其余                      → weak
+    """
+    avg = sum(rel_divs) / len(rel_divs) if rel_divs else 0.0
+    if sources_diverging >= 3 and avg > 0.15:
+        return "strong"
+    if sources_diverging >= 2 and avg > 0.05:
+        return "medium"
+    return "weak"
+
+
 def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
-    """OBV 顶底背离检测：仅对已确认 swing pivot 对比较，无未来函数。"""
+    """多源量价背离检测（OBV + CMF + MFI）：仅对已确认 swing pivot 对比较，无未来函数。
+
+    共振规则（emit-low 单源弱提示）：
+      k == 3 → confidence="high"
+      k == 2 → confidence="medium"
+      k == 1 → confidence="low"（弱提示，不抑制）
+      k == 0 → 不出 marker
+    signal_type 保持 obv_top_divergence / obv_bottom_divergence（兼容 API / 看板契约）。
+    reason 含强度档（weak/medium/strong），由背离幅度 × 源数映射。
+    """
     close = prim["close"].astype(float).reset_index(drop=True)
-    obv_series = _obv(close, prim["volume"].astype(float).reset_index(drop=True))
+    vol = prim["volume"].astype(float).reset_index(drop=True)
+    high = prim["high"].astype(float)
+    low = prim["low"].astype(float)
+
+    obv_series = _obv(close, vol)
+    cmf_series = _cmf(high, low, close, vol, _DIV_CMF_WINDOW)
+    mfi_series = _mfi(high, low, close, vol, _DIV_MFI_WINDOW)
+
     pivots = _attach_pivot_timestamps(find_swing_pivots(close, config.swing_k), prim)
     out: list[VPSignal] = []
-    for kind, sig_type, cmp_price, cmp_obv, direction in (
+
+    for kind, sig_type, cmp_price, cmp_ind, direction in (
         ("high", "obv_top_divergence",    lambda a, b: a > b, lambda a, b: a <= b, "bearish"),
         ("low",  "obv_bottom_divergence", lambda a, b: a < b, lambda a, b: a >= b, "bullish"),
     ):
         same = [p for p in pivots if p.kind == kind]
         for prev, curr in zip(same, same[1:]):
-            price_extreme = cmp_price(curr.price, prev.price)
-            obv_lagging = cmp_obv(float(obv_series.iloc[curr.index]), float(obv_series.iloc[prev.index]))
-            if price_extreme and obv_lagging:
-                # x 锚定确认 bar(curr.index+swing_k，背离可知日)，y 锚定枢轴极值——消除 k 根可视前视。
-                conf_idx = curr.index + config.swing_k
-                out.append(VPSignal(
-                    timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[conf_idx]),
-                    price=curr.price,
-                    anchor=kind,
-                    direction=direction,
-                    signal_type=sig_type,
-                    confidence="medium",
-                    is_daily_approx=True,
-                    is_anomalous=False,
-                    reason="价格创新极值但 OBV 未同步（形态背离）",
-                    threshold=float(obv_series.iloc[prev.index]),
-                    observed_value=float(obv_series.iloc[curr.index]),
-                ))
+            if not cmp_price(curr.price, prev.price):
+                continue
+
+            # 各源在枢轴处的值（NaN 安全：NaN 不计入共振）
+            obv_prev = float(obv_series.iloc[prev.index])
+            obv_curr = float(obv_series.iloc[curr.index])
+            cmf_prev = float(cmf_series.iloc[prev.index])
+            cmf_curr = float(cmf_series.iloc[curr.index])
+            mfi_prev = float(mfi_series.iloc[prev.index])
+            mfi_curr = float(mfi_series.iloc[curr.index])
+
+            obv_div  = cmp_ind(obv_curr, obv_prev) and not math.isnan(obv_curr) and not math.isnan(obv_prev)
+            cmf_div  = cmp_ind(cmf_curr, cmf_prev) and not math.isnan(cmf_curr) and not math.isnan(cmf_prev)
+            mfi_div  = cmp_ind(mfi_curr, mfi_prev) and not math.isnan(mfi_curr) and not math.isnan(mfi_prev)
+
+            k = sum([obv_div, cmf_div, mfi_div])
+            if k == 0:
+                continue
+
+            # 置信度：源数越多越高
+            if k >= 3:
+                confidence = "high"
+            elif k >= 2:
+                confidence = "medium"
+            else:
+                confidence = "low"   # 单源弱提示（emit-low 规则）
+
+            # 强度档：按相对背离幅度 × 源数映射
+            rel_divs: list[float] = []
+            denom_obv = abs(obv_prev) if obv_prev != 0 else 1.0
+            denom_cmf = abs(cmf_prev) if cmf_prev != 0 else 1.0
+            denom_mfi = abs(mfi_prev) if mfi_prev != 0 else 1.0
+            if obv_div:
+                rel_divs.append(abs(obv_curr - obv_prev) / denom_obv)
+            if cmf_div:
+                rel_divs.append(abs(cmf_curr - cmf_prev) / denom_cmf)
+            if mfi_div:
+                rel_divs.append(abs(mfi_curr - mfi_prev) / denom_mfi)
+            grade = _divergence_strength_grade(k, rel_divs)
+
+            sources_desc = "+".join(
+                s for s, d in [("OBV", obv_div), ("CMF", cmf_div), ("MFI", mfi_div)] if d
+            )
+            # x 锚定确认 bar(curr.index+swing_k，背离可知日)，y 锚定枢轴极值——消除 k 根可视前视。
+            conf_idx = curr.index + config.swing_k
+            out.append(VPSignal(
+                timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[conf_idx]),
+                price=curr.price,
+                anchor=kind,
+                direction=direction,
+                signal_type=sig_type,
+                confidence=confidence,
+                is_daily_approx=True,
+                is_anomalous=False,
+                reason=f"价格创新极值但量能指标未同步（{sources_desc} 背离，强度:{grade}）",
+                threshold=float(obv_prev),
+                observed_value=float(obv_curr),
+            ))
     return out
 
 
