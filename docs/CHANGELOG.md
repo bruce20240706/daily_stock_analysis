@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 信号引擎新增可信度层(M3)：对自选池信号做规则级三重门回测(目标/止损/到期)，按「信号类型×市场」给出 Wilson 置信区间胜率与"相对全体bar入场基准"的超额，verified 升级为"样本足且置信下界超基准"；命中率回填改读预计算 signal_stats；新增 SIGNAL_BACKTEST_* 配置与 --signal-backtest 批作业
+- [新功能] 量价引擎新增 CMF/MFI 量能指标、OBV+CMF+MFI 多源背离共振与强度分级、量能形态分级，crypto 量价参数差异化(VPS_CRYPTO_*)
+- [改进] 钻取面板/工作台信号tab/信号看板行展示可信度(置信区间/样本/基准超额/已验证)，并抽出共享格式化口径
 - [新功能] 新增 K 线价位反算器（derive_price_levels），基于 MA20/近20日低/ATR 派生入场/止损/目标价，经 data_perspective.price_position 接入现有文案护栏，并填充 /signals 的 price_lines（各字段可空）
 - [新功能] Web 个股栏新增 K 线抽屉入口：渲染日线蜡烛 + 成交量副图，支持十字光标、缩放与红涨绿跌/绿涨红跌切换（klinecharts 懒加载，仅在打开抽屉时引入，不影响首屏）。
 - [改进] `GET /api/v1/stocks/{code}/history` 端点 `days` 默认由 30 放宽至 120（上限保持 365），为 K 线抽屉提供更长回看窗口；alert 取数与 data_tools 的 365 上限常量未改动。
