@@ -5,7 +5,7 @@ import { stocksApi } from '../../api/stocks';
 import type { SignalsResponse } from '../../types/kline';
 import { Loading } from '../common';
 import { cn } from '../../utils/cn';
-import { formatHitRate } from '../../utils/credibility';
+import { formatCi, formatExcess, formatHitRate, verifiedLabel } from '../../utils/credibility';
 
 const consistencyLabel: Record<string, string> = {
   consistent: '一致', divergent: '分歧', conflict: '冲突', unknown: '未知', stale: '过期',
@@ -44,7 +44,22 @@ export const StockSignalsPanel: React.FC<{ code: string }> = ({ code }) => {
               <td className="py-1 text-left">{m.signalType}</td>
               <td className={cn(m.direction === 'bullish' && 'text-danger', m.direction === 'bearish' && 'text-success')}>{dirLabel[m.direction]}</td>
               <td className="text-secondary-text">{m.source === 'llm' ? 'LLM' : '规则'}</td>
-              <td className="text-secondary-text">{formatHitRate(m)}</td>
+              <td className="text-secondary-text">
+                {formatHitRate(m)}
+                {formatCi(m) !== null && (
+                  <span data-testid="signals-ci" className="ml-1 text-secondary-text">{formatCi(m)}</span>
+                )}
+                {formatExcess(m.baselineExcess) !== null && (
+                  <span
+                    data-testid="signals-excess"
+                    className={cn('ml-1', m.baselineExcess! > 0 ? 'text-success' : 'text-secondary-text')}
+                  >{formatExcess(m.baselineExcess)}</span>
+                )}
+                <span
+                  data-testid="signals-verified"
+                  className={cn('ml-1', m.verified ? 'text-success' : 'text-secondary-text')}
+                >{verifiedLabel(m.verified)}</span>
+              </td>
             </tr>
           ))}
           {data.markers.length === 0 && <tr><td colSpan={4} className="py-2 text-secondary-text">暂无量价信号</td></tr>}

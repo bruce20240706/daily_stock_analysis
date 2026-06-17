@@ -2,7 +2,7 @@ import type React from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { BoardEntry } from '../../types/kline';
 import { cn } from '../../utils/cn';
-import { formatHitRate } from '../../utils/credibility';
+import { formatCi, formatExcess, formatHitRate, verifiedLabel } from '../../utils/credibility';
 
 const dirLabel: Record<string, string> = { bullish: '看多', bearish: '看空', neutral: '中性' };
 const consistencyLabel: Record<BoardEntry['consistency'], string> = {
@@ -46,7 +46,16 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
               <td className="text-secondary-text">{fmt(e.priceLines.entry)}/{fmt(e.priceLines.stop)}/{fmt(e.priceLines.target)}</td>
               <td>
                 <span className="text-secondary-text">{formatHitRate(e)}</span>{' '}
-                <span className={cn(e.verified ? 'text-success' : 'text-secondary-text')}>{e.verified ? '已验证' : '未验证'}</span>
+                {formatCi(e) !== null && (
+                  <span data-testid="board-ci" className="mr-1 text-secondary-text">{formatCi(e)}</span>
+                )}
+                {formatExcess(e.baselineExcess) !== null && (
+                  <span
+                    data-testid="board-excess"
+                    className={cn('mr-1', e.baselineExcess! > 0 ? 'text-success' : 'text-secondary-text')}
+                  >{formatExcess(e.baselineExcess)}</span>
+                )}
+                <span className={cn(e.verified ? 'text-success' : 'text-secondary-text')}>{verifiedLabel(e.verified)}</span>
               </td>
               <td>
                 <button

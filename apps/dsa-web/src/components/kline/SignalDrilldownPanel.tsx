@@ -1,7 +1,7 @@
 import type React from 'react';
 import type { SignalMarker } from '../../types/kline';
 import { cn } from '../../utils/cn';
-import { formatHitRate } from '../../utils/credibility';
+import { formatCi, formatExcess, formatHitRate, verifiedLabel } from '../../utils/credibility';
 
 interface SignalDrilldownPanelProps {
   markers: SignalMarker[];
@@ -54,15 +54,28 @@ const MarkerCard: React.FC<{ marker: SignalMarker }> = ({ marker }) => {
         </div>
       )}
 
-      <div className="mt-3 flex items-center justify-between text-xs">
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         <span data-testid="drilldown-hit-rate" className="text-secondary-text">
           {formatHitRate(marker)}
         </span>
+        {formatCi(marker) !== null && (
+          <span data-testid="drilldown-ci" className="text-secondary-text">
+            {formatCi(marker)}
+          </span>
+        )}
+        {formatExcess(marker.baselineExcess) !== null && (
+          <span
+            data-testid="drilldown-excess"
+            className={marker.baselineExcess! > 0 ? 'text-success' : 'text-secondary-text'}
+          >
+            {formatExcess(marker.baselineExcess)}
+          </span>
+        )}
         <span
           data-testid="drilldown-verified"
           className={cn(marker.verified ? 'text-success' : 'text-secondary-text')}
         >
-          {marker.verified ? '已验证' : '未验证'}
+          {verifiedLabel(marker.verified)}
         </span>
       </div>
     </div>

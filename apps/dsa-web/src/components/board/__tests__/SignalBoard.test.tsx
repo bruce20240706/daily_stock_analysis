@@ -17,7 +17,9 @@ const mk = (over: Partial<BoardEntry>): BoardEntry => ({
   code: 'X', name: 'X名', market: 'CN', actionGroup: 'buy', ruleDirection: 'bullish',
   llmDirection: 'bullish', consistency: 'consistent', keySignals: ['volume_breakout'],
   priceLines: { entry: 1700, stop: 1620, target: 1850 }, latestClose: 1660,
-  hitRate: 0.62, hitSample: 18, verified: true, status: 'ok', degradedReason: null, ...over,
+  hitRate: 0.62, hitSample: 18, verified: true,
+  ciLow: null, ciHigh: null, baselineExcess: null,
+  status: 'ok', degradedReason: null, ...over,
 });
 
 describe('SignalBoard', () => {
@@ -93,6 +95,26 @@ describe('SignalBoard', () => {
     fireEvent.click(screen.getByRole('button', { name: /工作台/ }));
     expect(mockNavigate).toHaveBeenCalledWith('/stock/600519');
     expect(onRowClick).not.toHaveBeenCalled();
+  });
+
+  it('shows CI band and excess in the board hit cell', () => {
+    render(
+      <MemoryRouter>
+        <SignalBoard entries={[mk({ code: '600519', name: '贵州茅台', ciLow: 0.55, ciHigh: 0.8, baselineExcess: 0.05 })]} onRowClick={vi.fn()} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('board-ci')).toHaveTextContent('[55%–80%]');
+    expect(screen.getByTestId('board-excess')).toHaveTextContent('超额 +5pp');
+  });
+
+  it('omits CI and excess spans in the board when values are null', () => {
+    render(
+      <MemoryRouter>
+        <SignalBoard entries={[mk({ code: '600519', name: '贵州茅台' })]} onRowClick={vi.fn()} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('board-ci')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('board-excess')).not.toBeInTheDocument();
   });
 
   it('encodes crypto code (containing /) in workstation navigate call', () => {
