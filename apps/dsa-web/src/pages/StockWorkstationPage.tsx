@@ -1,5 +1,5 @@
 import type React from 'react';
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { historyApi } from '../api/history';
 import { AppPage, InlineAlert, Loading } from '../components/common';
@@ -31,7 +31,11 @@ const StockWorkstationPage: React.FC = () => {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
 
+  // 记录已为哪个 code 完成过自动取报告，避免空记录死循环
+  const reportLoadedForRef = useRef<string | null>(null);
+
   const loadReport = useCallback(async (recordId?: number) => {
+    reportLoadedForRef.current = code;
     setReportLoading(true);
     setReportError(null);
     try {
@@ -52,10 +56,10 @@ const StockWorkstationPage: React.FC = () => {
     }
   }, [code]);
 
-  // 切到报告 tab 且尚未取过 → 取最新
+  // 切到报告 tab 且当前 code 尚未取过 → 取最新（每个 code 最多触发一次）
   useEffect(() => {
-    if (tab === 'report' && !report && !reportLoading && !reportError) void loadReport();
-  }, [tab, report, reportLoading, reportError, loadReport]);
+    if (tab === 'report' && reportLoadedForRef.current !== code) void loadReport();
+  }, [tab, code, loadReport]);
 
   const onSelectHistory = useCallback((recordId: number) => {
     setTab('report');

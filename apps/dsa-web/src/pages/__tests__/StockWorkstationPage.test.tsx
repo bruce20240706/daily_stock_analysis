@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../components/kline/KLineChartPanel', () => ({ KLineChartPanel: () => <div data-testid="chart" /> }));
 vi.mock('../../components/workstation/StockWorkstationHeader', () => ({ StockWorkstationHeader: (p: { code: string }) => <div data-testid="ws-header">{p.code}</div> }));
@@ -37,6 +37,11 @@ describe('StockWorkstationPage skeleton', () => {
 });
 
 describe('StockWorkstationPage tabs', () => {
+  beforeEach(() => {
+    getList.mockClear();
+    getDetail.mockClear();
+  });
+
   it('shows signals tab by default and switches to report (lazy 2-hop fetch)', async () => {
     getList.mockResolvedValueOnce({ total: 1, page: 1, limit: 1, items: [{ id: 7 }] });
     getDetail.mockResolvedValueOnce({ meta: { id: 7, stockCode: '600519', stockName: '贵州茅台', queryId: 'q', reportType: 'detailed', createdAt: 'x' }, summary: {} });
@@ -45,6 +50,17 @@ describe('StockWorkstationPage tabs', () => {
     fireEvent.click(screen.getByRole('tab', { name: /报告/ }));
     expect(await screen.findByTestId('report')).toHaveTextContent('7');
     expect(getList).toHaveBeenCalledWith({ stockCode: '600519', limit: 1 });
+    expect(getDetail).toHaveBeenCalledWith(7);
+  });
+
+  it('shows empty state when no analysis records exist, without infinite re-fetch', async () => {
+    getList.mockResolvedValueOnce({ total: 0, page: 1, limit: 1, items: [] });
+    renderAt('/stock/600519');
+    fireEvent.click(screen.getByRole('tab', { name: /报告/ }));
+    expect(await screen.findByTestId('report-empty')).toBeInTheDocument();
+    // loop guard: getList called exactly once, getDetail never called
+    expect(getList).toHaveBeenCalledTimes(1);
+    expect(getDetail).not.toHaveBeenCalled();
   });
 
   it('loading a history item opens its report', async () => {
