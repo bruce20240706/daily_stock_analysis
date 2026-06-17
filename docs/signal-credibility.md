@@ -220,6 +220,9 @@ M3-A6 改源后，`resolve_marker_hit_fields(signal_type, code)` 改读 `signal_
 - **换手率与 A 股资金面**：当前三重门仅用 OHLCV 推导价位，未接入换手率、主力资金、北向资金等 A 股流动性指标，留待 M4 补充。
 - **盘中/分钟级未支持**：当前仅支持日线（`interval='1d'`），盘中/分钟级回测留待后续迭代。
 - **`expired` 不计入胜率**：到期未触门的样本被排除在 `sample` 分母外，胜率是条件性胜率（非全样本命中率），需理解定义差异。
+- **horizon 读取语义与旧桶残留**：`resolve_marker_hit_fields` 按当前 `SIGNAL_BACKTEST_HORIZON_BARS` 配置的 `horizon` 精确读取 `signal_stats` 桶；变更 horizon 配置后，旧 horizon 的桶行不会被自动删除而是被忽略（按精确 horizon 读取，不会误用），属无害累积，如需清理可重跑批作业或手动清桶。
+- **小样本展示口径**：`sample < SIGNAL_HIT_VERIFIED_MIN_SAMPLE`（缺省回落 `BACKTEST_EVAL_WINDOW_DAYS`）时回填全 null（前端显示「样本不足」），不展示不可信的胜率/CI/超额（对齐本文 §5 与 spec §4.1）。
+- **钻取面板命中率行**：当前为「X% · n」紧凑串（与工作台/看板共享 `formatHitRate` 口径统一），未带「命中率」前缀标签；属可读性取舍，不影响数据正确性。
 
 ---
 
