@@ -484,19 +484,28 @@ def _price_bucket(pct_chg, config: VPSConfig) -> str | None:
 
 
 def classify_volume_pattern(rel_vol: float, pct_chg: float, atr_norm: float, config: VPSConfig) -> str:
-    """量能形态分级：基于相对量比（rel_vol）和涨跌幅（pct_chg）判定量能形态档位。
+    """量能形态分级：基于相对量比（rel_vol）、涨跌幅（pct_chg）和 ATR 归一化值（atr_norm）判定量能形态档位。
 
     返回值（穷尽互斥）：
     - 'climax_volume'    天量（rel_vol >= vol_high）且价格上涨
     - 'dry_up'           地量（rel_vol < vol_low），量能极度萎缩
-    - 'shrink_pullback'  缩量回踩（rel_vol ∈ [vol_low, vol_shrink) 且 pct_chg < -eps）
+    - 'shrink_pullback'  缩量回踩（rel_vol ∈ [vol_low, vol_shrink) 且 pct_chg < -eps
+                         且 abs(pct_chg) <= _SHRINK_PULLBACK_ATR_K * atr_norm）
     - 'mild_expand'      温和放量（rel_vol ∈ [vol_up, vol_high) 且 pct_chg > eps）
-    - 'normal'           常规（其余所有组合）
+    - 'normal'           常规（其余所有组合，含缩量但跌幅超出 ATR 边界的剧烈下跌）
+
+    ATR 边界说明（shrink_pullback 核心守卫）：
+    - _SHRINK_PULLBACK_ATR_K = 1.5：shrink_pullback 要求 abs(pct_chg) <= 1.5 * atr_norm。
+      atr_norm = ATR / close，无量纲化后约等于该资产的"一个 ATR 当量的百分比跌幅"。
+      若跌幅超过 1.5 倍 ATR 当量，表明是一根相对剧烈的下跌（非温和缩量回踩），
+      此时 fall through 到 'normal'——atr_norm 由此成为决定性参数，而非仅供扩展。
+    - k=1.5 选择依据：Wilder ATR 衡量"正常波动幅度"；1.5 倍是 1σ 波动的合理上界，
+      既不会把正常日常小幅缩量下跌误排除，也能过滤暴跌误标缩量回踩。
 
     参数：
     - rel_vol:  当根成交量 / vol_ma，量比
-    - pct_chg:  涨跌幅（小数，如 0.02 = +2%）
-    - atr_norm: ATR 归一化值（当前暂作上下文保留参数，未来可用于强度分级扩展）
+    - pct_chg:  涨跌幅（小数，如 -0.02 = -2%）
+    - atr_norm: ATR / close（无量纲化 ATR，与 pct_chg 同量纲可直接比较）
     - config:   VPSConfig，阈值全部从此读取，无魔法数字
 
     阈值来源（全部源自 VPSConfig 字段）：
@@ -506,6 +515,9 @@ def classify_volume_pattern(rel_vol: float, pct_chg: float, atr_norm: float, con
     - vol_high   (default 1.5)  : 放量下界 / 天量下界
     - eps        (default 0.004): 价格平坦判定半带宽
     """
+    # ATR 守卫系数：shrink_pullback 要求 abs(pct_chg) <= k * atr_norm
+    _SHRINK_PULLBACK_ATR_K = 1.5
+
     vbucket = _volume_bucket(rel_vol, config)
     pbucket = _price_bucket(pct_chg, config)
 
@@ -517,9 +529,12 @@ def classify_volume_pattern(rel_vol: float, pct_chg: float, atr_norm: float, con
     if vbucket == "low":
         return "dry_up"
 
-    # 缩量回踩（shrink vol + 下跌）
+    # 缩量回踩（shrink vol + 下跌）且跌幅未超出 ATR 边界
+    # abs(pct_chg) > k * atr_norm 表示剧烈下跌，fall through 到 normal
     if vbucket == "shrink" and pbucket == "down":
-        return "shrink_pullback"
+        if atr_norm > 0 and abs(pct_chg) <= _SHRINK_PULLBACK_ATR_K * atr_norm:
+            return "shrink_pullback"
+        # atr_norm <= 0（不可用）时保守地允许通过（向后兼容），跌幅过大则降为 normal
 
     # 温和放量（up vol + 上涨）
     if vbucket == "up" and pbucket == "up":
@@ -786,12 +801,20 @@ def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSign
 
 
 def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
-    """放量突破检测：close >= 过去 N 日 high 最大值（shift(1) 不含当日）且 rel_vol >= 阈值。"""
+    """放量突破检测：close >= 过去 N 日 high 最大值（shift(1) 不含当日）且 rel_vol >= 阈值。
+
+    ATR 预计算优化：atr(prim, config.atr_period) 在循环外统一计算一次（O(n)），
+    循环内通过 atr_series.iloc[i] 取当 bar 的 ATR 值。
+    Wilder ATR 的递推定义保证：atr_series.iloc[i] == atr(prim.iloc[:i+1], period).iloc[-1]，
+    两者语义完全等价，与原逐次切片计算结果一致。
+    """
     high = prim["high"].astype(float)
     close = prim["close"].astype(float)
     # shift(1): prior max excludes current bar — no self-reference
     prior_max = high.rolling(config.breakout_window).max().shift(1)
     rel_vol = prim["rel_vol"]
+    # 预计算完整 ATR 序列，避免循环内 O(n²) 逐次切片重算
+    atr_series = atr(prim, config.atr_period)
     out: list[VPSignal] = []
     for i in range(len(prim)):
         pm = prior_max.iloc[i]
@@ -800,8 +823,7 @@ def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
             continue
         if close.iloc[i] >= pm and rv >= config.breakout_rel_vol:
             pct = float(prim["pct_chg"].iloc[i]) if not pd.isna(prim["pct_chg"].iloc[i]) else 0.0
-            atr_series_local = atr(prim.iloc[:i + 1], config.atr_period)
-            atr_val = _last_finite(atr_series_local)
+            atr_val = _last_finite(atr_series.iloc[:i + 1])
             atr_norm = (atr_val / float(close.iloc[i])) if (atr_val is not None and float(close.iloc[i]) > 0) else 0.0
             vol_pattern = classify_volume_pattern(float(rv), pct, atr_norm, config)
             out.append(VPSignal(

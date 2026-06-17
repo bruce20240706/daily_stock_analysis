@@ -995,13 +995,42 @@ def test_volume_pattern_classification_boundaries():
     - climax_volume : rel_vol >= vol_high(1.5)，价格上涨(pct_chg > eps=0.004)
     - dry_up        : rel_vol <  vol_low(0.7)，量能极度萎缩
     - shrink_pullback: rel_vol ∈ [vol_low(0.7), vol_shrink(0.8))，pct_chg < -eps
+                       且 abs(pct_chg) <= 1.5 * atr_norm（ATR 边界守卫）
     - mild_expand   : rel_vol ∈ [vol_up(1.2), vol_high(1.5))，pct_chg > eps
     - normal        : rel_vol ∈ [vol_shrink(0.8), vol_up(1.2))，pct_chg ≈ 0（flat）
+
+    shrink_pullback ATR 守卫（k=1.5）：
+    - atr_norm=0.5 时：abs(-0.02)=0.02 <= 1.5*0.5=0.75 → shrink_pullback（通过）
+    - atr_norm=0.01 时：abs(-0.02)=0.02 > 1.5*0.01=0.015 → 落入 normal（atr_norm 决定性）
     """
     from src.services.volume_price_signals import classify_volume_pattern, VPSConfig
     c = VPSConfig()
     assert classify_volume_pattern(3.0, 0.05, 1.0, c) == "climax_volume"    # 天量+上涨
     assert classify_volume_pattern(0.5, -0.01, 0.3, c) == "dry_up"          # 地量
-    assert classify_volume_pattern(0.7, -0.02, 0.5, c) == "shrink_pullback" # 缩量回踩
+    assert classify_volume_pattern(0.7, -0.02, 0.5, c) == "shrink_pullback" # 缩量回踩（ATR边界内）
     assert classify_volume_pattern(1.3, 0.02, 0.6, c) == "mild_expand"      # 温和放量
     assert classify_volume_pattern(1.0, 0.0, 0.5, c) == "normal"            # 常规
+
+
+def test_shrink_pullback_atr_norm_is_decisive():
+    """atr_norm 对 shrink_pullback 判定具有决定性：
+    相同的 rel_vol（缩量档）和 pct_chg（下跌），仅 atr_norm 不同时结果必须分叉。
+
+    场景：rel_vol=0.75（∈ [vol_low(0.7), vol_shrink(0.8))），pct_chg=-0.02（下跌）
+    - atr_norm=0.5（足够大）：abs(-0.02)=0.02 <= 1.5*0.5=0.75 → shrink_pullback
+    - atr_norm=0.01（极小）：abs(-0.02)=0.02 > 1.5*0.01=0.015 → 跌幅超出 ATR 边界，非温和缩量回踩
+      此时 fall through 到 normal，证明 atr_norm 是决定性参数，而非仅上下文保留字段。
+    """
+    from src.services.volume_price_signals import classify_volume_pattern, VPSConfig
+    c = VPSConfig()
+    # 同一 rel_vol / pct_chg，atr_norm 充足 → shrink_pullback
+    assert classify_volume_pattern(0.75, -0.02, 0.5, c) == "shrink_pullback"
+    # 同一 rel_vol / pct_chg，atr_norm 极小（跌幅 >> 1.5 * atr_norm）→ 非 shrink_pullback
+    result = classify_volume_pattern(0.75, -0.02, 0.01, c)
+    assert result != "shrink_pullback", (
+        f"atr_norm=0.01 时 abs(pct_chg)=0.02 > 1.5*0.01=0.015，"
+        f"不应判定为 shrink_pullback，实际返回 '{result}'"
+    )
+    assert result == "normal", (
+        f"跌幅超出 ATR 边界时应 fall through 到 normal，实际返回 '{result}'"
+    )
