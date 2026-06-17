@@ -41,6 +41,9 @@ export interface SignalMarker {
   hitRate: number | null;
   hitSample: number | null;
   verified: boolean;
+  ciLow: number | null;
+  ciHigh: number | null;
+  baselineExcess: number | null;
   asOf: number | null; // epoch ms, llm only
 }
 
@@ -76,6 +79,9 @@ export interface BoardEntry {
   hitRate: number | null;
   hitSample: number | null;
   verified: boolean;
+  ciLow: number | null;
+  ciHigh: number | null;
+  baselineExcess: number | null;
   status: 'ok' | 'degraded';
   degradedReason: string | null;
 }

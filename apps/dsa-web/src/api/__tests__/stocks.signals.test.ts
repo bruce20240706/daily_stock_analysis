@@ -100,6 +100,19 @@ describe('stocksApi.getSignals', () => {
     expect(result.markers).toEqual([]);
   });
 
+  it('maps credibility CI and baseline excess (snake→camel)', async () => {
+    get.mockResolvedValueOnce({ data: { status: 'ok', consistency: 'consistent', degraded_reason: null,
+      price_lines: { entry: 1, stop: 0.9, target: 1.2 },
+      markers: [{ timestamp: 1, price: 1, anchor: 'low', direction: 'bullish', signal_type: 'volume_breakout',
+        source: 'rule', confidence: 'high', is_daily_approx: false, is_anomalous: false, reason: 'x',
+        threshold: null, observed_value: null, hit_rate: 0.68, hit_sample: 20, verified: true, as_of: null,
+        ci_low: 0.55, ci_high: 0.8, baseline_excess: 0.05 }] } });
+    const res = await stocksApi.getSignals('600519');
+    expect(res.markers[0].ciLow).toBe(0.55);
+    expect(res.markers[0].ciHigh).toBe(0.8);
+    expect(res.markers[0].baselineExcess).toBe(0.05);
+  });
+
   it('encodes crypto codes containing a slash for the {code:path} route', async () => {
     get.mockResolvedValueOnce({
       data: {
