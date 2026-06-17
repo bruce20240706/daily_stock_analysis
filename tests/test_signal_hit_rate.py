@@ -398,3 +398,21 @@ def test_resolve_missing_bucket_is_sample_insufficient():
         f = resolve_marker_hit_fields("x", "600519")
         assert f == {"hit_rate": None, "hit_sample": None, "verified": False,
                      "ci_low": None, "ci_high": None, "baseline_excess": None}
+
+
+def test_resolve_stat_with_zero_sample_returns_all_none():
+    """Coverage 3 (A6): stat 对象存在但 sample==0 时覆盖 `(stat.sample or 0) <= 0` 分支。
+
+    与 stat=None 分支（test_resolve_missing_bucket_is_sample_insufficient）不同，
+    此处 repo 返回一个真实 stat 对象，只是 sample 值为 0（桶存在但无样本）。
+    两者都应返回 all-None/verified=False dict。
+    """
+    stat = _stat(sample=0, win_rate=None, ci_low=None, ci_high=None,
+                 baseline_win_rate=0.50, excess=None)
+    stat.excess = None
+    with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+         patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+        Repo.return_value.get.return_value = stat
+        f = resolve_marker_hit_fields("volume_breakout", "600519")
+        assert f == {"hit_rate": None, "hit_sample": None, "verified": False,
+                     "ci_low": None, "ci_high": None, "baseline_excess": None}

@@ -126,6 +126,28 @@ def test_build_board_maps_markers_to_entry_fields(monkeypatch):
     assert e["consistency"] == "consistent"
 
 
+def test_build_board_maps_ci_fields_to_entry(monkeypatch):
+    """Coverage 1 (A6): ci_low/ci_high/baseline_excess 从第一条 rule marker 穿透到 BoardEntry。"""
+    markers = [
+        {
+            "source": "rule", "signal_type": "volume_breakout", "direction": "bullish",
+            "hit_rate": 0.68, "hit_sample": 20, "verified": True,
+            "ci_low": 0.55, "ci_high": 0.80, "baseline_excess": 0.05,
+        },
+        {
+            "source": "llm", "signal_type": "llm_advice", "direction": "bullish",
+        },
+    ]
+    monkeypatch.setattr(sbs, "build_signals_for_code",
+                        lambda code, *, days=120: _bs("bullish", markers=markers))
+    e = sbs.build_board(["AAA"], days=120, refresh=True)["entries"][0]
+    assert e["ci_low"] == 0.55
+    assert e["ci_high"] == 0.80
+    assert e["baseline_excess"] == 0.05
+    assert e["hit_rate"] == 0.68
+    assert e["verified"] is True
+
+
 def test_build_board_empty(monkeypatch):
     out = sbs.build_board([], days=120, refresh=True)
     assert out["entries"] == [] and out["counts"]["buy"] == 0
