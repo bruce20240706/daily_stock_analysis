@@ -629,9 +629,12 @@ _DIV_MFI_WINDOW: int = 14
 
 
 def _divergence_strength_grade(sources_diverging: int, rel_divs: list[float]) -> str:
-    """根据共振源数与平均相对背离幅度映射强度档（weak / medium / strong）。
+    """根据共振源数与平均归一化背离幅度映射强度档（weak / medium / strong）。
 
-    rel_divs: 每个背离源的相对背离量（均已归一到 [0, ∞)，越大越背离）。
+    rel_divs: 每个背离源的归一化背离量，各源已按自身量纲收敛到 [0, 1]：
+      - OBV：|curr-prev| / max(|curr|, |prev|, 1)，有界相对量
+      - CMF（[-1,1] 量纲）：|curr-prev| / 2，除以全域宽度
+      - MFI（[0,100] 量纲）：|curr-prev| / 100
     规则：
       - k == 3 且平均幅度 > 0.15 → strong
       - k >= 2 且平均幅度 > 0.05 → medium
@@ -658,8 +661,8 @@ def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSign
     """
     close = prim["close"].astype(float).reset_index(drop=True)
     vol = prim["volume"].astype(float).reset_index(drop=True)
-    high = prim["high"].astype(float)
-    low = prim["low"].astype(float)
+    high = prim["high"].astype(float).reset_index(drop=True)
+    low = prim["low"].astype(float).reset_index(drop=True)
 
     obv_series = _obv(close, vol)
     cmf_series = _cmf(high, low, close, vol, _DIV_CMF_WINDOW)
@@ -701,17 +704,18 @@ def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSign
             else:
                 confidence = "low"   # 单源弱提示（emit-low 规则）
 
-            # 强度档：按相对背离幅度 × 源数映射
+            # 强度档：按各源量纲归一化背离幅度 × 源数映射
+            # OBV：无界累积量 → 有界相对量 |curr-prev|/max(|curr|,|prev|,1) ∈ [0,1]
+            # CMF：[-1,1] 量纲 → |curr-prev|/2 ∈ [0,1]
+            # MFI：[0,100] 量纲 → |curr-prev|/100 ∈ [0,1]
             rel_divs: list[float] = []
-            denom_obv = abs(obv_prev) if obv_prev != 0 else 1.0
-            denom_cmf = abs(cmf_prev) if cmf_prev != 0 else 1.0
-            denom_mfi = abs(mfi_prev) if mfi_prev != 0 else 1.0
             if obv_div:
-                rel_divs.append(abs(obv_curr - obv_prev) / denom_obv)
+                denom_obv = max(abs(obv_curr), abs(obv_prev), 1.0)
+                rel_divs.append(min(abs(obv_curr - obv_prev) / denom_obv, 1.0))
             if cmf_div:
-                rel_divs.append(abs(cmf_curr - cmf_prev) / denom_cmf)
+                rel_divs.append(min(abs(cmf_curr - cmf_prev) / 2.0, 1.0))
             if mfi_div:
-                rel_divs.append(abs(mfi_curr - mfi_prev) / denom_mfi)
+                rel_divs.append(min(abs(mfi_curr - mfi_prev) / 100.0, 1.0))
             grade = _divergence_strength_grade(k, rel_divs)
 
             sources_desc = "+".join(

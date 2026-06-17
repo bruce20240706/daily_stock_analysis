@@ -25,6 +25,7 @@ from src.services.volume_price_signals import (
     _volume_bucket,
     _price_bucket,
     _classify_vfx,
+    _divergence_strength_grade,
 )
 
 SH = ZoneInfo("Asia/Shanghai")
@@ -678,19 +679,306 @@ def test_multi_source_resonance_emits_higher_confidence_and_strength():
     )
 
 
-def test_two_source_divergence_emits_medium_confidence():
-    """双源共振（k=2）应出 medium 置信。
+def _df_with_obv_cmf_diverging_mfi_not() -> pd.DataFrame:
+    """构造恰好 OBV + CMF 背离、MFI 不背离的顶背离 fixture（k=2）。
 
-    fixture：在单源 fixture 基础上，让 CMF 也背离（通过拖累棒的宽幅收顶抬高 CMF1，
-    使 CMF2 相对降低）——直接使用标准三源 fixture 并验证至少有 medium 置信的 marker。
-    这里使用已知产出 k=2..3 情形的既有序列验证 medium 逻辑分支至少被覆盖：
-    k=3 -> high，k=2 -> medium，k=1 -> low（任一 <= 2 的路径）。
+    关键设计约束（顶背离条件：cmp_ind = lambda a,b: a<=b，即 curr <= prev 才算背离）：
+    - OBV 背离 (obv_curr <= obv_prev)：peak1 前大量上涨（OBV1 高）；peak2 前 OBV 被
+      "宽幅大量向下"棒拖累，peak2 仅小量上涨，OBV2 << OBV1 ✓
+    - CMF 背离 (cmf_curr <= cmf_prev)：peak2 的 14-bar 窗口（idx 51..64）含"负 MFM 大量"
+      棒（open 高、high 很高、close 偏低于 bar 中位）→ CMF2 < CMF1 ✓
+    - MFI 不背离 (mfi_curr > mfi_prev)：
+      * peak1 窗口（idx 20..33）含 idx 30 大量下跌棒 → MFI1 < 100
+      * peak2 窗口（idx 51..64）内 TP 每棒严格递增（虽然 MFM 负，但 TP 仍升）→ MFI 只看
+        TP 方向（delta=tp[t]-tp[t-1]），TP 递增 → pos flow 计入 → MFI2 = 100 ✓
+
+    "负 MFM 但 TP 递增" 棒设计：open=p, high=p+10(大 wick), low=p-1, close=p+0.5
+      MFM = ((close-low)-(high-close))/(high-low)
+            = ((0.5+1)-(10-0.5))/(10+1+1) ≈ (1.5-9.5)/11 ≈ -0.727 → 负 MFM → CMF 负贡献
+      TP = (high+low+close)/3 = (p+10 + p-1 + p+0.5)/3 = p + 9.5/3 ≈ p + 3.17
+      若 p 每棒递增，TP 也递增 → MFI pos flow → MFI2 = 100 ✓
+
+    构造（pad=30, idx 30=大量下跌拉低 MFI1, idx 31-35=peak1区,
+          idx 36-50=OBV 拖累期（在 peak2 窗口之外）,
+          idx 51-63=负 MFM 但 TP 递增棒×13 + idx 64=peak2, idx 65-66=确认棒）：
+    窗口：peak2=idx 64，CMF/MFI 14-bar 窗口 = idx 51..64 ✓
     """
-    # k=3 fixture 会出 high；k=1 fixture 会出 low；两者都覆盖了 k>=2 判断路径。
-    # 直接用 k=3 fixture 验证 confidence in {high, medium}（即 k>=2 出非低置信）
-    df = _df_with_obv_cmf_mfi_all_diverging()
-    res = compute_volume_price_signals(df, config=VPSConfig(swing_k=2))
-    div = [m for m in res.markers if "divergence" in m.signal_type]
-    assert any(m.confidence in ("high", "medium") for m in div), (
-        "k>=2 的背离必须出 medium 或 high 置信（非 low）"
+    pad = [_bar(100, 100.5, 99.5, 100, 1000) for _ in range(30)]
+
+    # idx 30：大量下跌棒，进入 peak1 的 14-bar 窗口，使 MFI1 < 100
+    down_before_peak1 = _bar(100, 100.5, 95.5, 96, 5000)
+
+    # peak1 区域 (idx 31-35)：3 根大量上涨 + 峰顶 (close=112) + 2 根下跌确认
+    peak1_zone = [
+        _bar(96,  100.5,  95.5, 100, 5000),  # idx 31
+        _bar(100, 106.5,  99.5, 106, 5000),  # idx 32
+        _bar(106, 112.5, 105.5, 112, 5000),  # idx 33: PEAK1 price=112
+        _bar(112, 112.5, 108.5, 109, 1000),  # idx 34: down confirm1
+        _bar(109, 109.5, 105.5, 106, 1000),  # idx 35: down confirm2
+    ]
+    # peak1 窗口(idx 20..33)：含 idx30 大量下跌 → MFI1 < 100（neg flow 进入）
+
+    # OBV 拖累期 (idx 36-50, 15 根)：close 贴底，大量 → OBV 大跌，不在 peak2 窗口内
+    # 这使 OBV2 << OBV1（peak2 = idx 64, 窗口 idx 51..64，拖累棒在 36..50 之外）
+    obv_drag = []
+    p = 106.0
+    step = (94.0 - p) / 15.0
+    for _ in range(15):
+        c = p + step
+        obv_drag.append(_bar(p, p + 0.2, c - 0.2, c, 5000))  # close 贴底，OBV 大跌
+        p = c
+    # OBV 从 peak1 高位跌至极低（−75000）
+
+    # 进入 peak2 14-bar 窗口的棒（idx 51-63, 13 根）:
+    # "负 MFM 但 TP 递增"棒：open=p，high=p+10，low=p-1，close=p+0.5，每棒 p 递增 1.5
+    # MFM = (1.5-9.5)/(10+1+1) ≈ -0.727 → CMF 负贡献（每棒大量 2000）
+    # TP = (p+10+p-1+p+0.5)/3 = p+3.17，每棒 p 递增 → TP 递增 → MFI pos flow → MFI2=100
+    # OBV：close (p+0.5) > prev_close (p)? 若 p 每棒+1.5，则 close[t]=p+0.5 > p-1=prev_open
+    # 实际 close[t]=p+0.5，prev_close = 前棒 close = (p-1.5)+0.5 = p-1 → close[t]=p+0.5 > p-1 ✓
+    # OBV 方向 +1（但量小 → OBV 增量小）
+    neg_cmf_bars = []
+    p = 94.0
+    for _ in range(13):
+        # bar: open=p, high=p+10, low=p-1, close=p+0.5, vol=2000
+        neg_cmf_bars.append(_bar(p, p + 10.0, p - 1.0, p + 0.5, 2000))
+        p += 1.5  # price steps up so TP increases
+
+    # peak2 (idx 64, close=115 > 112, OBV 仅微增)
+    peak2 = _bar(p, p + 10.0, p - 1.0, 115.0, 100)   # 极小量，OBV 微增，CMF 仍负
+    conf1  = _bar(115.0, 115.5, 111.5, 112.0, 500)
+    conf2  = _bar(112.0, 112.5, 108.5, 109.0, 500)
+
+    return _make_df(pad + [down_before_peak1] + peak1_zone + obv_drag + neg_cmf_bars + [peak2, conf1, conf2])
+
+
+def test_two_source_divergence_emits_medium_confidence():
+    """双源共振（k=2，OBV+CMF 背离，MFI 不背离）必须出 medium 置信，且不得出 high。
+
+    验证顺序：
+    1. 先通过引擎内部指标计算确认 fixture 确实产生 k=2（不是 k=3 或 k=1）。
+    2. 再断言 divergence marker 的 confidence == "medium"。
+    """
+    df = _df_with_obv_cmf_diverging_mfi_not()
+    cfg = VPSConfig(swing_k=2)
+
+    # --- 内部验证：确认 k=2（OBV+CMF 背离，MFI 不背离）---
+    from src.services.volume_price_signals import (
+        _normalize, _compute_primitives, _obv, _cmf, _mfi,
+        find_swing_pivots, _DIV_CMF_WINDOW, _DIV_MFI_WINDOW,
     )
+    norm, _ = _normalize(df, cfg)
+    prim = _compute_primitives(norm, cfg)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    vol   = prim["volume"].astype(float).reset_index(drop=True)
+    high  = prim["high"].astype(float).reset_index(drop=True)
+    low_s = prim["low"].astype(float).reset_index(drop=True)
+
+    obv_s = _obv(close, vol)
+    cmf_s = _cmf(high, low_s, close, vol, _DIV_CMF_WINDOW)
+    mfi_s = _mfi(high, low_s, close, vol, _DIV_MFI_WINDOW)
+
+    highs = [p for p in find_swing_pivots(close, cfg.swing_k) if p.kind == "high"]
+    assert len(highs) >= 2, f"fixture 须有至少 2 个 swing high，实际 {len(highs)}"
+    prev_p, curr_p = highs[-2], highs[-1]
+    assert curr_p.price > prev_p.price, "fixture 须使第二峰价格更高（顶背离前提）"
+
+    obv_prev, obv_curr = float(obv_s.iloc[prev_p.index]), float(obv_s.iloc[curr_p.index])
+    cmf_prev, cmf_curr = float(cmf_s.iloc[prev_p.index]), float(cmf_s.iloc[curr_p.index])
+    mfi_prev, mfi_curr = float(mfi_s.iloc[prev_p.index]), float(mfi_s.iloc[curr_p.index])
+
+    obv_div = obv_curr <= obv_prev
+    cmf_div = cmf_curr <= cmf_prev
+    mfi_div = mfi_curr <= mfi_prev and not math.isnan(mfi_curr) and not math.isnan(mfi_prev)
+    k_actual = sum([obv_div, cmf_div, mfi_div])
+
+    assert k_actual == 2, (
+        f"fixture 须产生 k=2，实际 k={k_actual}；"
+        f"obv_div={obv_div}({obv_prev:.1f}→{obv_curr:.1f}), "
+        f"cmf_div={cmf_div}({cmf_prev:.4f}→{cmf_curr:.4f}), "
+        f"mfi_div={mfi_div}({mfi_prev:.1f}→{mfi_curr:.1f})"
+    )
+
+    # --- 引擎断言：k=2 → confidence=="medium" ---
+    res = compute_volume_price_signals(df, config=cfg)
+    top_div = [m for m in res.markers if m.signal_type == "obv_top_divergence"]
+    assert len(top_div) > 0, "k=2 fixture 须产出 obv_top_divergence marker"
+    assert any(m.confidence == "medium" for m in top_div), (
+        f"k=2 背离须出 medium 置信，实际={[m.confidence for m in top_div]}"
+    )
+    assert all(m.confidence != "high" for m in top_div), (
+        f"k=2 背离不得出 high 置信，实际={[m.confidence for m in top_div]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: k=1 底背离单源测试（OBV 背离，CMF/MFI 不背离）
+# ---------------------------------------------------------------------------
+
+def _df_with_only_obv_bottom_divergence() -> pd.DataFrame:
+    """构造仅 OBV 底背离、CMF/MFI 不背离的底背离 fixture（k=1，bullish）。
+
+    关键设计约束（底背离条件：cmp_ind = lambda a,b: a>=b，即 curr >= prev 才算背离）：
+    - OBV 底背离 (obv_curr >= obv_prev)：valley1 的大量下跌使 OBV1 极低；大量反弹使
+      OBV 升高；valley2 的下跌量极小 → OBV2 远高于 OBV1 ✓
+    - CMF 不背离 (cmf_curr < cmf_prev)：valley2 的 14-bar 窗口全为大量下跌棒（MFM 负）
+      → CMF2 强负；valley1 的窗口含部分上涨棒 → CMF1 < |CMF2| → CMF2 < CMF1 ✓
+    - MFI 不背离 (mfi_curr < mfi_prev)：valley1 窗口含大量上涨棒（up_bar）→ MFI1 > 0；
+      valley2 窗口全为下跌棒 → MFI2 = 0 < MFI1 ✓
+
+    关键设计：valley2 的 14-bar MFI 窗口（idx [V2-13..V2]）必须全是下跌棒，
+    且 valley1 的窗口含至少一根 TP 上涨棒（up_bar）。
+    OBV 约束：大量反弹（recovery 5 根 × 10000 = +50000）远超 valley1 累积下跌，
+    valley2 只用极小量（200）下跌 → OBV2 仍远高于 OBV1。
+    """
+    pad = [_bar(100, 100.5, 99.5, 100, 1000) for _ in range(30)]
+
+    # idx 30：大量上涨棒，进入 valley1 的 14-bar MFI 窗口，使 MFI1 > 0
+    # （valley1 确认 bar 约为 idx 33，14-bar 窗口 = idx 20..33，含 idx 30）
+    up_bar = _bar(100, 105.5, 99.5, 105, 8000)   # idx 30: 大量上涨 → MFI pos flow 大
+
+    # valley1 区域：3 根极大量下跌 + 谷底 (close=88) + 2 根上涨确认
+    # 大量下跌使 OBV1 极低（e.g. 每根 -8000 × 3 = -24000 + up_bar +8000 = OBV1 ≈ -16000）
+    valley1_zone = [
+        _bar(105, 105.5, 100.5, 101, 8000),  # idx 31: 下跌
+        _bar(101, 101.5,  94.5,  95, 8000),  # idx 32: 下跌
+        _bar(95,   95.5,  87.5,  88, 8000),  # idx 33: VALLEY1 price=88（极大量，OBV1极低）
+        _bar(88,   93.5,  87.5,  93, 2000),  # idx 34: up confirm1
+        _bar(93,   98.5,  92.5,  98, 2000),  # idx 35: up confirm2
+    ]
+    # valley1 窗口含 idx 30 大量上涨 → MFI1 > 0（不是全上涨也不是 100）
+
+    # 大量反弹：5 根极高量上涨，把 OBV 从极低拉到极高
+    # 反弹后 OBV 大幅高于 valley1 水平
+    recovery = [
+        _bar(98,  102.5,  97.5, 102, 10000),  # idx 36
+        _bar(102, 106.5, 101.5, 106, 10000),  # idx 37
+        _bar(106, 110.5, 105.5, 110, 10000),  # idx 38
+        _bar(110, 114.5, 109.5, 114, 10000),  # idx 39
+        _bar(114, 118.5, 113.5, 118, 10000),  # idx 40
+    ]
+    # 此时 OBV 约 = OBV_base + recovery_net ≈ +50000（极高）
+
+    # 14 根大量下跌棒，构成 valley2 的 14-bar MFI/CMF 窗口（idx 41-54）：
+    # close 贴底（MFM 强负）→ CMF2 强负、MFI2 = 0；
+    # vol=5000（大量）→ OBV 从高位下跌 5000×14=-70000，OBV2 = 50000-70000+基线...
+    # 需 OBV2 >= OBV1：OBV1 ≈ -16000（极低），recovery 后 ≈ +34000，fall: 5000×14=70000下跌
+    # 最终 OBV2 ≈ 34000-70000 = -36000 < OBV1 ≈ -16000 → 不满足！
+    # 解决：缩小 fall_bars vol（减小到 500，14×500=7000下跌）
+    # OBV2 = 34000 - 7000 - 500 = 26500 >> OBV1 = -16000 ✓
+    fall_bars = []
+    p = 118.0
+    step = (86.0 - p) / 14.0
+    for _ in range(14):
+        c = p + step
+        # close 贴近 bar 底（MFM 负 → CMF2 负，MFI pos flow = 0）
+        fall_bars.append(_bar(p, p + 0.2, c - 0.2, c, 500))
+        p = c
+    # valley2 的 14-bar 窗口 (idx 41..54)：全为下跌棒 → MFI2=0 < MFI1 > 0 ✓
+    # CMF2 全负 < CMF1（CMF1 窗口含 up_bar 正流）✓
+
+    # valley2 (close=85 < 88, vol=500) + 2 根上涨确认
+    valley2 = _bar(p, p + 0.2, p - 0.2, 85.0, 500)   # VALLEY2 price=85 < 88
+    conf1 = _bar(85.0, 89.5, 84.5, 89.0, 1000)
+    conf2 = _bar(89.0, 93.5, 88.5, 93.0, 1000)
+
+    return _make_df(pad + [up_bar] + valley1_zone + recovery + fall_bars + [valley2, conf1, conf2])
+
+
+def test_bottom_single_source_obv_divergence_emits_low_confidence():
+    """单源底背离（仅 OBV 背离，CMF/MFI 不背离，k=1）：
+    - 产出 obv_bottom_divergence marker
+    - confidence == "low"（emit-low 规则，k=1 弱提示）
+    覆盖 _detect_obv_divergence 中 kind='low' / cmp_ind=lambda a,b: a>=b 的 >= 比较分支。
+    """
+    df = _df_with_only_obv_bottom_divergence()
+    cfg = VPSConfig(swing_k=2)
+
+    # --- 内部验证：确认 k=1（OBV 背离，CMF/MFI 不背离）---
+    from src.services.volume_price_signals import (
+        _normalize, _compute_primitives, _obv, _cmf, _mfi,
+        find_swing_pivots, _DIV_CMF_WINDOW, _DIV_MFI_WINDOW,
+    )
+    norm, _ = _normalize(df, cfg)
+    prim = _compute_primitives(norm, cfg)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    vol   = prim["volume"].astype(float).reset_index(drop=True)
+    high  = prim["high"].astype(float).reset_index(drop=True)
+    low_s = prim["low"].astype(float).reset_index(drop=True)
+
+    obv_s = _obv(close, vol)
+    cmf_s = _cmf(high, low_s, close, vol, _DIV_CMF_WINDOW)
+    mfi_s = _mfi(high, low_s, close, vol, _DIV_MFI_WINDOW)
+
+    lows = [p for p in find_swing_pivots(close, cfg.swing_k) if p.kind == "low"]
+    assert len(lows) >= 2, f"fixture 须有至少 2 个 swing low，实际 {len(lows)}"
+    prev_p, curr_p = lows[-2], lows[-1]
+    assert curr_p.price < prev_p.price, "fixture 须使第二谷价格更低（底背离前提）"
+
+    obv_prev, obv_curr = float(obv_s.iloc[prev_p.index]), float(obv_s.iloc[curr_p.index])
+    cmf_prev, cmf_curr = float(cmf_s.iloc[prev_p.index]), float(cmf_s.iloc[curr_p.index])
+    mfi_prev, mfi_curr = float(mfi_s.iloc[prev_p.index]), float(mfi_s.iloc[curr_p.index])
+
+    # 底背离：cmp_ind = lambda a, b: a >= b（curr >= prev 才算背离）
+    obv_div = obv_curr >= obv_prev
+    cmf_div = cmf_curr >= cmf_prev and not math.isnan(cmf_curr) and not math.isnan(cmf_prev)
+    mfi_div = mfi_curr >= mfi_prev and not math.isnan(mfi_curr) and not math.isnan(mfi_prev)
+    k_actual = sum([obv_div, cmf_div, mfi_div])
+
+    assert k_actual == 1, (
+        f"fixture 须产生 k=1（仅 OBV 底背离），实际 k={k_actual}；"
+        f"obv_div={obv_div}({obv_prev:.1f}→{obv_curr:.1f}), "
+        f"cmf_div={cmf_div}({cmf_prev:.4f}→{cmf_curr:.4f}), "
+        f"mfi_div={mfi_div}({mfi_prev:.1f}→{mfi_curr:.1f})"
+    )
+
+    # --- 引擎断言：k=1 → obv_bottom_divergence，confidence=="low" ---
+    res = compute_volume_price_signals(df, config=cfg)
+    bot_div = [m for m in res.markers if m.signal_type == "obv_bottom_divergence"]
+    assert len(bot_div) > 0, (
+        "单源 OBV 底背离 fixture 须产出 obv_bottom_divergence marker（emit-low 规则）"
+    )
+    assert all(m.confidence == "low" for m in bot_div), (
+        f"k=1 底背离须出 low 置信，实际={[m.confidence for m in bot_div]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: _divergence_strength_grade 单元测试（各源量纲归一化后阈值固定）
+# ---------------------------------------------------------------------------
+
+def test_divergence_strength_grade_bounded_inputs():
+    """验证 _divergence_strength_grade 在各源归一化后的阈值语义（[0,1] 输入）。
+
+    rel_divs 应为归一化后的值：
+      - OBV：|curr-prev|/max(|curr|,|prev|,1) ∈ [0,1]
+      - CMF：|curr-prev|/2 ∈ [0,1]
+      - MFI：|curr-prev|/100 ∈ [0,1]
+
+    规则：
+      - k==3 且 avg > 0.15 → "strong"
+      - k>=2 且 avg > 0.05 → "medium"
+      - 其余              → "weak"
+    """
+    # strong：k=3，avg=(0.20+0.20+0.20)/3=0.20 > 0.15
+    assert _divergence_strength_grade(3, [0.20, 0.20, 0.20]) == "strong"
+
+    # 刚好不够 strong：k=3，avg=0.15 不严格 > 0.15 → medium（avg>0.05）
+    assert _divergence_strength_grade(3, [0.15, 0.15, 0.15]) == "medium"
+
+    # medium：k=2，avg=(0.10+0.10)/2=0.10 > 0.05
+    assert _divergence_strength_grade(2, [0.10, 0.10]) == "medium"
+
+    # weak：k=2，avg=(0.03+0.03)/2=0.03 <= 0.05
+    assert _divergence_strength_grade(2, [0.03, 0.03]) == "weak"
+
+    # weak：k=1，任何幅度（k<2，不满足 medium 条件）
+    assert _divergence_strength_grade(1, [0.50]) == "weak"
+
+    # weak：空 rel_divs
+    assert _divergence_strength_grade(0, []) == "weak"
+
+    # 边界：k=3，avg 刚好超过 0.15
+    assert _divergence_strength_grade(3, [0.16, 0.16, 0.14]) == "strong"  # avg=0.1533>0.15
+
+    # 归一化输入上界（值=1.0），k=2 → medium（avg=1.0 > 0.05）
+    assert _divergence_strength_grade(2, [1.0, 1.0]) == "medium"
