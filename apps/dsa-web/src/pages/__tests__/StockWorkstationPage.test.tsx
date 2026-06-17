@@ -111,7 +111,7 @@ describe('StockWorkstationPage tabs', () => {
 
   it('DuplicateTaskError polls existing task and shows its report', async () => {
     const { DuplicateTaskError } = await import('../../api/analysis');
-    analyzeAsync.mockRejectedValueOnce(new DuplicateTaskError());
+    analyzeAsync.mockRejectedValueOnce(new DuplicateTaskError('600519', 'T1'));
     getStatus.mockResolvedValueOnce({ taskId: 'T1', status: 'completed', result: { report: { meta: { id: 5, stockCode: '600519', stockName: 'x', queryId: 'q', reportType: 'detailed', createdAt: 'x' }, summary: {} } } });
     renderAt('/stock/600519');
     fireEvent.click(screen.getByRole('button', { name: /刷新分析/ }));

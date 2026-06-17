@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BoardEntry, SignalsBoardResponse } from '../../types/kline';
 
@@ -41,25 +42,25 @@ describe('SignalBoardPage', () => {
 
   it('renders board rows after fetch', async () => {
     getBoard.mockResolvedValueOnce(board([entry()]));
-    render(<SignalBoardPage />);
+    render(<MemoryRouter><SignalBoardPage /></MemoryRouter>);
     expect(await screen.findByText('贵州茅台')).toBeInTheDocument();
   });
 
   it('shows empty-watchlist guidance', async () => {
     getBoard.mockResolvedValueOnce(board([]));
-    render(<SignalBoardPage />);
+    render(<MemoryRouter><SignalBoardPage /></MemoryRouter>);
     expect(await screen.findByTestId('board-empty')).toBeInTheDocument();
   });
 
   it('shows an error message when the fetch fails', async () => {
     getBoard.mockRejectedValueOnce(new Error('boom'));
-    render(<SignalBoardPage />);
+    render(<MemoryRouter><SignalBoardPage /></MemoryRouter>);
     expect(await screen.findByText(/加载失败/)).toBeInTheDocument();
   });
 
   it('opens KLineDrawer on row click', async () => {
     getBoard.mockResolvedValueOnce(board([entry()]));
-    render(<SignalBoardPage />);
+    render(<MemoryRouter><SignalBoardPage /></MemoryRouter>);
     fireEvent.click(await screen.findByText('贵州茅台'));
     expect(await screen.findByTestId('kline-drawer')).toHaveTextContent('600519');
   });

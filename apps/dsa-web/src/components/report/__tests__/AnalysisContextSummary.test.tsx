@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { historyApi } from '../../../api/history';
 import type { AnalysisContextPackOverview, AnalysisReport, AnalysisResult } from '../../../types/analysis';
@@ -270,7 +271,7 @@ describe('ReportSummary analysis context placement', () => {
       createdAt: '2026-04-10T12:00:00',
     };
 
-    render(<ReportSummary data={result} />);
+    render(<MemoryRouter><ReportSummary data={result} /></MemoryRouter>);
 
     await waitFor(() => {
       expect(screen.getByText('暂无相关资讯')).toBeInTheDocument();
