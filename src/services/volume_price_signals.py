@@ -483,6 +483,52 @@ def _price_bucket(pct_chg, config: VPSConfig) -> str | None:
     return "flat"
 
 
+def classify_volume_pattern(rel_vol: float, pct_chg: float, atr_norm: float, config: VPSConfig) -> str:
+    """量能形态分级：基于相对量比（rel_vol）和涨跌幅（pct_chg）判定量能形态档位。
+
+    返回值（穷尽互斥）：
+    - 'climax_volume'    天量（rel_vol >= vol_high）且价格上涨
+    - 'dry_up'           地量（rel_vol < vol_low），量能极度萎缩
+    - 'shrink_pullback'  缩量回踩（rel_vol ∈ [vol_low, vol_shrink) 且 pct_chg < -eps）
+    - 'mild_expand'      温和放量（rel_vol ∈ [vol_up, vol_high) 且 pct_chg > eps）
+    - 'normal'           常规（其余所有组合）
+
+    参数：
+    - rel_vol:  当根成交量 / vol_ma，量比
+    - pct_chg:  涨跌幅（小数，如 0.02 = +2%）
+    - atr_norm: ATR 归一化值（当前暂作上下文保留参数，未来可用于强度分级扩展）
+    - config:   VPSConfig，阈值全部从此读取，无魔法数字
+
+    阈值来源（全部源自 VPSConfig 字段）：
+    - vol_low    (default 0.7)  : 地量上界
+    - vol_shrink (default 0.8)  : 缩量上界
+    - vol_up     (default 1.2)  : 正常量上界
+    - vol_high   (default 1.5)  : 放量下界 / 天量下界
+    - eps        (default 0.004): 价格平坦判定半带宽
+    """
+    vbucket = _volume_bucket(rel_vol, config)
+    pbucket = _price_bucket(pct_chg, config)
+
+    # 天量（high vol）且上涨
+    if vbucket == "high" and pbucket == "up":
+        return "climax_volume"
+
+    # 地量（low vol）：极度萎缩，无论价格方向
+    if vbucket == "low":
+        return "dry_up"
+
+    # 缩量回踩（shrink vol + 下跌）
+    if vbucket == "shrink" and pbucket == "down":
+        return "shrink_pullback"
+
+    # 温和放量（up vol + 上涨）
+    if vbucket == "up" and pbucket == "up":
+        return "mild_expand"
+
+    # 其余所有组合：常规
+    return "normal"
+
+
 def _classify_vfx(
     *,
     rel_vol,
@@ -753,6 +799,11 @@ def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
         if pd.isna(pm) or pd.isna(rv):
             continue
         if close.iloc[i] >= pm and rv >= config.breakout_rel_vol:
+            pct = float(prim["pct_chg"].iloc[i]) if not pd.isna(prim["pct_chg"].iloc[i]) else 0.0
+            atr_series_local = atr(prim.iloc[:i + 1], config.atr_period)
+            atr_val = _last_finite(atr_series_local)
+            atr_norm = (atr_val / float(close.iloc[i])) if (atr_val is not None and float(close.iloc[i]) > 0) else 0.0
+            vol_pattern = classify_volume_pattern(float(rv), pct, atr_norm, config)
             out.append(VPSignal(
                 timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[i]),
                 price=float(close.iloc[i]),
@@ -762,7 +813,7 @@ def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
                 confidence="high",
                 is_daily_approx=True,
                 is_anomalous=False,
-                reason=f"放量突破近{config.breakout_window}日高点（不含当日）",
+                reason=f"放量突破近{config.breakout_window}日高点（不含当日）[量能形态:{vol_pattern}]",
                 threshold=float(pm),
                 observed_value=float(rv),
             ))
@@ -797,6 +848,16 @@ def _detect_shrink_pullback(prim: pd.DataFrame, config: VPSConfig) -> list[VPSig
         and not np.isnan(atr_now)
         and drawdown < config.pullback_atr_mult * atr_now
     ):
+        # 获取最新 bar 的量能形态档，注入 reason 语义
+        curr_rv = float(rel_vol.iloc[i]) if not pd.isna(rel_vol.iloc[i]) else float("nan")
+        curr_pct = float(prim["pct_chg"].iloc[i]) if not pd.isna(prim["pct_chg"].iloc[i]) else 0.0
+        close_now = float(close.iloc[i])
+        atr_norm_now = (atr_now / close_now) if close_now > 0 else 0.0
+        if not math.isnan(curr_rv):
+            vol_pattern = classify_volume_pattern(curr_rv, curr_pct, atr_norm_now, config)
+            reason_str = f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）[量能形态:{vol_pattern}]"
+        else:
+            reason_str = f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）"
         out.append(VPSignal(
             timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[i]),
             price=float(close.iloc[i]),
@@ -806,7 +867,7 @@ def _detect_shrink_pullback(prim: pd.DataFrame, config: VPSConfig) -> list[VPSig
             confidence="medium",
             is_daily_approx=True,
             is_anomalous=False,
-            reason=f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）",
+            reason=reason_str,
             threshold=config.pullback_atr_mult * atr_now,
             observed_value=drawdown,
         ))

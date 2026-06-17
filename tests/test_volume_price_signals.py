@@ -982,3 +982,26 @@ def test_divergence_strength_grade_bounded_inputs():
 
     # 归一化输入上界（值=1.0），k=2 → medium（avg=1.0 > 0.05）
     assert _divergence_strength_grade(2, [1.0, 1.0]) == "medium"
+
+
+# ---------------------------------------------------------------------------
+# M3-B3: 量能形态分级（classify_volume_pattern）边界测试
+# ---------------------------------------------------------------------------
+
+def test_volume_pattern_classification_boundaries():
+    """验证 classify_volume_pattern 在各量档 × 价格方向组合下的边界输出。
+
+    阈值对齐说明（均来自 VPSConfig 默认值，无魔法数字）：
+    - climax_volume : rel_vol >= vol_high(1.5)，价格上涨(pct_chg > eps=0.004)
+    - dry_up        : rel_vol <  vol_low(0.7)，量能极度萎缩
+    - shrink_pullback: rel_vol ∈ [vol_low(0.7), vol_shrink(0.8))，pct_chg < -eps
+    - mild_expand   : rel_vol ∈ [vol_up(1.2), vol_high(1.5))，pct_chg > eps
+    - normal        : rel_vol ∈ [vol_shrink(0.8), vol_up(1.2))，pct_chg ≈ 0（flat）
+    """
+    from src.services.volume_price_signals import classify_volume_pattern, VPSConfig
+    c = VPSConfig()
+    assert classify_volume_pattern(3.0, 0.05, 1.0, c) == "climax_volume"    # 天量+上涨
+    assert classify_volume_pattern(0.5, -0.01, 0.3, c) == "dry_up"          # 地量
+    assert classify_volume_pattern(0.7, -0.02, 0.5, c) == "shrink_pullback" # 缩量回踩
+    assert classify_volume_pattern(1.3, 0.02, 0.6, c) == "mild_expand"      # 温和放量
+    assert classify_volume_pattern(1.0, 0.0, 0.5, c) == "normal"            # 常规
