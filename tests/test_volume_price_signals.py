@@ -1034,3 +1034,37 @@ def test_shrink_pullback_atr_norm_is_decisive():
     assert result == "normal", (
         f"跌幅超出 ATR 边界时应 fall through 到 normal，实际返回 '{result}'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task B4: VPSConfig.for_market — crypto 量价参数差异化
+# ---------------------------------------------------------------------------
+
+def test_for_market_crypto_uses_crypto_values(monkeypatch):
+    """market='crypto' 时，for_market 返回的 config 应将主动字段替换为 crypto_* 值。"""
+    monkeypatch.setenv("VPS_CRYPTO_BREAKOUT_WINDOW", "30")
+    monkeypatch.setenv("VPS_CRYPTO_ATR_PERIOD", "7")
+    monkeypatch.setenv("VPS_CRYPTO_BREAKOUT_REL_VOL", "1.5")
+    cfg = VPSConfig.for_market("crypto")
+    assert cfg.breakout_window == 30
+    assert cfg.atr_period == 7
+    assert cfg.breakout_rel_vol == pytest.approx(1.5)
+
+
+def test_for_market_non_crypto_equals_from_env(monkeypatch):
+    """market='cn'（或任意非 crypto）时，for_market 结果与 from_env() 字节一致。"""
+    monkeypatch.setenv("VPS_BREAKOUT_WINDOW", "25")
+    monkeypatch.setenv("VPS_CRYPTO_BREAKOUT_WINDOW", "30")
+    cfg_market = VPSConfig.for_market("cn")
+    cfg_env = VPSConfig.from_env()
+    assert cfg_market == cfg_env
+
+
+def test_for_market_unknown_falls_back(monkeypatch):
+    """market=None 或 'unknown' 时，for_market 回落到 from_env()（等价）。"""
+    monkeypatch.setenv("VPS_BREAKOUT_WINDOW", "18")
+    cfg_none = VPSConfig.for_market(None)
+    cfg_unknown = VPSConfig.for_market("unknown")
+    cfg_env = VPSConfig.from_env()
+    assert cfg_none == cfg_env
+    assert cfg_unknown == cfg_env

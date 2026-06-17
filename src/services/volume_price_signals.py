@@ -67,6 +67,25 @@ class VPSConfig:
             crypto_breakout_rel_vol=parse_env_float(os.getenv("VPS_CRYPTO_BREAKOUT_REL_VOL"), 2.0, field_name="VPS_CRYPTO_BREAKOUT_REL_VOL", minimum=1.0),
         )
 
+    @classmethod
+    def for_market(cls, market: str | None) -> "VPSConfig":
+        """返回适合指定市场的 VPSConfig 实例。
+
+        crypto 市场：用 VPS_CRYPTO_* 值覆盖对应的主动计算字段（breakout_window、
+        atr_period、breakout_rel_vol），其余字段保持 from_env() 默认。
+        非 crypto（含 None、未知字符串）：直接返回 from_env()，行为字节一致。
+        """
+        base = cls.from_env()
+        if market == "crypto":
+            import dataclasses
+            return dataclasses.replace(
+                base,
+                breakout_window=base.crypto_breakout_window,
+                atr_period=base.crypto_atr_period,
+                breakout_rel_vol=base.crypto_breakout_rel_vol,
+            )
+        return base
+
 
 @dataclass(frozen=True)
 class Pivot:

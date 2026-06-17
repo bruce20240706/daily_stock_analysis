@@ -78,7 +78,7 @@ def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
     _lc = rows[-1].get("close")
     latest_close = float(_lc) if _lc is not None else None
 
-    engine_result = compute_volume_price_signals(df, config=VPSConfig.from_env())
+    engine_result = compute_volume_price_signals(df, config=VPSConfig.for_market(market))
 
     rule_signal = None
     try:
