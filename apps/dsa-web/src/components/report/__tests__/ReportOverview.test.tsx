@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { ReportOverview } from '../ReportOverview';
 
 const baseMeta = {
@@ -21,27 +22,29 @@ const baseSummary = {
 describe('ReportOverview', () => {
   it('renders final market phase and partial-bar labels from report metadata', () => {
     render(
-      <ReportOverview
-        meta={{
-          ...baseMeta,
-          marketPhaseSummary: {
-            market: 'cn',
-            phase: 'intraday',
-            marketLocalTime: '2026-03-21T10:30:00+08:00',
-            sessionDate: '2026-03-21',
-            effectiveDailyBarDate: '2026-03-20',
-            isTradingDay: true,
-            isMarketOpenNow: true,
-            isPartialBar: true,
-            minutesToOpen: null,
-            minutesToClose: 150,
-            triggerSource: 'api',
-            analysisIntent: 'auto',
-            warnings: [],
-          },
-        }}
-        summary={baseSummary}
-      />,
+      <MemoryRouter>
+        <ReportOverview
+          meta={{
+            ...baseMeta,
+            marketPhaseSummary: {
+              market: 'cn',
+              phase: 'intraday',
+              marketLocalTime: '2026-03-21T10:30:00+08:00',
+              sessionDate: '2026-03-21',
+              effectiveDailyBarDate: '2026-03-20',
+              isTradingDay: true,
+              isMarketOpenNow: true,
+              isPartialBar: true,
+              minutesToOpen: null,
+              minutesToClose: 150,
+              triggerSource: 'api',
+              analysisIntent: 'auto',
+              warnings: [],
+            },
+          }}
+          summary={baseSummary}
+        />
+      </MemoryRouter>,
     );
 
     expect(screen.getByLabelText('市场阶段: CN · 盘中')).toBeInTheDocument();
@@ -51,28 +54,30 @@ describe('ReportOverview', () => {
 
   it('renders English final market phase and partial-bar labels', () => {
     render(
-      <ReportOverview
-        meta={{
-          ...baseMeta,
-          reportLanguage: 'en',
-          marketPhaseSummary: {
-            market: 'us',
-            phase: 'postmarket',
-            marketLocalTime: '2026-03-21T16:30:00-04:00',
-            sessionDate: '2026-03-21',
-            effectiveDailyBarDate: '2026-03-21',
-            isTradingDay: true,
-            isMarketOpenNow: false,
-            isPartialBar: true,
-            minutesToOpen: null,
-            minutesToClose: null,
-            triggerSource: 'api',
-            analysisIntent: 'auto',
-            warnings: [],
-          },
-        }}
-        summary={baseSummary}
-      />,
+      <MemoryRouter>
+        <ReportOverview
+          meta={{
+            ...baseMeta,
+            reportLanguage: 'en',
+            marketPhaseSummary: {
+              market: 'us',
+              phase: 'postmarket',
+              marketLocalTime: '2026-03-21T16:30:00-04:00',
+              sessionDate: '2026-03-21',
+              effectiveDailyBarDate: '2026-03-21',
+              isTradingDay: true,
+              isMarketOpenNow: false,
+              isPartialBar: true,
+              minutesToOpen: null,
+              minutesToClose: null,
+              triggerSource: 'api',
+              analysisIntent: 'auto',
+              warnings: [],
+            },
+          }}
+          summary={baseSummary}
+        />
+      </MemoryRouter>,
     );
 
     expect(screen.getByLabelText('Market phase: US · Post-market')).toBeInTheDocument();
@@ -81,27 +86,29 @@ describe('ReportOverview', () => {
 
   it('renders unknown final phase without partial-bar label', () => {
     render(
-      <ReportOverview
-        meta={{
-          ...baseMeta,
-          marketPhaseSummary: {
-            market: null,
-            phase: 'unknown',
-            marketLocalTime: null,
-            sessionDate: null,
-            effectiveDailyBarDate: null,
-            isTradingDay: null,
-            isMarketOpenNow: null,
-            isPartialBar: false,
-            minutesToOpen: null,
-            minutesToClose: null,
-            triggerSource: 'api',
-            analysisIntent: 'auto',
-            warnings: ['calendar_unavailable'],
-          },
-        }}
-        summary={baseSummary}
-      />,
+      <MemoryRouter>
+        <ReportOverview
+          meta={{
+            ...baseMeta,
+            marketPhaseSummary: {
+              market: null,
+              phase: 'unknown',
+              marketLocalTime: null,
+              sessionDate: null,
+              effectiveDailyBarDate: null,
+              isTradingDay: null,
+              isMarketOpenNow: null,
+              isPartialBar: false,
+              minutesToOpen: null,
+              minutesToClose: null,
+              triggerSource: 'api',
+              analysisIntent: 'auto',
+              warnings: ['calendar_unavailable'],
+            },
+          }}
+          summary={baseSummary}
+        />
+      </MemoryRouter>,
     );
 
     expect(screen.getByText('市场阶段: 阶段未知')).toBeVisible();
@@ -109,7 +116,7 @@ describe('ReportOverview', () => {
   });
 
   it('does not render a market phase placeholder for legacy reports', () => {
-    render(<ReportOverview meta={baseMeta} summary={baseSummary} />);
+    render(<MemoryRouter><ReportOverview meta={baseMeta} summary={baseSummary} /></MemoryRouter>);
 
     expect(screen.queryByText(/市场阶段/)).not.toBeInTheDocument();
     expect(screen.queryByText('日线未完成')).not.toBeInTheDocument();
@@ -117,21 +124,23 @@ describe('ReportOverview', () => {
 
   it('renders related boards with leading and lagging markers', () => {
     render(
-      <ReportOverview
-        meta={baseMeta}
-        summary={baseSummary}
-        details={{
-          belongBoards: [
-            { name: ' 白酒 ', type: '行业' },
-            { name: '消费', type: '概念' },
-            { name: '新能源' },
-          ],
-          sectorRankings: {
-            top: [{ name: '白酒', changePct: 2.31 }],
-            bottom: [{ name: '消费', changePct: -1.2 }],
-          },
-        }}
-      />,
+      <MemoryRouter>
+        <ReportOverview
+          meta={baseMeta}
+          summary={baseSummary}
+          details={{
+            belongBoards: [
+              { name: ' 白酒 ', type: '行业' },
+              { name: '消费', type: '概念' },
+              { name: '新能源' },
+            ],
+            sectorRankings: {
+              top: [{ name: '白酒', changePct: 2.31 }],
+              bottom: [{ name: '消费', changePct: -1.2 }],
+            },
+          }}
+        />
+      </MemoryRouter>,
     );
 
     expect(screen.getByText('关联板块')).toBeInTheDocument();
@@ -146,18 +155,20 @@ describe('ReportOverview', () => {
 
   it('places related boards below action advice and renders more than three on one row', () => {
     const { container } = render(
-      <ReportOverview
-        meta={baseMeta}
-        summary={baseSummary}
-        details={{
-          belongBoards: [
-            { name: '白酒', type: '行业' },
-            { name: '消费', type: '概念' },
-            { name: '高端制造' },
-            { name: '沪股通' },
-          ],
-        }}
-      />,
+      <MemoryRouter>
+        <ReportOverview
+          meta={baseMeta}
+          summary={baseSummary}
+          details={{
+            belongBoards: [
+              { name: '白酒', type: '行业' },
+              { name: '消费', type: '概念' },
+              { name: '高端制造' },
+              { name: '沪股通' },
+            ],
+          }}
+        />
+      </MemoryRouter>,
     );
 
     const actionAdviceTitle = screen.getByText('操作建议');
@@ -171,13 +182,15 @@ describe('ReportOverview', () => {
 
   it('shows board list when rankings are unavailable', () => {
     render(
-      <ReportOverview
-        meta={baseMeta}
-        summary={baseSummary}
-        details={{
-          belongBoards: [{ name: '半导体', type: '行业' }],
-        }}
-      />,
+      <MemoryRouter>
+        <ReportOverview
+          meta={baseMeta}
+          summary={baseSummary}
+          details={{
+            belongBoards: [{ name: '半导体', type: '行业' }],
+          }}
+        />
+      </MemoryRouter>,
     );
 
     expect(screen.getByText('关联板块')).toBeInTheDocument();
@@ -188,29 +201,41 @@ describe('ReportOverview', () => {
   });
 
   it('hides related boards section when no boards are available', () => {
-    render(<ReportOverview meta={baseMeta} summary={baseSummary} details={{ belongBoards: [] }} />);
+    render(<MemoryRouter><ReportOverview meta={baseMeta} summary={baseSummary} details={{ belongBoards: [] }} /></MemoryRouter>);
 
     expect(screen.queryByText('关联板块')).not.toBeInTheDocument();
   });
 
   it('fails open on malformed ranking payloads', () => {
     render(
-      <ReportOverview
-        meta={baseMeta}
-        summary={baseSummary}
-        details={{
-          belongBoards: [{ name: ' 白酒 ' }],
-          sectorRankings: {
-            top: {} as unknown as never[],
-            bottom: [{ name: '白酒', changePct: '-2.5%' as unknown as number }],
-          },
-        }}
-      />,
+      <MemoryRouter>
+        <ReportOverview
+          meta={baseMeta}
+          summary={baseSummary}
+          details={{
+            belongBoards: [{ name: ' 白酒 ' }],
+            sectorRankings: {
+              top: {} as unknown as never[],
+              bottom: [{ name: '白酒', changePct: '-2.5%' as unknown as number }],
+            },
+          }}
+        />
+      </MemoryRouter>,
     );
 
     expect(screen.getByText('关联板块')).toBeInTheDocument();
     expect(screen.getByText('白酒')).toBeInTheDocument();
     expect(screen.getByText('领跌')).toBeInTheDocument();
     expect(screen.getByText('-2.50%')).toBeInTheDocument();
+  });
+
+  it('shows a workstation link pointing to /stock/<code>', () => {
+    render(
+      <MemoryRouter>
+        <ReportOverview meta={baseMeta} summary={baseSummary} />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole('link', { name: /在工作台打开/ });
+    expect(link).toHaveAttribute('href', '/stock/600519');
   });
 });

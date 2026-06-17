@@ -1,5 +1,6 @@
 import type React from 'react';
 import { Component, lazy, Suspense, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { Drawer } from '../common/Drawer';
 
 interface KLineDrawerProps {
@@ -103,6 +104,15 @@ export const KLineDrawer: React.FC<KLineDrawerProps> = ({
       backdropClassName="bg-background/56 backdrop-blur-[2px]"
     >
       <div className="flex h-[70vh] flex-col">
+        <div className="flex justify-end pb-2">
+          <Link
+            to={'/stock/' + encodeURIComponent(stockCode)}
+            onClick={handleClose}
+            className="text-xs text-secondary-text hover:text-foreground"
+          >
+            在工作台打开 ↗
+          </Link>
+        </div>
         <KLineDrawerErrorBoundary
           resetKey={stockCode}
           fallback={<KLineErrorState onRequestClose={handleClose} />}

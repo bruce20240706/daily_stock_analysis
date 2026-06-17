@@ -1,16 +1,19 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 
 const renderDrawer = async (overrides?: { onClose?: () => void; isOpen?: boolean }) => {
   const { KLineDrawer } = await import('../KLineDrawer');
   const onClose = overrides?.onClose ?? vi.fn();
   render(
-    <KLineDrawer
-      stockCode="600519"
-      stockName="贵州茅台"
-      isOpen={overrides?.isOpen ?? true}
-      onClose={onClose}
-    />,
+    <MemoryRouter>
+      <KLineDrawer
+        stockCode="600519"
+        stockName="贵州茅台"
+        isOpen={overrides?.isOpen ?? true}
+        onClose={onClose}
+      />
+    </MemoryRouter>,
   );
   return onClose;
 };
@@ -79,5 +82,20 @@ describe('KLineDrawer', () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it('workstation link navigates to /stock/<code> and closes the drawer', async () => {
+    vi.resetModules();
+    vi.doMock('../KLineChartPanel', () => ({
+      default: () => <div data-testid="kline-panel" />,
+    }));
+
+    const onClose = vi.fn();
+    await renderDrawer({ onClose });
+
+    const link = screen.getByRole('link', { name: /在工作台打开/ });
+    expect(link).toHaveAttribute('href', '/stock/600519');
+    fireEvent.click(link);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,5 @@
 import type React from 'react';
+import { Link } from 'react-router-dom';
 import type {
   ReportDetails as ReportDetailsType,
   ReportMeta,
@@ -179,6 +180,14 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                     {formatDateTime(meta.createdAt)}
                   </span>
                 </div>
+                {meta.stockCode && (
+                  <Link
+                    to={'/stock/' + encodeURIComponent(meta.stockCode)}
+                    className="mt-2 text-xs text-secondary-text hover:text-foreground inline-flex items-center gap-1"
+                  >
+                    在工作台打开 ↗
+                  </Link>
+                )}
               </div>
             </div>
 

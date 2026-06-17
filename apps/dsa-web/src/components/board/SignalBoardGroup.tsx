@@ -1,4 +1,5 @@
 import type React from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { BoardEntry } from '../../types/kline';
 import { cn } from '../../utils/cn';
 
@@ -14,6 +15,7 @@ const fmtHit = (e: BoardEntry) =>
 interface GroupProps { groupKey: string; title: string; entries: BoardEntry[]; onRowClick: (c: string, n?: string) => void; }
 
 export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entries, onRowClick }) => {
+  const navigate = useNavigate();
   if (entries.length === 0) return null;
   // default sort: hit rate descending, no-sample rows sink to the bottom
   const sorted = [...entries].sort((a, b) => (b.hitRate ?? -1) - (a.hitRate ?? -1));
@@ -25,6 +27,7 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
           <tr className="text-xs text-secondary-text">
             <th className="text-left">标的</th><th>规则</th><th>LLM</th><th>一致性</th>
             <th className="text-left">关键量价信号</th><th>入/损/标</th><th>命中率</th>
+            <th>工作台</th>
           </tr>
         </thead>
         <tbody>
@@ -46,6 +49,15 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
               <td>
                 <span className="text-secondary-text">{fmtHit(e)}</span>{' '}
                 <span className={cn(e.verified ? 'text-success' : 'text-secondary-text')}>{e.verified ? '已验证' : '未验证'}</span>
+              </td>
+              <td>
+                <button
+                  type="button"
+                  onClick={(ev) => { ev.stopPropagation(); navigate('/stock/' + encodeURIComponent(e.code)); }}
+                  className="text-xs text-secondary-text hover:text-foreground"
+                >
+                  工作台 ↗
+                </button>
               </td>
             </tr>
           ))}
