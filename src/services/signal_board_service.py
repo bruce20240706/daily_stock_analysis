@@ -16,6 +16,7 @@ from typing import Optional
 import pandas as pd
 
 from src.config import parse_env_float, parse_env_int
+from src.core.trading_calendar import get_market_for_stock
 from src.services.signals_service import build_signals_payload, buy_signal_to_direction, STALE_TRADING_DAYS_DEFAULT
 from src.services.signal_hit_rate import resolve_marker_hit_fields
 from src.services.stock_service import StockService
@@ -78,7 +79,8 @@ def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
     _lc = rows[-1].get("close")
     latest_close = float(_lc) if _lc is not None else None
 
-    engine_result = compute_volume_price_signals(df, config=VPSConfig.for_market(market))
+    engine_market = get_market_for_stock(code)
+    engine_result = compute_volume_price_signals(df, config=VPSConfig.for_market(engine_market))
 
     rule_signal = None
     try:

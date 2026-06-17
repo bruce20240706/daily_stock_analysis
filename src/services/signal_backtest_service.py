@@ -19,6 +19,7 @@ from src.services.signal_backtest import (
     evaluate_baseline_outcomes,
     evaluate_signal_outcomes,
 )
+from src.services.volume_price_signals import VPSConfig
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from src.storage import SignalStatRow
@@ -101,8 +102,9 @@ class SignalBacktestService:
                     continue
 
                 df = pd.DataFrame(rows)
-                all_sig.extend(evaluate_signal_outcomes(df, market=market, horizon=hz))
-                all_base.extend(evaluate_baseline_outcomes(df, market=market, horizon=hz))
+                cfg_m = VPSConfig.for_market(market)
+                all_sig.extend(evaluate_signal_outcomes(df, market=market, horizon=hz, config=cfg_m))
+                all_base.extend(evaluate_baseline_outcomes(df, market=market, horizon=hz, config=cfg_m))
                 processed += 1
 
             except Exception as exc:  # 单股失败不拖垮整批
