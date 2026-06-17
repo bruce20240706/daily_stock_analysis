@@ -409,6 +409,34 @@ class BacktestSummary(Base):
     )
 
 
+class SignalStatRow(Base):
+    """信号规则三重门回测统计（按 signal_type × market × interval × horizon 聚合）。"""
+
+    __tablename__ = 'signal_stats'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    signal_type = Column(String(64), nullable=False, index=True)
+    market = Column(String(16), nullable=False, index=True)   # cn/hk/us/crypto
+    interval = Column(String(8), nullable=False, default='1d')
+    horizon = Column(Integer, nullable=False)
+    win = Column(Integer, default=0)
+    loss = Column(Integer, default=0)
+    sample = Column(Integer, default=0)
+    win_rate = Column(Float)
+    ci_low = Column(Float)
+    ci_high = Column(Float)
+    baseline_win_rate = Column(Float)
+    excess = Column(Float)
+    computed_at = Column(DateTime, default=datetime.now, index=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            'signal_type', 'market', 'interval', 'horizon',
+            name='uix_signal_stats_type_market_interval_horizon',
+        ),
+    )
+
+
 class PortfolioAccount(Base):
     """Portfolio account metadata."""
 
