@@ -18,6 +18,9 @@ const ruleBull = (over: Partial<SignalMarker> = {}): SignalMarker => ({
   hitRate: 0.62,
   hitSample: 18,
   verified: true,
+  ciLow: null,
+  ciHigh: null,
+  baselineExcess: null,
   asOf: null,
   ...over,
 });
