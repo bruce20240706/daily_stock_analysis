@@ -48,8 +48,11 @@ def test_build_signals_for_code_returns_board_signals(monkeypatch):
 
     bs = sbs.build_signals_for_code("600519", days=120)
 
-    assert set(bs.signals_payload) == {"status", "markers", "price_lines", "consistency", "degraded_reason"}
+    assert {"status", "markers", "price_lines", "consistency", "degraded_reason", "resonance"}.issubset(
+        set(bs.signals_payload)
+    )
     assert bs.signals_payload["status"] == "ok"
+    assert bs.signals_payload["resonance"] == "none"   # neutral direction → no deep fetch
     assert bs.rule_direction == "bullish"
     assert bs.latest_close == 1800.0
     assert bs.name == "贵州茅台"
