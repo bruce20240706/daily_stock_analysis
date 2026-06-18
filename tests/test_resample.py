@@ -1,5 +1,6 @@
 import pandas as pd
 import pytest
+from data_provider.base import attach_ma_indicators
 from data_provider.resample import resample_ohlc
 
 
@@ -62,7 +63,15 @@ def test_invalid_period_raises():
         resample_ohlc(_daily(["2024-01-01"], [10]), "hourly")
 
 
-from data_provider.base import attach_ma_indicators
+def test_datetime_date_input_supported():
+    df = pd.DataFrame({
+        "date": pd.to_datetime(["2024-01-01", "2024-01-08"]),
+        "open": [10, 20], "high": [10, 20], "low": [10, 20], "close": [10, 20],
+        "volume": [1, 1], "amount": [10, 10],
+    })
+    out = resample_ohlc(df, "weekly")
+    assert len(out) == 2
+    assert out.iloc[1]["close"] == 20
 
 
 def test_attach_ma_matches_daily_formula():
