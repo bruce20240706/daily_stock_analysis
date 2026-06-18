@@ -46,7 +46,7 @@ M4-A 的目标是两件事，且两件都建立在 M3 的日线可信度之上�
 **`data_provider/resample.py`** — 市场无关、确定性的纯函数：
 
 - `resample_ohlc(df_daily, period) -> df_period`
-  - 输入：标准化日线帧（`STANDARD_COLUMNS = ['date','open','high','low','close','volume','amount','pct_chg']`）。
+  - 输入：日线帧，**仅依赖 date/open/high/low/close（+可选 volume/amount）**，不要求输入含 `pct_chg`（对 board 那份用 `change_percent` 命名、且 date 为字符串的 dict 帧同样可用）；date 字符串或 datetime 皆可，内部统一 `to_datetime`。
   - `period ∈ {'weekly','monthly'}`。
   - 聚合：`open=first / high=max / low=min / close=last / volume=sum / amount=sum`。
   - `pct_chg` 重算：本期 close vs 上期 close；首根置 NaN。
@@ -96,9 +96,10 @@ M4-A 的目标是两件事，且两件都建立在 M3 的日线可信度之上�
 
 ### 5.2 共振流
 
-1. board service 对每个 code 抓**一份足够深的日线**（够月线 MA20 暖机，深度同 §5.1 monthly 口径），日线近段用于信号、整段 `resample` 用于周/月趋势。**一次抓取两用，不重复抓**（实现需断言抓取次数）。
-2. `period_trend(weekly)`、`period_trend(monthly)` → `resonance_level(entry.signal_direction, weekly_trend, monthly_trend)` → 附到 entry。
-3. **单股共振计算失败不拖垮看板**：该股 `resonance` 降级为 `none`，其余股正常（符合稳定性护栏：单股/单源失败不拖垮主流程）。
+1. board service 的 M3 信号抓取（`get_history_data(period=daily, days=120)`）**保持不动**。原因：`DataFetcherManager.get_daily_data(days=N)` 按日历窗口 `start=end−N*2 天` 取数、返回该窗口内全部交易日（**非固定 N 根**，`days=120` 实际约 165 根），对一份深抓结果做 `tail(days)` 切片无法等价还原 M3 引擎窗口，会让引擎输入漂移。故**不复用同一份抓取**（修正 brainstorm 阶段的「一次抓取两用」设想，以代码真实语义为准、稳定性优先）。
+2. 共振改为**独立、按方向门控**的深抓：仅当该 code 规则方向为 bullish/bearish（买/卖）时，再抓一份足够深的日线（够月线 MA20 暖机，`RESONANCE_DAILY_DAYS≈750`）做 `resample` + `period_trend`；**hold/中性/unavailable 完全不抓**（零额外开销）。
+3. `period_trend(weekly)`、`period_trend(monthly)` → `resonance_level(rule_direction, weekly_trend, monthly_trend)` → 写入 `signals_payload['resonance']`，由 `/signals`（单股）与 `/board`（看板）共用的 `build_signals_for_code` 一次算出、两路共享。
+4. **单股共振计算失败不拖垮看板**：该股 `resonance` 降级为 `none`，其余股正常（符合稳定性护栏：单股/单源失败不拖垮主流程）。
 
 ## 6. 共振判定规则（汇总，见 §4.1 精确定义）
 
@@ -135,7 +136,7 @@ M4-A 的目标是两件事，且两件都建立在 M3 的日线可信度之上�
 - `src/services/multi_period_resonance.py`：`period_trend` 多头/空头/纠缠/收盘未确认/NaN 各 fixture；`resonance_level` 买×周看多→`weekly`、买×周月皆看多→`weekly_monthly`、买×周中性/反向→`none`（周线门控）、卖向对称、hold/中性方向→`none`。
 - `src/services/stock_service.py`：`get_history_data(period='weekly'/'monthly')` 返回 resampled 同结构；daily 路径回归不变；抓取深度派生（warmup）；历史不足优雅降级（不抛错）。
 - API `tests/`：`GET /history?period=weekly` 由 **422 → 200**，schema 不变 + period 回显；`days` 放宽上限边界值。
-- board/drilldown service：entry 带 `resonance`；**单股共振失败不破坏看板**（mock 一股抛错 → 该股 `none`、其余正常）；一次抓取两用、不重复抓（spy 断言抓取次数）。
+- board/drilldown service：entry + `SignalsResponse` 带 `resonance`；**单股共振失败不破坏看板**（mock 一股抛错 → 该股 `none`、其余正常）；共振抓取**按方向门控**（spy 断言：hold/中性 entry 不触发第二次 `get_history_data`，仅 buy/sell 触发）；M3 信号抓取与引擎窗口保持不变（回归断言：daily 信号路径零改动）。
 
 前端单测（vitest）：
 
@@ -153,7 +154,7 @@ M4-A 的目标是两件事，且两件都建立在 M3 的日线可信度之上�
 - 风险：
   - 月线展示根数偏少（即便放宽 days），体验弱——列为 v1 限制。
   - 日历分组与交易所官方周/月 bar 有边界差异——文档说明。
-  - board 加深日线抓取 → 单股抓取量上升；用一次抓取两用 + 失败降级控制开销与稳定性。
+  - board 共振对 buy/sell entry 增加一次深抓 → 单股抓取量上升；用方向门控（仅 buy/sell 抓）+ 失败降级 + 看板 TTL 缓存控制开销；M3 信号路径零改动。
   - 堆叠在 M3 之上：M3 若在 review 中改动需 rebase；M4-A 入 main 须等 M3 先入。
 - 回滚：M4-A 改动集中在新增模块 + `stock_service` period 分支 + 前端切换/徽标，回滚 = 还原 period 分支抛错 + 撤前端组件 + 撤 schema 追加字段；signal_stats/daily 主链未动，回滚面小。
 
