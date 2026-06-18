@@ -322,6 +322,28 @@ def test_preserves_sell_signal_when_significant_risk_exists_near_support() -> No
     assert result.operation_advice == "卖出"
 
 
+def test_downgrades_buy_with_outflow_and_no_breakout() -> None:
+    # buy + outflow + price not breaking out → structural hold (buy_with_outflow branch)
+    result = _result(
+        decision_type="buy",
+        operation_advice="买入",
+        score=65,
+        current_price=31.5,  # mid-range, not near resistance, no breakout
+    )
+
+    stabilize_decision_with_structure(
+        result,
+        SimpleNamespace(support_levels=[30.0], resistance_levels=[34.0]),
+        _fund_flow(main=-1_500_000, five_day=-2_000_000, ten_day=-1_000_000),
+    )
+
+    assert result.decision_type == "hold"
+    assert result.operation_advice == "震荡观望"
+    assert result.sentiment_score <= 59
+    assert result.dashboard["decision_stability"]["applied"] is True
+    assert "主力资金流出" in result.risk_warning
+
+
 def test_refines_hold_pullback_near_support_as_shakeout_watch() -> None:
     result = _result(
         decision_type="hold",

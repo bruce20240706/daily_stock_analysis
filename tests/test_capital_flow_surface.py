@@ -1,3 +1,4 @@
+import copy
 import types
 from src.analyzer import _build_capital_flow_from_context, fill_capital_flow_if_needed, _dragon_tiger_prompt_line
 
@@ -79,3 +80,27 @@ def test_dragon_tiger_prompt_line_absent_when_not_on_list():
 def test_dragon_tiger_prompt_line_absent_when_not_supported():
     assert _dragon_tiger_prompt_line(_ctx(dt_status="not_supported", on_list=False)) == ""
     assert _dragon_tiger_prompt_line(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# Task 5: 决策回归锁定 — fill 不改 decision_stability，不向 data_perspective 注入外溢键
+# ---------------------------------------------------------------------------
+
+def _result_with_dashboard(decision_type="buy"):
+    return types.SimpleNamespace(
+        dashboard={}, report_language="zh", decision_type=decision_type,
+        confidence_level="高", operation_advice="买入",
+    )
+
+
+def test_capital_flow_fill_then_stabilize_no_decision_stability_keys_added():
+    # fill 先于 stabilize（LLM 后）运行；fill 只写 data_perspective.capital_flow，不碰 decision_stability
+    result = _result_with_dashboard()
+    fill_capital_flow_if_needed(result, _ctx())
+    ds_before = copy.deepcopy(result.dashboard.get("decision_stability"))
+    assert ds_before is None  # fill 不建 decision_stability
+    cf = result.dashboard["data_perspective"]["capital_flow"]
+    assert set(cf) == {
+        "main_net_inflow", "inflow_5d", "inflow_10d", "net_flow_status",
+        "dragon_tiger_on_list", "dragon_tiger_recent_count", "dragon_tiger_latest_date",
+    }  # 无外溢键
