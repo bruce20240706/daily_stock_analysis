@@ -1,6 +1,7 @@
 """/history 端点 days Query 契约回归。
 
 M0 只放宽该端点 Query 的默认值（30→120），上限保持 365、下限保持 1；
+M4-A 进一步将 days 上限放宽至 1825，以支撑周/月线长窗口需求。
 mock StockService，断言 handler 真正收到的 days 值（默认/显式/越界拒绝），
 不依赖真实网络或 DB。同时锁定：放宽仅作用于本端点，不触碰 alert 取数上限。
 """
@@ -41,14 +42,14 @@ def test_history_days_explicit_is_passed_through(mock_stock_service):
     assert _CapturingStockService.last_days == 45
 
 
-def test_history_days_upper_bound_still_365(mock_stock_service):
-    resp = client.get("/api/v1/stocks/600519/history?days=365")
+def test_history_days_upper_bound_is_1825(mock_stock_service):
+    resp = client.get("/api/v1/stocks/600519/history?days=1825")
     assert resp.status_code == 200
-    assert _CapturingStockService.last_days == 365
+    assert _CapturingStockService.last_days == 1825
 
 
-def test_history_days_above_365_rejected(mock_stock_service):
-    resp = client.get("/api/v1/stocks/600519/history?days=366")
+def test_history_days_above_1825_rejected(mock_stock_service):
+    resp = client.get("/api/v1/stocks/600519/history?days=1826")
     assert resp.status_code == 422
 
 
