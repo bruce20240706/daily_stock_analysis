@@ -168,6 +168,7 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
       // 透传 days：保持 /signals 与 /history 同源同窗口（结构性保证，不依赖默认值巧合）
       .getSignals(stockCode, days)
       .then((signals) => {
+        if (chartRef.current !== chart) return;
         setResonance(signals.resonance);
         if (signals.status === 'degraded') {
           // 有图无标注：后端降级（任意非空 degraded_reason）一律按通用降级，不画任何标注。
@@ -244,7 +245,7 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
             <button
               key={p}
               type="button"
-              onClick={() => setPeriod(p)}
+              onClick={() => { setPeriod(p); setDrilldownMarkers(null); }}
               aria-pressed={period === p}
               className={cn(
                 'rounded-lg px-3 py-1.5 text-xs',
@@ -289,7 +290,7 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
             信号标注暂不可用，已展示纯 K 线图。
           </div>
         )}
-        {drilldownMarkers && (
+        {period === 'daily' && drilldownMarkers && (
           <div className="absolute right-2 top-2 z-10 w-72 max-w-[80%]">
             <SignalDrilldownPanel
               markers={drilldownMarkers}

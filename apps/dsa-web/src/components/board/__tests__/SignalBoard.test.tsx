@@ -134,7 +134,9 @@ describe('SignalBoard', () => {
         <SignalBoard entries={[mk({ code: '600519', name: '贵州茅台', resonance: 'weekly_monthly' })]} onRowClick={vi.fn()} />
       </MemoryRouter>,
     );
-    expect(screen.getByTestId('board-resonance')).toHaveTextContent('共振·周月');
+    const badge = screen.getByTestId('board-resonance');
+    expect(badge).toHaveTextContent('共振·周月');
+    expect(badge).toHaveAttribute('aria-label', expect.stringContaining('共振'));
   });
 
   it('omits resonance badge when resonance is none', () => {

@@ -94,7 +94,9 @@ describe('SignalDrilldownPanel', () => {
 
   it('renders resonance header badge when active', () => {
     render(<SignalDrilldownPanel markers={[]} resonance="weekly" onClose={() => {}} />);
-    expect(screen.getByTestId('drilldown-resonance')).toHaveTextContent('共振·周');
+    const badge = screen.getByTestId('drilldown-resonance');
+    expect(badge).toHaveTextContent('共振·周');
+    expect(badge).toHaveAttribute('aria-label', expect.stringContaining('共振'));
   });
 
   it('omits resonance badge when none', () => {
