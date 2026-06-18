@@ -1139,6 +1139,11 @@ class StockAnalysisPipeline:
             if result and chip_data is not None:
                 normalize_chip_structure_availability(result, chip_data)
 
+            # 资金面 section（主力资金流 + 龙虎榜呈现, presence-only, A股, 对决策只读）
+            # 与传统路径 Step 7.6b 同序：chip → capital_flow → price_position → stabilize
+            if result:
+                fill_capital_flow_if_needed(result, fundamental_context)
+
             # price_position fallback (same as non-agent path Step 7.7)
             if result:
                 fill_price_position_if_needed(result, trend_result, realtime_quote)

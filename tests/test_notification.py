@@ -1740,7 +1740,8 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
                         "main_net_inflow": "1.23亿",
                         "inflow_5d": "5.67亿",
                         "inflow_10d": "8.90亿",
-                        "net_flow_status": "主力净流入",
+                        # 生产口径：net_flow_status 来自 bias 人读映射（净流入/净流出/中性/未知）
+                        "net_flow_status": "净流入",
                         "dragon_tiger_on_list": True,
                         "dragon_tiger_recent_count": 3,
                         "dragon_tiger_latest_date": "2026-06-10",
@@ -1754,8 +1755,11 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertIn("资金面", out)
         self.assertIn("主力净流入", out)
         self.assertIn("1.23亿", out)
+        # net_flow_status 唯一来源：括号内 (净流入)
+        self.assertIn("(净流入)", out)
+        # 龙虎榜行唯一断言：次数 + 日期同时出现（避免 "3" 命中日期 2026-06-10）
         self.assertIn("龙虎榜", out)
-        self.assertIn("3", out)
+        self.assertIn("3 次", out)
         self.assertIn("2026-06-10", out)
 
     @mock.patch("src.notification.get_config")
@@ -1776,7 +1780,8 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
                         "main_net_inflow": "-0.55亿",
                         "inflow_5d": "-1.20亿",
                         "inflow_10d": "0.30亿",
-                        "net_flow_status": "主力净流出",
+                        # 生产口径：net_flow_status = 纯 bias 人读映射
+                        "net_flow_status": "净流出",
                         "dragon_tiger_on_list": False,
                     }
                 }
@@ -1786,7 +1791,7 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         out = service.generate_dashboard_report([result], report_date="2026-06-18")
 
         self.assertIn("资金面", out)
-        self.assertIn("主力净流出", out)
+        self.assertIn("(净流出)", out)
         self.assertNotIn("龙虎榜", out)
 
     @mock.patch("src.notification.get_config")
@@ -1817,6 +1822,82 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
 
         self.assertNotIn("资金面", out)
         self.assertNotIn("龙虎榜", out)
+
+    @mock.patch("src.notification.get_config")
+    def test_notification_capital_flow_english(self, mock_get_config: mock.MagicMock):
+        """report_language=en: 资金面 block renders English labels; 龙虎榜 line has no ' 次' suffix."""
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False, report_language="en")
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="Kweichow Moutai",
+            sentiment_score=72,
+            trend_prediction="Bullish",
+            operation_advice="Hold",
+            analysis_summary="Steady",
+            report_language="en",
+            dashboard={
+                "data_perspective": {
+                    "capital_flow": {
+                        "main_net_inflow": "1.23亿",
+                        "inflow_5d": "5.67亿",
+                        "inflow_10d": "8.90亿",
+                        "net_flow_status": "Inflow",
+                        "dragon_tiger_on_list": True,
+                        "dragon_tiger_recent_count": 3,
+                        "dragon_tiger_latest_date": "2026-06-10",
+                    }
+                }
+            },
+        )
+
+        out = service.generate_dashboard_report([result], report_date="2026-06-18")
+
+        self.assertIn("Capital Flow", out)
+        self.assertIn("(Inflow)", out)
+        self.assertIn("Dragon-Tiger list: on list", out)
+        self.assertIn("2026-06-10", out)
+        # EN 不带 " 次" 后缀
+        self.assertNotIn(" 次", out)
+
+    @mock.patch("src.notification.get_config")
+    def test_notification_capital_flow_renderer_path(self, mock_get_config: mock.MagicMock):
+        """report_renderer_enabled=True: Jinja2 模板渲染资金面 section + 龙虎榜行(上榜)。"""
+        mock_get_config.return_value = _make_config(report_renderer_enabled=True)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+            report_language="zh",
+            dashboard={
+                "data_perspective": {
+                    "capital_flow": {
+                        "main_net_inflow": "1.23亿",
+                        "inflow_5d": "5.67亿",
+                        "inflow_10d": "8.90亿",
+                        "net_flow_status": "净流入",
+                        "dragon_tiger_on_list": True,
+                        "dragon_tiger_recent_count": 3,
+                        "dragon_tiger_latest_date": "2026-06-10",
+                    }
+                }
+            },
+        )
+
+        out = service.generate_dashboard_report([result], report_date="2026-06-18")
+
+        # 必须走 Jinja2 渲染分支（含模板专有标题“数据透视”）
+        self.assertIn("数据透视", out)
+        self.assertIn("资金面", out)
+        self.assertIn("主力净流入", out)
+        self.assertIn("(净流入)", out)
+        self.assertIn("龙虎榜：上榜", out)
+        self.assertIn("3 次", out)
+        self.assertIn("2026-06-10", out)
 
 
 if __name__ == "__main__":

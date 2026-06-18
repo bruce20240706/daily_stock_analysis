@@ -230,6 +230,8 @@ def test_capital_flow_model_fields():
     assert cf.net_flow_status == "净流入"
     assert cf.dragon_tiger_on_list is True
     assert cf.dragon_tiger_recent_count == 2
+    # 字段数锁定：新增/删除字段必须显式更新此断言 + notification/模板/docs 三处呈现
+    assert len(CapitalFlow.model_fields) == 7
 
 
 def test_data_perspective_capital_flow_optional_backward_compat():

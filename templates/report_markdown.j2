@@ -106,6 +106,14 @@
 {% elif chip_unavailable_reason %}
 **{{ labels.chip_label }}**: {{ chip_unavailable_reason }}
 {% endif %}
+
+{% set cf_data = data_persp.get('capital_flow', {}) %}
+{% if cf_data %}
+**{{ labels.capital_flow_label }}**: {{ labels.main_net_inflow_label }} {{ 'N/A' if cf_data.get('main_net_inflow') is none else cf_data.get('main_net_inflow') }} ({{ cf_data.get('net_flow_status') or 'N/A' }}) | 5d {{ 'N/A' if cf_data.get('inflow_5d') is none else cf_data.get('inflow_5d') }} | 10d {{ 'N/A' if cf_data.get('inflow_10d') is none else cf_data.get('inflow_10d') }}
+{% if cf_data.get('dragon_tiger_on_list') %}
+🐯 {{ labels.dragon_tiger_on_list_label }} {{ cf_data.get('dragon_tiger_recent_count', 'N/A') }}{{ labels.dragon_tiger_count_suffix }}, {{ cf_data.get('dragon_tiger_latest_date', 'N/A') }}
+{% endif %}
+{% endif %}
 {% endif %}
 
 {% set phase_decision = dashboard.get('phase_decision') or {} %}

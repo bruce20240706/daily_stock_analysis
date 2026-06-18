@@ -54,12 +54,17 @@
 
 ### LLM prompt 注入
 
-当股票上榜（`dragon_tiger_on_list == True`）时，`_dragon_tiger_prompt_line`（`src/analyzer.py`）向分析 prompt 追加一行标志级提示（次数 + 日期），供 LLM 在分析中引用参考。未上榜时不追加任何内容。
+当股票上榜且数据可用（`dragon_tiger` 块 `status in {ok, partial}` 且 `dragon_tiger_on_list == True`）时，`_dragon_tiger_prompt_line`（`src/analyzer.py`）向分析 prompt 追加一行标志级提示（次数 + 日期），供 LLM 在分析中引用参考。未上榜、`status` 为 `not_supported`/`failed`，或非 dict 输入时，不追加任何内容（与 `CapitalFlow` section 同源 status 门控）。
+
+> **agent 模式**：资金面 section 正常填充；龙虎榜/主力资金流的 *curated prompt 行* 为传统路径便利，agent 模式经 `fundamental_context` 通道供 LLM 使用。
+>
+> 说明：agent 路径在 `_analyze_with_agent` 中通过 `initial_context["fundamental_context"]`（`src/core/pipeline.py`）把含 `dragon_tiger`/`capital_flow` 的原始 `fundamental_context` 交给 LLM；`_dragon_tiger_prompt_line` 与主力资金流 prompt 量级表都是 `_format_prompt` 阶段的传统路径便利行，不注入 agent prompt。两条路径都会在 LLM 后填充 `CapitalFlow` section（agent 路径同序：chip → capital_flow → price_position → stabilize）。
 
 ### 报告与 notification 呈现
 
-- 上榜时，`CapitalFlow` section 中的龙虎榜字段（`dragon_tiger_on_list/recent_count/latest_date`）会填充并在 notification 资金面 markdown 块中渲染谨慎提示。
+- 上榜时，`CapitalFlow` section 中的龙虎榜字段（`dragon_tiger_on_list/recent_count/latest_date`）会填充并在 notification 资金面块中渲染谨慎提示。
 - 未上榜或数据不可用时，对应字段为 `None`，notification 不渲染龙虎榜行。
+- **两条 notification 渲染路径均覆盖**：legacy markdown 分支（`src/notification.py`）与 `report_renderer_enabled=True` 的 Jinja2 模板分支（`templates/report_markdown.j2`，经 `src/report_language.py` 的 `labels` 双语机制）都渲染资金面 section 与龙虎榜行，语义一致。
 
 ---
 
@@ -76,12 +81,16 @@
 
 ## presence-only 与 A 股 gate
 
-| 场景 | capital_flow status | dragon_tiger status | CapitalFlow section | notification 资金面块 |
-|---|---|---|---|---|
-| A 股，数据正常 | `ok` | `ok` / `partial` | 填充 | 渲染 |
-| A 股，数据抓取失败 | `failed` / `partial` | `failed` | 不填充 | 不渲染 |
-| 港股 / 美股 / crypto | `not_supported` | `not_supported` | 缺席 | 缺席 |
-| ETF | `not_supported` | `not_supported` | 缺席 | 缺席 |
+section 是否出现取 **OR 语义**：两块中只要任一 `status in {ok, partial}` 即填充该块对应字段，另一块字段保持 `None`；两块均不可用才整体缺席。
+
+| 场景 | capital_flow status | dragon_tiger status | CapitalFlow section | 主力资金流字段 | 龙虎榜字段 |
+|---|---|---|---|---|---|
+| A 股，数据正常 | `ok` | `ok` / `partial` | 填充 | 填充 | 上榜时填充 |
+| A 股，仅资金流可用 | `ok` | `failed` / `not_supported` | 填充 | 填充 | `None`（不渲染上榜行） |
+| A 股，仅龙虎榜可用 | `failed` / `partial` | `ok` | 填充 | `None`（含 `net_flow_status`） | 上榜时填充 |
+| A 股，两块均失败 | `failed` | `failed` | 不填充 | — | — |
+| 港股 / 美股 / crypto | `not_supported` | `not_supported` | 缺席 | — | — |
+| ETF | `not_supported` | `not_supported` | 缺席 | — | — |
 
 非 A 股或 ETF 时，`get_capital_flow_context` / `get_dragon_tiger_context` 直接返回 `not_supported`，`fill_capital_flow_if_needed` 不写入 `capital_flow` 字段，notification 资金面块不渲染，`_dragon_tiger_prompt_line` 不追加 prompt 行。
 

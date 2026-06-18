@@ -56,6 +56,30 @@ def test_build_dragon_tiger_not_on_list():
     assert out["dragon_tiger_on_list"] is False
 
 
+def test_build_asymmetric_cf_failed_dt_ok():
+    # cf failed 但 dt ok：section 出现，主力资金流字段/net_flow_status 全 None，龙虎榜照填
+    out = _build_capital_flow_from_context(_ctx(cf_status="failed", dt_status="ok", on_list=True))
+    assert out is not None
+    assert out["main_net_inflow"] is None
+    assert out["inflow_5d"] is None
+    assert out["inflow_10d"] is None
+    assert out["net_flow_status"] is None
+    assert out["dragon_tiger_on_list"] is True
+    assert out["dragon_tiger_recent_count"] == 2
+    assert out["dragon_tiger_latest_date"] == "2026-06-17"
+
+
+def test_build_asymmetric_cf_ok_dt_failed():
+    # cf ok 但 dt failed：section 出现，主力资金流照填，龙虎榜字段全 None（不渲染上榜）
+    out = _build_capital_flow_from_context(_ctx(cf_status="ok", dt_status="failed", mni=1.2e8), language="zh")
+    assert out is not None
+    assert out["main_net_inflow"] == 1.2e8
+    assert out["net_flow_status"] == "净流入"
+    assert out["dragon_tiger_on_list"] is None
+    assert out["dragon_tiger_recent_count"] is None
+    assert out["dragon_tiger_latest_date"] is None
+
+
 def test_fill_sets_data_perspective_capital_flow():
     result = types.SimpleNamespace(dashboard={}, report_language="zh")
     fill_capital_flow_if_needed(result, _ctx())
@@ -74,12 +98,16 @@ def test_dragon_tiger_prompt_line_on_list():
 
 
 def test_dragon_tiger_prompt_line_absent_when_not_on_list():
+    # (a) on_list=False (status ok) → 空串
     assert _dragon_tiger_prompt_line(_ctx(on_list=False)) == ""
-
-
-def test_dragon_tiger_prompt_line_absent_when_not_supported():
-    assert _dragon_tiger_prompt_line(_ctx(dt_status="not_supported", on_list=False)) == ""
     assert _dragon_tiger_prompt_line(None) == ""
+
+
+def test_dragon_tiger_prompt_line_absent_when_status_not_supported():
+    # (b) status="not_supported" 但 on_list=True → 仍空串（真正命中 status 门控，与 section 同源）
+    assert _dragon_tiger_prompt_line(_ctx(dt_status="not_supported", on_list=True)) == ""
+    # status="failed" 同样门控掉，即便 on_list=True
+    assert _dragon_tiger_prompt_line(_ctx(dt_status="failed", on_list=True)) == ""
 
 
 # ---------------------------------------------------------------------------

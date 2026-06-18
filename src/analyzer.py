@@ -905,10 +905,10 @@ def fill_capital_flow_if_needed(
         )
         if built is None:
             return
-        if not result.dashboard:
-            result.dashboard = {}
-        dp = result.dashboard.get("data_perspective") or {}
-        result.dashboard["data_perspective"] = dp
+        dashboard = result.dashboard if isinstance(result.dashboard, dict) else {}
+        result.dashboard = dashboard
+        dp = dashboard.get("data_perspective") or {}
+        dashboard["data_perspective"] = dp
         dp["capital_flow"] = built
         logger.info("[capital_flow] Filled capital-flow section from fundamental_context")
     except Exception as e:
@@ -916,11 +916,19 @@ def fill_capital_flow_if_needed(
 
 
 def _dragon_tiger_prompt_line(fundamental_context: Optional[Dict[str, Any]]) -> str:
-    """龙虎榜 presence-only prompt 行（标志级，非量级）；未上榜/不可用 → 空串。"""
+    """龙虎榜 presence-only prompt 行（标志级，非量级）；未上榜/状态不可用 → 空串。
+
+    与 _build_capital_flow_from_context 同源门控：dragon_tiger status 必须 in {ok, partial}，
+    且 is_on_list 为真，才追加 prompt 行。
+    """
     if not isinstance(fundamental_context, dict):
         return ""
     dt = fundamental_context.get("dragon_tiger")
-    data = dt.get("data") if isinstance(dt, dict) and isinstance(dt.get("data"), dict) else {}
+    if not isinstance(dt, dict):
+        return ""
+    if str(dt.get("status") or "").strip().lower() not in ("ok", "partial"):
+        return ""
+    data = dt.get("data") if isinstance(dt.get("data"), dict) else {}
     if not data.get("is_on_list"):
         return ""
     return (

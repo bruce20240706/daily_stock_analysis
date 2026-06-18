@@ -1804,6 +1804,101 @@ class TestAnalyzeWithAgentStockName(unittest.TestCase):
             self.assertEqual(result.dashboard.get("operation_advice"), "洗盘观察")
             self.assertEqual(result.dashboard.get("sentiment_score"), result.sentiment_score)
 
+    def test_analyze_with_agent_fills_capital_flow_section(self):
+        """Agent path must fill data_perspective.capital_flow for A股 + capital_flow ok
+        (mirrors traditional Step 7.6b; previously absent in agent flow)."""
+        with patch('src.core.pipeline.get_config') as mock_config, \
+             patch('src.core.pipeline.get_db'), \
+             patch('src.core.pipeline.DataFetcherManager'), \
+             patch('src.core.pipeline.GeminiAnalyzer'), \
+             patch('src.core.pipeline.NotificationService'), \
+             patch('src.core.pipeline.SearchService'), \
+             patch('src.agent.factory.build_agent_executor') as mock_build_executor:
+
+            mock_cfg = MagicMock()
+            mock_cfg.max_workers = 2
+            mock_cfg.agent_mode = True
+            mock_cfg.agent_max_steps = 10
+            mock_cfg.agent_skills = []
+            mock_cfg.bocha_api_keys = []
+            mock_cfg.tavily_api_keys = []
+            mock_cfg.brave_api_keys = []
+            mock_cfg.serpapi_keys = []
+            mock_cfg.searxng_base_urls = []
+            mock_cfg.searxng_public_instances_enabled = False
+            mock_cfg.news_max_age_days = 7
+            mock_cfg.enable_realtime_quote = True
+            mock_cfg.enable_chip_distribution = True
+            mock_cfg.realtime_source_priority = []
+            mock_cfg.save_context_snapshot = False
+            mock_cfg.report_language = "zh"
+            mock_cfg.agent_orchestrator_timeout_s = 600
+            mock_config.return_value = mock_cfg
+
+            from src.core.pipeline import StockAnalysisPipeline
+            from src.agent.executor import AgentResult
+            from src.enums import ReportType
+            from src.stock_analyzer import TrendAnalysisResult, TrendStatus, BuySignal
+            pipeline = StockAnalysisPipeline(config=mock_cfg)
+
+            agent_result = AgentResult(
+                success=True,
+                content="{}",
+                dashboard={
+                    "sentiment_score": 60,
+                    "trend_prediction": "看多",
+                    "operation_advice": "持有",
+                    "decision_type": "hold",
+                    "analysis_summary": "稳健",
+                    "dashboard": {
+                        "core_conclusion": {"one_sentence": "结论"},
+                    },
+                },
+                provider="gemini",
+            )
+            mock_executor = MagicMock()
+            mock_executor.run.return_value = agent_result
+            mock_build_executor.return_value = mock_executor
+
+            trend_result = TrendAnalysisResult(
+                code="600519",
+                trend_status=TrendStatus.BULL,
+                buy_signal=BuySignal.HOLD,
+                signal_score=60,
+                support_levels=[30.0],
+                resistance_levels=[34.0],
+            )
+            fundamental_context = {
+                "capital_flow": {
+                    "status": "ok",
+                    "data": {"stock_flow": {
+                        "main_net_inflow": 1.2e8, "inflow_5d": 3.0e7, "inflow_10d": 5.0e7}},
+                },
+                "dragon_tiger": {
+                    "status": "ok",
+                    "data": {"is_on_list": True, "recent_count": 2, "latest_date": "2026-06-17"},
+                },
+            }
+
+            result = pipeline._analyze_with_agent(
+                code="600519",
+                report_type=ReportType.SIMPLE,
+                query_id="q-agent-capital-flow",
+                stock_name="贵州茅台",
+                realtime_quote={"price": 31.5, "change_pct": 0.5},
+                chip_data=None,
+                fundamental_context=fundamental_context,
+                trend_result=trend_result,
+            )
+
+            self.assertIsNotNone(result)
+            cf = result.dashboard["data_perspective"]["capital_flow"]
+            self.assertEqual(cf["main_net_inflow"], 1.2e8)
+            self.assertEqual(cf["net_flow_status"], "净流入")
+            self.assertIs(cf["dragon_tiger_on_list"], True)
+            self.assertEqual(cf["dragon_tiger_recent_count"], 2)
+            self.assertEqual(cf["dragon_tiger_latest_date"], "2026-06-17")
+
     def test_analyze_with_agent_phase_integrity_fills_missing_phase_decision(self):
         """Agent weak integrity should enforce phase_decision when phase context exists."""
         with patch('src.core.pipeline.get_config') as mock_config, \
