@@ -30,6 +30,7 @@ from data_provider.realtime_types import ChipDistribution
 from src.analyzer import (
     GeminiAnalyzer,
     AnalysisResult,
+    fill_capital_flow_if_needed,
     fill_price_position_if_needed,
     normalize_chip_structure_availability,
     populate_decision_action_fields,
@@ -619,6 +620,10 @@ class StockAnalysisPipeline:
             # Step 7.6: chip_structure fallback (Issue #589) and unavailable collapse
             if result:
                 normalize_chip_structure_availability(result, chip_data)
+
+            # Step 7.6b: 资金面 section（主力资金流 + 龙虎榜呈现, presence-only, A股, 对决策只读）
+            if result:
+                fill_capital_flow_if_needed(result, fundamental_context)
 
             # Step 7.7: price_position fallback
             if result:

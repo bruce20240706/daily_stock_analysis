@@ -844,6 +844,87 @@ def fill_chip_structure_if_needed(result: "AnalysisResult", chip_data: Any) -> N
         logger.warning("[chip_structure] Fill failed, skipping: %s", e)
 
 
+_NET_FLOW_STATUS_ZH = {"inflow": "净流入", "outflow": "净流出", "neutral": "中性", "unavailable": "未知"}
+_NET_FLOW_STATUS_EN = {"inflow": "Inflow", "outflow": "Outflow", "neutral": "Neutral", "unavailable": "Unknown"}
+
+
+def _build_capital_flow_from_context(
+    fundamental_context: Optional[Dict[str, Any]], language: str = "zh"
+) -> Optional[Dict[str, Any]]:
+    """从 fundamental_context 的 capital_flow + dragon_tiger 块确定性构建资金面 section dict。
+
+    presence-only：两块 status 均非 ok/partial（含非 A股/ETF 的 not_supported）→ 返回 None（section 不出现）。
+    net_flow_status 复用 _capital_flow_bias_with_status 的 bias，人读映射；不引入新阈值。
+    """
+    if not isinstance(fundamental_context, dict):
+        return None
+    cf = fundamental_context.get("capital_flow")
+    dt = fundamental_context.get("dragon_tiger")
+    cf = cf if isinstance(cf, dict) else {}
+    dt = dt if isinstance(dt, dict) else {}
+    cf_ok = str(cf.get("status") or "").strip().lower() in ("ok", "partial")
+    dt_ok = str(dt.get("status") or "").strip().lower() in ("ok", "partial")
+    if not cf_ok and not dt_ok:
+        return None
+    out: Dict[str, Any] = {
+        "main_net_inflow": None, "inflow_5d": None, "inflow_10d": None,
+        "net_flow_status": None,
+        "dragon_tiger_on_list": None, "dragon_tiger_recent_count": None, "dragon_tiger_latest_date": None,
+    }
+    if cf_ok:
+        data = cf.get("data") if isinstance(cf.get("data"), dict) else {}
+        stock_flow = data.get("stock_flow") if isinstance(data.get("stock_flow"), dict) else {}
+        mni = stock_flow.get("main_net_inflow")
+        out["main_net_inflow"] = mni
+        out["inflow_5d"] = stock_flow.get("inflow_5d")
+        out["inflow_10d"] = stock_flow.get("inflow_10d")
+        # Derive net_flow_status from main_net_inflow (primary signal); fall back to
+        # _capital_flow_bias_with_status only when main_net_inflow is unavailable.
+        mni_numeric = _coerce_numeric_value(mni)
+        if mni_numeric is not None:
+            if mni_numeric > 0:
+                bias = "inflow"
+            elif mni_numeric < 0:
+                bias = "outflow"
+            else:
+                bias = "neutral"
+        else:
+            bias = _capital_flow_bias_with_status(fundamental_context)[0]
+        mapping = _NET_FLOW_STATUS_EN if language == "en" else _NET_FLOW_STATUS_ZH
+        out["net_flow_status"] = mapping.get(bias, mapping["unavailable"])
+    if dt_ok:
+        dt_data = dt.get("data") if isinstance(dt.get("data"), dict) else {}
+        out["dragon_tiger_on_list"] = bool(dt_data.get("is_on_list", False))
+        out["dragon_tiger_recent_count"] = dt_data.get("recent_count")
+        out["dragon_tiger_latest_date"] = dt_data.get("latest_date")
+    return out
+
+
+def fill_capital_flow_if_needed(
+    result: "AnalysisResult", fundamental_context: Optional[Dict[str, Any]]
+) -> None:
+    """确定性把资金面（主力资金流 + 龙虎榜）填进 data_perspective.capital_flow（in-place）。
+
+    presence-only + A股-gated；LLM 后、对决策只读；失败静默跳过、不阻断主流程。
+    """
+    if not result:
+        return
+    try:
+        built = _build_capital_flow_from_context(
+            fundamental_context, language=getattr(result, "report_language", "zh")
+        )
+        if built is None:
+            return
+        if not result.dashboard:
+            result.dashboard = {}
+        dp = result.dashboard.get("data_perspective") or {}
+        result.dashboard["data_perspective"] = dp
+        dp["capital_flow"] = built
+        logger.info("[capital_flow] Filled capital-flow section from fundamental_context")
+    except Exception as e:
+        logger.warning("[capital_flow] Fill failed, skipping: %s", e)
+
+
 _PRICE_POS_KEYS = ("ma5", "ma10", "ma20", "bias_ma5", "bias_status", "current_price", "support_level", "resistance_level")
 
 
