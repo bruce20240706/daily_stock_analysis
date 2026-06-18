@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 报告新增「资金面」section：A股主力资金流（主力净流入/5日/10日 + 净流入状态）与龙虎榜（上榜/次数/最新）确定性呈现，notification 渲染
+- [改进] 激活龙虎榜：上榜时以 presence-only 进 LLM 分析 prompt 供引用，并在资金面 section 呈现（不写内部 decision_stability、不改既有主力资金流降级逻辑）
 - [新功能] 新增 K 线价位反算器（derive_price_levels），基于 MA20/近20日低/ATR 派生入场/止损/目标价，经 data_perspective.price_position 接入现有文案护栏，并填充 /signals 的 price_lines（各字段可空）
 - [新功能] Web 个股栏新增 K 线抽屉入口：渲染日线蜡烛 + 成交量副图，支持十字光标、缩放与红涨绿跌/绿涨红跌切换（klinecharts 懒加载，仅在打开抽屉时引入，不影响首屏）。
 - [改进] `GET /api/v1/stocks/{code}/history` 端点 `days` 默认由 30 放宽至 120（上限保持 365），为 K 线抽屉提供更长回看窗口；alert 取数与 data_tools 的 365 上限常量未改动。
