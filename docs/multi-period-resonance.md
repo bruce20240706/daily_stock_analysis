@@ -157,6 +157,7 @@ M3 信号抓取（日历窗口取数 + `get_daily_data`）与共振深抓（`RES
 
 - `GET /api/v1/stocks/{code}/history` 的 `days` 上限由 365 放宽至 1825，纯加宽、向后兼容；日线默认值（120）不变，旧客户端仍正常工作。
 - `resonance` 字段为追加字段，旧客户端不读取时无影响。
+- 日线路径行为基本不变，并额外将异常 NaN 的 `change_percent`（如 pct_chg=0.0 等零值边界）归一为 `None`（更安全，旧实现会让 NaN 透传到响应体）。
 - M3 信号路径、`signal_stats` 回测管线、现有回测/胜率数据**零改动**。
 
 ---

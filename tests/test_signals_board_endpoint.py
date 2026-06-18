@@ -37,3 +37,42 @@ def test_board_endpoint_empty_watchlist(monkeypatch):
                             "degraded_codes": []})
     resp = board_ep.get_signals_board(days=120, refresh=False, service=_Svc([]))
     assert resp.entries == []
+
+
+# T4: /board resonance field end-to-end via BoardEntry(**entry) splat path
+def _entry_with_resonance(code, resonance):
+    """Entry dict WITH explicit resonance value."""
+    base = _entry(code)
+    base["resonance"] = resonance
+    return base
+
+
+def test_board_entry_resonance_weekly_monthly(monkeypatch):
+    """BoardEntry splat with resonance='weekly_monthly' should be accepted and round-trip."""
+    entry_dict = _entry_with_resonance("AAA", "weekly_monthly")
+    monkeypatch.setattr(board_ep, "build_board",
+                        lambda codes, *, days, refresh: {
+                            "as_of": 1,
+                            "entries": [entry_dict],
+                            "counts": {"buy": 1, "hold": 0, "sell": 0, "unavailable": 0},
+                            "degraded_codes": [],
+                        })
+    resp = board_ep.get_signals_board(days=120, refresh=False, service=_Svc(["AAA"]))
+    assert len(resp.entries) == 1
+    assert resp.entries[0].resonance == "weekly_monthly"
+
+
+def test_board_entry_resonance_defaults_to_none(monkeypatch):
+    """BoardEntry splat WITHOUT resonance key should default to 'none'."""
+    entry_dict = _entry("BBB")  # no resonance key
+    assert "resonance" not in entry_dict
+    monkeypatch.setattr(board_ep, "build_board",
+                        lambda codes, *, days, refresh: {
+                            "as_of": 1,
+                            "entries": [entry_dict],
+                            "counts": {"buy": 1, "hold": 0, "sell": 0, "unavailable": 0},
+                            "degraded_codes": [],
+                        })
+    resp = board_ep.get_signals_board(days=120, refresh=False, service=_Svc(["BBB"]))
+    assert len(resp.entries) == 1
+    assert resp.entries[0].resonance == "none"

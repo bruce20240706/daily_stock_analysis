@@ -24,6 +24,14 @@ def resample_ohlc(df_daily: pd.DataFrame, period: str) -> pd.DataFrame:
 
     has_vol = "volume" in df.columns
     has_amt = "amount" in df.columns
+
+    # 强制将 volume/amount 转为 float64（None → NaN），防止 object dtype 0 流入
+    # attach_ma_indicators 触发 ZeroDivisionError（S1 回归）。
+    if has_vol:
+        df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
+    if has_amt:
+        df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+
     key = df["date"].dt.to_period(_PERIOD_FREQ[period])
     grouped = df.groupby(key, sort=True)
 

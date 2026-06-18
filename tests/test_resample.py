@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from data_provider.base import attach_ma_indicators
+from data_provider.base import attach_ma_indicators, BaseFetcher
 from data_provider.resample import resample_ohlc
 
 
@@ -80,3 +80,63 @@ def test_attach_ma_matches_daily_formula():
     assert out["ma5"].iloc[-1] == pytest.approx(sum([11, 12, 13, 14, 15]) / 5)
     assert "ma10" in out and "ma20" in out and "volume_ratio" in out
     assert out["volume_ratio"].iloc[0] == pytest.approx(1.0)  # 首根 shift NaN→1.0
+
+
+# S1 regression: volume/amount 全为 None 时 groupby.sum() 返回 object dtype 0，
+# 导致 attach_ma_indicators 内 volume/avg_volume_5.shift(1) 触发 ZeroDivisionError。
+def test_resample_none_volume_no_zerodivision():
+    """resample_ohlc 输出的 volume 列必须为 float64，不能是 object dtype。
+
+    根因：groupby(...).sum() 对全 None object 列返回整数 0（object dtype），
+    attach_ma_indicators 再做 float 除法时触发 ZeroDivisionError。
+    修复：聚合前对 volume/amount 强制 pd.to_numeric(errors='coerce')→float64，
+    确保结果为 float64（NaN-safe），attach_ma_indicators 不再触发 ZeroDivisionError。
+    """
+    df = pd.DataFrame({
+        "date": ["2024-01-01", "2024-01-02", "2024-01-08", "2024-01-09"],
+        "open": [10.0, 11.0, 20.0, 21.0],
+        "high": [10.0, 11.0, 20.0, 21.0],
+        "low": [10.0, 11.0, 20.0, 21.0],
+        "close": [10.0, 11.0, 20.0, 21.0],
+        "volume": pd.array([None, None, None, None], dtype=object),
+        "amount": pd.array([None, None, None, None], dtype=object),
+    })
+    out = resample_ohlc(df, "weekly")
+    assert len(out) == 2
+    # After fix: volume must be float64, not object
+    assert out["volume"].dtype == float
+    # attach_ma_indicators on the result must not raise ZeroDivisionError
+    result = attach_ma_indicators(out)
+    assert "volume_ratio" in result.columns
+
+
+# T5: _calculate_indicators rounds ma5/ma10/ma20/volume_ratio to 2 decimals
+class _MinimalFetcher(BaseFetcher):
+    """Minimal concrete subclass for testing _calculate_indicators."""
+    name = "_MinimalFetcher"
+
+    def _fetch_raw_data(self, stock_code, start_date, end_date):
+        return pd.DataFrame()
+
+    def _normalize_data(self, df, stock_code):
+        return df
+
+
+def test_calculate_indicators_rounds_to_2_decimals():
+    """BaseFetcher._calculate_indicators must round ma5/ma10/ma20/volume_ratio to 2 decimals."""
+    fetcher = _MinimalFetcher()
+    # Build a frame with values that produce >2 decimal places in rolling mean
+    closes = [10.0, 11.0, 12.0, 13.0, 14.0, 15.0]
+    vols = [3.0, 7.0, 2.0, 5.0, 8.0, 4.0]
+    df = pd.DataFrame({
+        "close": closes,
+        "volume": vols,
+    })
+    result = fetcher._calculate_indicators(df)
+    for col in ["ma5", "ma10", "ma20", "volume_ratio"]:
+        if col in result.columns:
+            series = result[col].dropna()
+            for val in series:
+                assert round(val, 2) == pytest.approx(val, abs=1e-9), (
+                    f"{col} value {val} is not rounded to 2 decimals"
+                )
