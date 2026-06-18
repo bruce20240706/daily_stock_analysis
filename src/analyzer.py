@@ -878,18 +878,8 @@ def _build_capital_flow_from_context(
         out["main_net_inflow"] = mni
         out["inflow_5d"] = stock_flow.get("inflow_5d")
         out["inflow_10d"] = stock_flow.get("inflow_10d")
-        # Derive net_flow_status from main_net_inflow (primary signal); fall back to
-        # _capital_flow_bias_with_status only when main_net_inflow is unavailable.
-        mni_numeric = _coerce_numeric_value(mni)
-        if mni_numeric is not None:
-            if mni_numeric > 0:
-                bias = "inflow"
-            elif mni_numeric < 0:
-                bias = "outflow"
-            else:
-                bias = "neutral"
-        else:
-            bias = _capital_flow_bias_with_status(fundamental_context)[0]
+        # net_flow_status 完全复用 _capital_flow_bias_with_status 的 bias，保持显示与决策同源。
+        bias = _capital_flow_bias_with_status(fundamental_context)[0]
         mapping = _NET_FLOW_STATUS_EN if language == "en" else _NET_FLOW_STATUS_ZH
         out["net_flow_status"] = mapping.get(bias, mapping["unavailable"])
     if dt_ok:
