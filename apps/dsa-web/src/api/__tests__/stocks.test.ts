@@ -105,7 +105,7 @@ describe('stocksApi.getKlineHistory', () => {
 
     const result = await stocksApi.getKlineHistory('600519', 120);
 
-    expect(get).toHaveBeenCalledWith('/api/v1/stocks/600519/history', { params: { days: 120 } });
+    expect(get).toHaveBeenCalledWith('/api/v1/stocks/600519/history', { params: { days: 120, period: 'daily' } });
     expect(result).toHaveLength(2);
     expect(result[0].timestamp).toBe(shanghaiMidnightMs('2026-01-02'));
     expect(result[0].turnover).toBe(1000);
@@ -117,7 +117,7 @@ describe('stocksApi.getKlineHistory', () => {
 
     await stocksApi.getKlineHistory('BTC/USDT');
 
-    expect(get).toHaveBeenCalledWith('/api/v1/stocks/BTC%2FUSDT/history', { params: { days: 120 } });
+    expect(get).toHaveBeenCalledWith('/api/v1/stocks/BTC%2FUSDT/history', { params: { days: 120, period: 'daily' } });
   });
 
   it('sorts returned bars ascending by timestamp', async () => {

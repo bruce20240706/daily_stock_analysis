@@ -60,7 +60,7 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
                 {resonanceLabel(e.resonance) && (
                   <span
                     data-testid="board-resonance"
-                    title={resonanceTooltip(e.resonance)}
+                    aria-label={resonanceTooltip(e.resonance)}
                     className="ml-1 rounded bg-accent/15 px-1 text-accent"
                   >{resonanceLabel(e.resonance)}</span>
                 )}

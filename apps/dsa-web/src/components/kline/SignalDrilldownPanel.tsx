@@ -92,7 +92,7 @@ export const SignalDrilldownPanel: React.FC<SignalDrilldownPanelProps> = ({ mark
         {resonanceLabel(resonance) && (
           <span
             data-testid="drilldown-resonance"
-            title={resonanceTooltip(resonance)}
+            aria-label={resonanceTooltip(resonance)}
             className="rounded bg-accent/15 px-1.5 py-0.5 text-xs text-accent"
           >{resonanceLabel(resonance)}</span>
         )}
