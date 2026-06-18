@@ -43,7 +43,7 @@
 
 ### 抓取深度
 
-`src/services/stock_service.py` 中，`get_history_data` 对不同周期的抓取策略：
+`src/services/stock_service.py` 中，`get_history_data` 对不同周期的抓取策略（**此表描述 `/history` API 即前端周期切换路径**；共振内部深抓始终走 `period="daily"`，不经过 weekly/monthly warmup 分支，见下文"取数与稳定性"）：
 
 | 周期 | 实际抓取日线天数 | warmup 天数 |
 |------|----------------|------------|
@@ -151,7 +151,7 @@ M3 信号抓取（日历窗口取数 + `get_daily_data`）与共振深抓（`RES
 本功能**无新增运行时配置项**（无新增 `.env` / `config_registry` / Settings 页条目）：
 
 - 共振始终计算，无开关。
-- `RESONANCE_DAILY_DAYS = 750` 为代码内部常量（非 env），足以保证月线 MA20 暖机（月线约 800 日线天数，加上 `min(..., 3650)` 保护）。
+- `RESONANCE_DAILY_DAYS = 750` 为代码内部常量（非 env）。共振深抓走 `get_history_data(period="daily", days=750)` —— 因为是 daily 周期，不叠加 warmup；`get_daily_data` 以约 750×2≈1500 日历日窗口取数（约千余交易日），`resonance_from_daily` 再在内部重采样到周/月线。约 1500 日历日 ≈ 约 50 个自然月，远超月线 MA20 所需的 20 根。注意：`/history` 的 weekly/monthly warmup（200/800）是前端图表那条路径所用，与共振的 daily 深抓路径无关。
 
 **兼容性**：
 
