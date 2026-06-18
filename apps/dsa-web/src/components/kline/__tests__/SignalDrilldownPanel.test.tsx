@@ -91,4 +91,14 @@ describe('SignalDrilldownPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '关闭依据' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('renders resonance header badge when active', () => {
+    render(<SignalDrilldownPanel markers={[]} resonance="weekly" onClose={() => {}} />);
+    expect(screen.getByTestId('drilldown-resonance')).toHaveTextContent('共振·周');
+  });
+
+  it('omits resonance badge when none', () => {
+    render(<SignalDrilldownPanel markers={[]} resonance="none" onClose={() => {}} />);
+    expect(screen.queryByTestId('drilldown-resonance')).toBeNull();
+  });
 });

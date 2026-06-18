@@ -1,11 +1,13 @@
 import type React from 'react';
-import type { SignalMarker } from '../../types/kline';
+import type { ResonanceLevel, SignalMarker } from '../../types/kline';
 import { cn } from '../../utils/cn';
 import { formatCi, formatExcess, formatHitRate, verifiedLabel } from '../../utils/credibility';
+import { resonanceLabel, resonanceTooltip } from '../../utils/resonance';
 
 interface SignalDrilldownPanelProps {
   markers: SignalMarker[];
   onClose: () => void;
+  resonance?: ResonanceLevel;
 }
 
 const formatNumber = (value: number | null): string =>
@@ -82,17 +84,26 @@ const MarkerCard: React.FC<{ marker: SignalMarker }> = ({ marker }) => {
   );
 };
 
-export const SignalDrilldownPanel: React.FC<SignalDrilldownPanelProps> = ({ markers, onClose }) => (
+export const SignalDrilldownPanel: React.FC<SignalDrilldownPanelProps> = ({ markers, onClose, resonance = 'none' }) => (
   <div className="flex flex-col gap-3" role="group" aria-label="信号依据">
     <div className="flex items-center justify-between">
       <span className="label-uppercase">SIGNAL EVIDENCE</span>
-      <button
-        type="button"
-        onClick={onClose}
-        className="home-surface-button rounded-lg px-3 py-1 text-xs text-secondary-text"
-      >
-        关闭依据
-      </button>
+      <div className="flex items-center gap-2">
+        {resonanceLabel(resonance) && (
+          <span
+            data-testid="drilldown-resonance"
+            title={resonanceTooltip(resonance)}
+            className="rounded bg-accent/15 px-1.5 py-0.5 text-xs text-accent"
+          >{resonanceLabel(resonance)}</span>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          className="home-surface-button rounded-lg px-3 py-1 text-xs text-secondary-text"
+        >
+          关闭依据
+        </button>
+      </div>
     </div>
     {markers.map((marker) => (
       <MarkerCard key={`${marker.timestamp}:${marker.source}:${marker.signalType}`} marker={marker} />
