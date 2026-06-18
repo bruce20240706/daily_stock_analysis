@@ -21,6 +21,7 @@ export interface KLine {
 
 export type SignalSource = 'rule' | 'llm';
 export type SignalDirection = 'bullish' | 'bearish' | 'neutral';
+export type ResonanceLevel = 'none' | 'weekly' | 'weekly_monthly';
 export type SignalConfidence = 'high' | 'medium' | 'low';
 export type SignalAnchor = 'low' | 'high' | 'close';
 export type Consistency = 'consistent' | 'divergent' | 'conflict' | 'unknown' | 'stale';
@@ -59,6 +60,7 @@ export interface SignalsResponse {
   degradedReason: string | null;
   priceLines: PriceLines;
   markers: SignalMarker[];
+  resonance: ResonanceLevel;
 }
 
 // ============ Board contract (mirrors api/v1/schemas SignalsBoardResponse) ============
@@ -84,6 +86,7 @@ export interface BoardEntry {
   baselineExcess: number | null;
   status: 'ok' | 'degraded';
   degradedReason: string | null;
+  resonance: ResonanceLevel;
 }
 
 export interface BoardCounts { buy: number; hold: number; sell: number; unavailable: number; }

@@ -1,5 +1,5 @@
 import apiClient from './index';
-import type { KLine } from '../types/kline';
+import type { KLine, ResonanceLevel } from '../types/kline';
 import type { SignalMarker, SignalsResponse } from '../types/kline';
 import type { BoardEntry, SignalsBoardResponse } from '../types/kline';
 import type { StockQuote } from '../types/kline';
@@ -47,6 +47,7 @@ type RawSignalsResponse = {
   degraded_reason: string | null;
   price_lines: { entry: number | null; stop: number | null; target: number | null } | null;
   markers: RawSignalMarker[] | null;
+  resonance?: ResonanceLevel | null;
 };
 
 const mapSignalMarker = (raw: RawSignalMarker): SignalMarker => ({
@@ -80,6 +81,7 @@ type RawBoardEntry = {
   latest_close: number | null; hit_rate: number | null; hit_sample: number | null;
   verified: boolean; ci_low: number | null; ci_high: number | null; baseline_excess: number | null;
   status: BoardEntry['status']; degraded_reason: string | null;
+  resonance?: ResonanceLevel | null;
 };
 type RawBoardResponse = {
   as_of: number; entries: RawBoardEntry[] | null;
@@ -95,6 +97,7 @@ const mapBoardEntry = (r: RawBoardEntry): BoardEntry => ({
   latestClose: r.latest_close ?? null, hitRate: r.hit_rate ?? null, hitSample: r.hit_sample ?? null,
   verified: r.verified, ciLow: r.ci_low ?? null, ciHigh: r.ci_high ?? null, baselineExcess: r.baseline_excess ?? null,
   status: r.status, degradedReason: r.degraded_reason ?? null,
+  resonance: r.resonance ?? 'none',
 });
 
 export const stocksApi = {
@@ -142,10 +145,14 @@ export const stocksApi = {
    * 与 /signals 同源同 days（M0 暂只用 /history）；不复用 api/history.ts（分析记录域）。
    * code 经 encodeURIComponent 以兼容带 '/' 的 crypto 代码（后端 {code:path} 路由）。
    */
-  async getKlineHistory(code: string, days: number = KLINE_DEFAULT_DAYS): Promise<KLine[]> {
+  async getKlineHistory(
+    code: string,
+    days: number = KLINE_DEFAULT_DAYS,
+    period: 'daily' | 'weekly' | 'monthly' = 'daily',
+  ): Promise<KLine[]> {
     const response = await apiClient.get(
       `/api/v1/stocks/${encodeURIComponent(code)}/history`,
-      { params: { days } },
+      { params: { days, period } },
     );
     const data = response.data as { data?: KLineDataRaw[] };
     const rows = data.data ?? [];
@@ -179,6 +186,7 @@ export const stocksApi = {
         target: data.price_lines?.target ?? null,
       },
       markers: (data.markers ?? []).map(mapSignalMarker),
+      resonance: data.resonance ?? 'none',
     };
   },
 
