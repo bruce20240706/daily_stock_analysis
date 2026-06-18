@@ -69,6 +69,18 @@ class ChipStructure(BaseModel):
     chip_health: Optional[str] = None
 
 
+class CapitalFlow(BaseModel):
+    """资金面（A股；主力资金流 + 龙虎榜存在性）。"""
+
+    main_net_inflow: Optional[Union[int, float, str]] = None
+    inflow_5d: Optional[Union[int, float, str]] = None
+    inflow_10d: Optional[Union[int, float, str]] = None
+    net_flow_status: Optional[str] = None
+    dragon_tiger_on_list: Optional[bool] = None
+    dragon_tiger_recent_count: Optional[int] = None
+    dragon_tiger_latest_date: Optional[str] = None
+
+
 class DataPerspective(BaseModel):
     """Data perspective block."""
 
@@ -76,6 +88,7 @@ class DataPerspective(BaseModel):
     price_position: Optional[PricePosition] = None
     volume_analysis: Optional[VolumeAnalysis] = None
     chip_structure: Optional[ChipStructure] = None
+    capital_flow: Optional[CapitalFlow] = None
 
 
 class Intelligence(BaseModel):

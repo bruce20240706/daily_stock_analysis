@@ -19,7 +19,7 @@ try:
 except ModuleNotFoundError:
     sys.modules["litellm"] = MagicMock()
 
-from src.schemas.report_schema import AnalysisReportSchema
+from src.schemas.report_schema import AnalysisReportSchema, CapitalFlow, DataPerspective
 from src.analyzer import GeminiAnalyzer, AnalysisResult
 
 
@@ -219,3 +219,22 @@ class TestAnalyzerSchemaFallback(unittest.TestCase):
         self.assertEqual(result.trend_prediction, "Bullish")
         self.assertEqual(result.operation_advice, "Buy")
         self.assertEqual(result.confidence_level, "Low")
+
+
+def test_capital_flow_model_fields():
+    cf = CapitalFlow(
+        main_net_inflow=1.2e8, inflow_5d=-3.4e7, inflow_10d=5.6e7,
+        net_flow_status="净流入",
+        dragon_tiger_on_list=True, dragon_tiger_recent_count=2, dragon_tiger_latest_date="2026-06-17",
+    )
+    assert cf.net_flow_status == "净流入"
+    assert cf.dragon_tiger_on_list is True
+    assert cf.dragon_tiger_recent_count == 2
+
+
+def test_data_perspective_capital_flow_optional_backward_compat():
+    # 旧 payload 无 capital_flow 键仍解析；默认 None
+    dp = DataPerspective(**{"trend_status": None})
+    assert dp.capital_flow is None
+    dp2 = DataPerspective(capital_flow=CapitalFlow(net_flow_status="中性"))
+    assert dp2.capital_flow.net_flow_status == "中性"
