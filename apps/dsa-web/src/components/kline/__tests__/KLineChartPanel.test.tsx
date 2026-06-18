@@ -54,7 +54,7 @@ describe('KLineChartPanel', () => {
     await renderPanel();
 
     await waitFor(() => expect(applyNewData).toHaveBeenCalledWith(sampleKlines));
-    expect(getKlineHistory).toHaveBeenCalledWith('600519', 120);
+    expect(getKlineHistory).toHaveBeenCalledWith('600519', 120, 'daily');
     expect(init).toHaveBeenCalledTimes(1);
     expect(createIndicator).toHaveBeenCalledWith('VOL', false, expect.any(Object));
   });

@@ -8,7 +8,8 @@ import type {
   OverlayFigure,
 } from 'klinecharts';
 import { stocksApi, KLINE_DEFAULT_DAYS } from '../../api/stocks';
-import type { KLine, SignalMarker } from '../../types/kline';
+import type { KLine, ResonanceLevel, SignalMarker } from '../../types/kline';
+import { cn } from '../../utils/cn';
 import { buildSignalGlyphs, type SignalGlyph } from './klineOverlays';
 import { SignalDrilldownPanel } from './SignalDrilldownPanel';
 
@@ -151,14 +152,23 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
   const [upRedDownGreen, setUpRedDownGreen] = useState(true);
   const [signalsAvailable, setSignalsAvailable] = useState(true);
   const [drilldownMarkers, setDrilldownMarkers] = useState<SignalMarker[] | null>(null);
+  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [resonance, setResonance] = useState<ResonanceLevel>('none');
 
   const applySignalsLayer = useCallback(() => {
     const chart = chartRef.current;
     if (!chart) return;
+    if (period !== 'daily') {
+      // 信号是日线概念，仅日视图渲染；非日视图清空标注与共振
+      setSignalsAvailable(true);
+      setResonance('none');
+      return;
+    }
     stocksApi
       // 透传 days：保持 /signals 与 /history 同源同窗口（结构性保证，不依赖默认值巧合）
       .getSignals(stockCode, days)
       .then((signals) => {
+        setResonance(signals.resonance);
         if (signals.status === 'degraded') {
           // 有图无标注：后端降级（任意非空 degraded_reason）一律按通用降级，不画任何标注。
           setSignalsAvailable(false);
@@ -175,7 +185,7 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
         console.error('Failed to load signals overlay:', error);
         setSignalsAvailable(false);
       });
-  }, [stockCode, days]);
+  }, [stockCode, days, period]);
 
   useEffect(() => {
     let disposed = false;
@@ -191,7 +201,8 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
 
     (async () => {
       try {
-        const klines = await stocksApi.getKlineHistory(stockCode, days);
+        const klineDays = period === 'daily' ? days : period === 'weekly' ? 365 : 1825;
+        const klines = await stocksApi.getKlineHistory(stockCode, klineDays, period);
         if (disposed) return;
         if (klines.length === 0) {
           setState('empty');
@@ -215,7 +226,7 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
       }
       chartRef.current = null;
     };
-  }, [stockCode, days, applySignalsLayer]);
+  }, [stockCode, days, period, applySignalsLayer]);
 
   const toggleColors = () => {
     setUpRedDownGreen((prev) => {
@@ -227,7 +238,23 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-2 flex items-center justify-end">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex gap-1" role="group" aria-label="K线周期">
+          {(['daily', 'weekly', 'monthly'] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPeriod(p)}
+              aria-pressed={period === p}
+              className={cn(
+                'rounded-lg px-3 py-1.5 text-xs',
+                period === p ? 'bg-accent/20 text-accent' : 'text-secondary-text',
+              )}
+            >
+              {p === 'daily' ? '日' : p === 'weekly' ? '周' : '月'}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           onClick={toggleColors}
@@ -254,7 +281,7 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
             <p className="text-sm text-danger">K 线加载失败</p>
           </div>
         )}
-        {!signalsAvailable && (
+        {period === 'daily' && !signalsAvailable && (
           <div
             data-testid="signals-unavailable"
             className="absolute bottom-2 left-2 rounded-lg border border-border/50 bg-card/60 px-3 py-2 text-xs text-secondary-text"
@@ -264,7 +291,11 @@ export const KLineChartPanel: React.FC<KLineChartPanelProps> = ({
         )}
         {drilldownMarkers && (
           <div className="absolute right-2 top-2 z-10 w-72 max-w-[80%]">
-            <SignalDrilldownPanel markers={drilldownMarkers} onClose={() => setDrilldownMarkers(null)} />
+            <SignalDrilldownPanel
+              markers={drilldownMarkers}
+              resonance={resonance}
+              onClose={() => setDrilldownMarkers(null)}
+            />
           </div>
         )}
       </div>
