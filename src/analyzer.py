@@ -915,6 +915,21 @@ def fill_capital_flow_if_needed(
         logger.warning("[capital_flow] Fill failed, skipping: %s", e)
 
 
+def _dragon_tiger_prompt_line(fundamental_context: Optional[Dict[str, Any]]) -> str:
+    """龙虎榜 presence-only prompt 行（标志级，非量级）；未上榜/不可用 → 空串。"""
+    if not isinstance(fundamental_context, dict):
+        return ""
+    dt = fundamental_context.get("dragon_tiger")
+    data = dt.get("data") if isinstance(dt, dict) and isinstance(dt.get("data"), dict) else {}
+    if not data.get("is_on_list"):
+        return ""
+    return (
+        "\n### 龙虎榜（游资信号，存在性）\n"
+        f"近 {data.get('recent_count', 'N/A')} 日上榜龙虎榜，最新 {data.get('latest_date', 'N/A')}；"
+        "游资活跃，注意分歧/波动。\n"
+    )
+
+
 _PRICE_POS_KEYS = ("ma5", "ma10", "ma20", "bias_ma5", "bias_status", "current_price", "support_level", "resistance_level")
 
 
@@ -3234,6 +3249,8 @@ class GeminiAnalyzer:
 
 > 资金流向只能作为价格位置的过滤器：接近压力且主力流出时不得追买；接近支撑且未放量跌破时，优先判断为持有观察、震荡或洗盘观察。
 """
+
+        prompt += _dragon_tiger_prompt_line(fundamental_context)
 
         # 添加筹码分布数据
         if 'chip' in context:

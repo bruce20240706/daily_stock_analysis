@@ -1,5 +1,5 @@
 import types
-from src.analyzer import _build_capital_flow_from_context, fill_capital_flow_if_needed
+from src.analyzer import _build_capital_flow_from_context, fill_capital_flow_if_needed, _dragon_tiger_prompt_line
 
 
 def _ctx(cf_status="ok", dt_status="ok", *, mni=1.2e8, i5=None, i10=None, on_list=True):
@@ -65,3 +65,17 @@ def test_fill_not_supported_leaves_capital_flow_absent():
     result = types.SimpleNamespace(dashboard={"data_perspective": {}}, report_language="zh")
     fill_capital_flow_if_needed(result, _ctx(cf_status="not_supported", dt_status="not_supported"))
     assert "capital_flow" not in result.dashboard["data_perspective"]
+
+
+def test_dragon_tiger_prompt_line_on_list():
+    line = _dragon_tiger_prompt_line(_ctx(on_list=True))
+    assert "龙虎榜" in line and "2" in line and "2026-06-17" in line
+
+
+def test_dragon_tiger_prompt_line_absent_when_not_on_list():
+    assert _dragon_tiger_prompt_line(_ctx(on_list=False)) == ""
+
+
+def test_dragon_tiger_prompt_line_absent_when_not_supported():
+    assert _dragon_tiger_prompt_line(_ctx(dt_status="not_supported", on_list=False)) == ""
+    assert _dragon_tiger_prompt_line(None) == ""
