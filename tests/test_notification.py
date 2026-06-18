@@ -1722,6 +1722,102 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertTrue(ok)
         self.assertAlmostEqual(mock_post.call_count, 4, delta=1)
 
+    @mock.patch("src.notification.get_config")
+    def test_notification_renders_capital_flow_block(self, mock_get_config: mock.MagicMock):
+        """capital_flow present + dragon_tiger_on_list=True renders 资金面 block with 龙虎榜 line."""
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+            dashboard={
+                "data_perspective": {
+                    "capital_flow": {
+                        "main_net_inflow": "1.23亿",
+                        "inflow_5d": "5.67亿",
+                        "inflow_10d": "8.90亿",
+                        "net_flow_status": "主力净流入",
+                        "dragon_tiger_on_list": True,
+                        "dragon_tiger_recent_count": 3,
+                        "dragon_tiger_latest_date": "2026-06-10",
+                    }
+                }
+            },
+        )
+
+        out = service.generate_dashboard_report([result], report_date="2026-06-18")
+
+        self.assertIn("资金面", out)
+        self.assertIn("主力净流入", out)
+        self.assertIn("1.23亿", out)
+        self.assertIn("龙虎榜", out)
+        self.assertIn("3", out)
+        self.assertIn("2026-06-10", out)
+
+    @mock.patch("src.notification.get_config")
+    def test_notification_capital_flow_not_on_list_no_dragon_line(self, mock_get_config: mock.MagicMock):
+        """capital_flow present but dragon_tiger_on_list=False: 资金面 block present, NO 龙虎榜 line."""
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+            dashboard={
+                "data_perspective": {
+                    "capital_flow": {
+                        "main_net_inflow": "-0.55亿",
+                        "inflow_5d": "-1.20亿",
+                        "inflow_10d": "0.30亿",
+                        "net_flow_status": "主力净流出",
+                        "dragon_tiger_on_list": False,
+                    }
+                }
+            },
+        )
+
+        out = service.generate_dashboard_report([result], report_date="2026-06-18")
+
+        self.assertIn("资金面", out)
+        self.assertIn("主力净流出", out)
+        self.assertNotIn("龙虎榜", out)
+
+    @mock.patch("src.notification.get_config")
+    def test_notification_capital_flow_absent_not_rendered(self, mock_get_config: mock.MagicMock):
+        """data_perspective without capital_flow does not emit 资金面 block."""
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+            dashboard={
+                "data_perspective": {
+                    "chip_structure": {
+                        "profit_ratio": "65%",
+                        "avg_cost": "1650",
+                        "concentration": "高度集中",
+                        "chip_health": "健康",
+                    }
+                }
+            },
+        )
+
+        out = service.generate_dashboard_report([result], report_date="2026-06-18")
+
+        self.assertNotIn("资金面", out)
+        self.assertNotIn("龙虎榜", out)
+
 
 if __name__ == "__main__":
     unittest.main()

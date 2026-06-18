@@ -1247,7 +1247,33 @@ class NotificationService(
                                 f"**{labels['chip_label']}**: {chip_unavailable_reason}",
                                 "",
                             ])
-                
+                    # 资金面（主力资金流 + 龙虎榜，A股；presence-only）
+                    cf_data = data_persp.get('capital_flow', {})
+                    if cf_data:
+                        cf_label = 'Capital Flow' if report_language == 'en' else '资金面'
+                        mni_label = 'Main net inflow' if report_language == 'en' else '主力净流入'
+                        _mni = cf_data.get('main_net_inflow')
+                        _i5 = cf_data.get('inflow_5d')
+                        _i10 = cf_data.get('inflow_10d')
+                        report_lines.extend([
+                            f"**{cf_label}**: {mni_label} "
+                            f"{'N/A' if _mni is None else _mni} ({cf_data.get('net_flow_status') or 'N/A'}) | "
+                            f"5d {'N/A' if _i5 is None else _i5} | 10d {'N/A' if _i10 is None else _i10}",
+                            "",
+                        ])
+                        if cf_data.get('dragon_tiger_on_list'):
+                            dt_prefix = (
+                                'Dragon-Tiger list: on list' if report_language == 'en'
+                                else '龙虎榜：上榜'
+                            )
+                            report_lines.extend([
+                                f"\U0001f42f {dt_prefix} "
+                                f"{cf_data.get('dragon_tiger_recent_count', 'N/A')}"
+                                f"{'' if report_language == 'en' else ' 次'}"
+                                f", {cf_data.get('dragon_tiger_latest_date', 'N/A')}",
+                                "",
+                            ])
+
                 # ========== 作战计划 ==========
                 battle = dashboard.get('battle_plan', {}) if dashboard else {}
                 if battle:
