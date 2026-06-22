@@ -117,3 +117,19 @@ def test_short_volume_excludes_amount_column_regardless_of_order(monkeypatch):
     monkeypatch.setattr(adapter, "_call_df_candidates", lambda cands: (df, cands[0][0], []))
     out = adapter.get_margin_detail("600519")
     assert out["short_volume"] == 1000.0
+
+
+def test_get_margin_detail_deadline_exhausted_skips_fetch(monkeypatch):
+    import time as _t
+    adapter = AkshareFundamentalAdapter()
+    calls = {"n": 0}
+
+    def _spy(cands):
+        calls["n"] += 1
+        return _sse_df(), cands[0][0], []
+
+    monkeypatch.setattr(adapter, "_call_df_candidates", _spy)
+    # deadline already in the past → loop breaks before any fetch
+    out = adapter.get_margin_detail("600519", deadline=_t.monotonic() - 1.0)
+    assert out["status"] == "not_supported"
+    assert calls["n"] == 0

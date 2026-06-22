@@ -555,6 +555,8 @@ class AkshareFundamentalAdapter:
             if cached is not None:
                 _margin_detail_memo.move_to_end(key)
                 return cached
+        # _errors 有意丢弃：presence-only fail-open——空 DataFrame 与抓取错误同形(都→无数据)，
+        # 在 get_margin_context 块层统一呈现为 not_supported；不向上抛、不进 result.errors。
         df, _source, _errors = self._call_df_candidates([(fn_name, {"date": date_str})])
         if df is not None and not df.empty:
             with _MARGIN_MEMO_LOCK:

@@ -1283,7 +1283,7 @@ class NotificationService(
                         _fb = margin_data.get('financing_balance')
                         _fbuy = margin_data.get('financing_buy')
                         _sv = margin_data.get('short_volume')
-                        _exch = margin_data.get('exchange') or ''
+                        _exch = margin_data.get('exchange') or 'N/A'
                         if report_language != 'en':
                             _exch = {'SSE': '沪', 'SZSE': '深'}.get(_exch, _exch)
                         _td = margin_data.get('trade_date') or 'N/A'

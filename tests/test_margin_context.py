@@ -55,3 +55,18 @@ def test_enumeration_failed_factory_includes_margin():
     bf = mgr.build_failed_fundamental_context("600519", "x")
     assert "margin" in bf
     assert bf["coverage"]["margin"] == "failed"
+
+
+def test_get_fundamental_context_etf_margin_not_supported(monkeypatch):
+    # ETF 走 get_fundamental_context 完整路径（spec §9.7）：mock 掉 valuation/bundle 的网络，
+    # 断言 margin 经 ETF 分支落为 not_supported 且进 coverage（证明枚举接入，非空言）。
+    mgr = _mgr()
+    monkeypatch.setattr(mgr, "get_realtime_quote", lambda code: None)
+    monkeypatch.setattr(
+        mgr._fundamental_adapter, "get_fundamental_bundle",
+        lambda code: {"status": "not_supported", "growth": {}, "earnings": {},
+                      "institution": {}, "source_chain": [], "errors": []},
+    )
+    ctx = mgr.get_fundamental_context("510300")
+    assert "margin" in ctx
+    assert ctx["coverage"]["margin"] == "not_supported"

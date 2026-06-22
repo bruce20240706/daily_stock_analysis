@@ -181,3 +181,15 @@ def test_jinja2_margin_absent_not_rendered():
         dashboard={"data_perspective": {"chip_structure": {"chip_health": "健康"}}})
     out = _render("markdown", [r], summary_only=False)
     assert "融资融券" not in out
+
+
+def test_build_margin_ok_empty_data_returns_none_values():
+    # status=ok 但 data 空（行命中但数值全空）：section 出现、字段全 None、键集冻结
+    out = _build_margin_from_context({"margin": {"status": "ok", "data": {}}})
+    assert out is not None
+    assert out["financing_balance"] is None
+    assert out["short_volume"] is None
+    assert out["trade_date"] is None
+    assert set(out) == {
+        "financing_balance", "financing_buy", "short_volume", "trade_date", "exchange",
+    }
