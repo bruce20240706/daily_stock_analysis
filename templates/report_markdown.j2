@@ -116,7 +116,7 @@
 {% endif %}
 {% set margin_data = data_persp.get('margin_trading', {}) %}
 {% if margin_data %}
-**{{ labels.margin_label }}**: {{ labels.financing_balance_label }} {{ 'N/A' if margin_data.get('financing_balance') is none else margin_data.get('financing_balance') }} | {{ labels.financing_buy_label }} {{ 'N/A' if margin_data.get('financing_buy') is none else margin_data.get('financing_buy') }} | {{ labels.short_volume_label }} {{ 'N/A' if margin_data.get('short_volume') is none else margin_data.get('short_volume') }} ({{ margin_data.get('exchange') or 'N/A' }} {{ margin_data.get('trade_date') or 'N/A' }})
+**{{ labels.margin_label }}**: {{ labels.financing_balance_label }} {{ 'N/A' if margin_data.get('financing_balance') is none else margin_data.get('financing_balance') }} | {{ labels.financing_buy_label }} {{ 'N/A' if margin_data.get('financing_buy') is none else margin_data.get('financing_buy') }} | {{ labels.short_volume_label }} {{ 'N/A' if margin_data.get('short_volume') is none else margin_data.get('short_volume') }} ({% if report_language == 'en' %}{{ margin_data.get('exchange') or 'N/A' }}{% else %}{{ {'SSE': '沪', 'SZSE': '深'}.get(margin_data.get('exchange'), margin_data.get('exchange') or 'N/A') }}{% endif %} {{ margin_data.get('trade_date') or 'N/A' }})
 {% endif %}
 {% endif %}
 

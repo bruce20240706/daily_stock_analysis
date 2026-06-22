@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 import copy
 import types
+from unittest import mock
 
+from src.analyzer import AnalysisResult, _build_margin_from_context, fill_margin_if_needed
 from src.schemas.report_schema import DataPerspective, MarginTrading
+from src.services.report_renderer import render as _render
 
 
 def test_margin_trading_model_fields():
@@ -35,7 +38,6 @@ def test_data_perspective_accepts_margin_trading():
 
 
 # --- Task 4: builder / fill / fail-open / decision read-only ---
-from src.analyzer import _build_margin_from_context, fill_margin_if_needed  # noqa: E402
 
 
 def _mctx(status="ok"):
@@ -103,9 +105,6 @@ def test_fill_margin_does_not_touch_decision_stability():
 
 
 # --- Task 5: both render paths (Python legacy + Jinja2) + zh/en ---
-from unittest import mock  # noqa: E402
-from src.analyzer import AnalysisResult  # noqa: E402
-from src.services.report_renderer import render as _render  # noqa: E402
 
 
 def _result_with_margin(report_language="zh"):
@@ -164,6 +163,8 @@ def test_jinja2_renders_margin_labels_zh():
     assert "融资融券" in out
     assert "融资余额" in out
     assert "融券余量" in out
+    assert "沪" in out
+    assert "SSE" not in out
 
 
 def test_jinja2_renders_margin_labels_en():
@@ -171,3 +172,12 @@ def test_jinja2_renders_margin_labels_en():
     assert "Margin Trading" in out
     assert "Financing Balance" in out
     assert "Short Volume" in out
+
+
+def test_jinja2_margin_absent_not_rendered():
+    r = AnalysisResult(
+        code="600519", name="贵州茅台", sentiment_score=72, trend_prediction="看多",
+        operation_advice="持有", analysis_summary="x",
+        dashboard={"data_perspective": {"chip_structure": {"chip_health": "健康"}}})
+    out = _render("markdown", [r], summary_only=False)
+    assert "融资融券" not in out
