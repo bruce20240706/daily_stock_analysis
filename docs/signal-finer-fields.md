@@ -39,15 +39,17 @@
 
 **语义**：基于信号触发时间与当前时间的相对距离（bar 数），反映信号的「新鲜度」：
 
-| 值 | 含义 | 默认阈值 |
+设 `bars_since = 最新 bar 索引 − 触发 bar 索引`，窗口 `W = horizon_bars`（命中 `signal_stats` 时）否则配置默认窗口 `SIGNAL_BACKTEST_HORIZON_BARS`（默认 10）：
+
+| 值 | 含义 | 判定 |
 |---|---|---|
-| `active` | 信号较新，仍在有效窗口内 | bar 距离 ≤ `horizon_bars × 0.3`（或默认 N 内） |
-| `aging` | 信号触发后时间过半，进入衰老期 | `horizon_bars × 0.3` < bar 距离 ≤ `horizon_bars` |
-| `expired` | 超过 horizon 窗口，信号已过期 | bar 距离 > `horizon_bars` |
+| `active` | 信号在最新 bar 触发 | `bars_since == 0`（实现按 `<= 0`） |
+| `aging` | 触发后仍在验证窗口内 | `0 < bars_since < W` |
+| `expired` | 已超出验证窗口 | `bars_since >= W` |
 
 **时间相对性**：`status` 基于「触发 bar 到当前最新 bar 的距离」，仅在实时计算时有意义，**不适用于历史 bar 回放**（历史视角每根 bar 的 status 各不相同）。transient-only 保证了它不会被误当历史字段使用。
 
-**无 horizon 时**：若 `horizon_bars` 为 `null`，`status` 回退为 `null`。
+**无 horizon 时**：若 `horizon_bars` 为 `null`（未命中 `signal_stats`），`status` 仍按默认窗口 `W` 正常计算；**仅当** marker 时间戳匹配不到任何 bar（或非 rule marker）时 `status` 才为 `null`。
 
 ---
 
