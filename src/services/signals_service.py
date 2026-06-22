@@ -214,6 +214,46 @@ def _llm_marker(
     }
 
 
+def compute_plan_quality(price_lines: dict, consistency: str) -> Optional[str]:
+    """交易计划质量(确定性,与可信度正交)。price_lines 全 null→None。"""
+    entry = price_lines.get("entry") if isinstance(price_lines, dict) else None
+    stop = price_lines.get("stop") if isinstance(price_lines, dict) else None
+    target = price_lines.get("target") if isinstance(price_lines, dict) else None
+    if entry is None and stop is None and target is None:
+        return None
+    if entry is None or stop is None or consistency == "conflict":
+        return "low"
+    if target is not None and consistency == "consistent":
+        return "high"
+    return "medium"
+
+
+def compute_marker_statuses(markers: list, bar_dates: list, default_window: int) -> None:
+    """in-place 给每条 source==rule marker 写 status(active/aging/expired);找不到 bar→None。"""
+    ts_to_idx = {}
+    for i, d in enumerate(bar_dates):
+        try:
+            ts_to_idx[date_str_to_epoch_ms(str(d))] = i
+        except Exception:
+            continue
+    last_idx = len(bar_dates) - 1
+    for m in markers:
+        if m.get("source") != "rule":
+            continue
+        idx = ts_to_idx.get(int(m.get("timestamp", -1)))
+        if idx is None:
+            m["status"] = None
+            continue
+        bars_since = last_idx - idx
+        w = m.get("horizon_bars") or default_window
+        if bars_since <= 0:
+            m["status"] = "active"
+        elif bars_since < w:
+            m["status"] = "aging"
+        else:
+            m["status"] = "expired"
+
+
 def build_signals_payload(
     *,
     engine_result: Any,

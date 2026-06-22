@@ -97,3 +97,49 @@ def test_resolver_none_path_horizon_none(monkeypatch):
     monkeypatch.setattr(shr.SignalStatsRepository, "get", lambda self, st, mkt, horizon=None: None)
     out = shr.resolve_marker_hit_fields("x", "600519")
     assert out["horizon"] is None and out["hit_rate"] is None
+
+
+from src.services.signals_service import compute_plan_quality, compute_marker_statuses
+from src.services.signals_service import date_str_to_epoch_ms
+
+
+def test_plan_quality_rules():
+    full = {"entry": 1.0, "stop": 0.9, "target": 1.2}
+    assert compute_plan_quality(full, "consistent") == "high"
+    assert compute_plan_quality(full, "divergent") == "medium"
+    assert compute_plan_quality(full, "unknown") == "medium"
+    assert compute_plan_quality(full, "conflict") == "low"
+    assert compute_plan_quality({"entry": 1.0, "stop": 0.9, "target": None}, "consistent") == "medium"
+    assert compute_plan_quality({"entry": 1.0, "stop": None, "target": 1.2}, "consistent") == "low"
+    assert compute_plan_quality({"entry": None, "stop": None, "target": None}, "consistent") is None
+
+
+def test_marker_statuses_active_aging_expired():
+    dates = ["2026-06-15", "2026-06-16", "2026-06-17", "2026-06-18"]  # idx 0..3, last=3
+    def mk(date, horizon=None):
+        return {"source": "rule", "timestamp": date_str_to_epoch_ms(date),
+                "horizon_bars": horizon, "status": None}
+    m_latest = mk("2026-06-18")           # bars_since=0 -> active
+    m_one = mk("2026-06-17", horizon=5)   # bars_since=1 < 5 -> aging
+    m_old = mk("2026-06-15", horizon=2)   # bars_since=3 >= 2 -> expired
+    m_llm = {"source": "llm", "timestamp": date_str_to_epoch_ms("2026-06-18"), "status": None}
+    compute_marker_statuses([m_latest, m_one, m_old, m_llm], dates, default_window=10)
+    assert m_latest["status"] == "active"
+    assert m_one["status"] == "aging"
+    assert m_old["status"] == "expired"
+    assert m_llm["status"] is None  # 不动 LLM
+
+
+def test_marker_status_default_window_when_horizon_none():
+    dates = ["2026-06-01", "2026-06-02", "2026-06-03"]  # last idx 2
+    m = {"source": "rule", "timestamp": date_str_to_epoch_ms("2026-06-01"),
+         "horizon_bars": None, "status": None}  # bars_since=2; W=default
+    compute_marker_statuses([m], dates, default_window=2)  # 2>=2 -> expired
+    assert m["status"] == "expired"
+
+
+def test_marker_status_unmatched_timestamp_none():
+    dates = ["2026-06-01", "2026-06-02"]
+    m = {"source": "rule", "timestamp": 999999, "horizon_bars": None, "status": None}
+    compute_marker_statuses([m], dates, default_window=10)
+    assert m["status"] is None
