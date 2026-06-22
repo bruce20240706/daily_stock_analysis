@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SignalsResponse } from '../../../types/kline';
 import { buildSignalGlyphs } from '../klineOverlays';
@@ -7,6 +7,7 @@ const okSignals: SignalsResponse = {
   status: 'ok',
   consistency: 'consistent',
   degradedReason: null,
+  resonance: 'none',
   priceLines: { entry: 1700.5, stop: 1620, target: 1850 },
   markers: [
     {
@@ -242,6 +243,38 @@ describe('KLineChartPanel signals layer', () => {
     });
   });
 
+  it('degradation banner is daily-only: disappears after switching to weekly', async () => {
+    vi.resetModules();
+    setupChartMock();
+    vi.doMock('../../../api/stocks', () => ({
+      KLINE_DEFAULT_DAYS: 120,
+      stocksApi: {
+        getKlineHistory: vi.fn().mockResolvedValue([
+          { timestamp: 1718323200000, open: 1690, high: 1710, low: 1680, close: 1700, volume: 1000, turnover: 0 },
+        ]),
+        getSignals: vi.fn().mockRejectedValue(new Error('signals 500')),
+      },
+    }));
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await renderPanel();
+
+      // 日视图下降级横幅应可见
+      expect(await screen.findByTestId('signals-unavailable')).toBeInTheDocument();
+
+      // 切换到周视图
+      fireEvent.click(screen.getByRole('button', { name: '周' }));
+
+      // 周视图下降级横幅应消失（仅日视图显示）
+      await waitFor(() => {
+        expect(screen.queryByTestId('signals-unavailable')).toBeNull();
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('weakens B-class (is_daily_approx) markers via lower opacity', async () => {
     vi.resetModules();
     setupChartMock();
@@ -268,5 +301,66 @@ describe('KLineChartPanel signals layer', () => {
       const styles = (glyphCalls[0][0] as { styles?: { polygon?: { color?: string } } }).styles;
       expect(styles?.polygon?.color).toMatch(/0\.45\)$/);
     });
+  });
+
+  it('switches period: refetches kline with period, skips signals on non-daily', async () => {
+    vi.resetModules();
+    const chart = setupChartMock();
+    const getSignals = vi.fn().mockResolvedValue(okSignals);
+    const getKlineHistory = vi.fn().mockResolvedValue([
+      { timestamp: 1718323200000, open: 1690, high: 1710, low: 1680, close: 1700, volume: 1000, turnover: 0 },
+    ]);
+    vi.doMock('../../../api/stocks', () => ({
+      KLINE_DEFAULT_DAYS: 120,
+      stocksApi: { getKlineHistory, getSignals },
+    }));
+
+    await renderPanel();
+
+    // 初始 daily: getKlineHistory(code, 120, 'daily') + getSignals 均被调用
+    await waitFor(() => expect(chart.applyNewData).toHaveBeenCalled());
+    await waitFor(() => expect(getSignals).toHaveBeenCalledTimes(1));
+    expect(getKlineHistory).toHaveBeenCalledWith('600519', 120, 'daily');
+
+    // 点击「周」按钮
+    getKlineHistory.mockResolvedValue([
+      { timestamp: 1718323200000, open: 1690, high: 1710, low: 1680, close: 1700, volume: 1000, turnover: 0 },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: '周' }));
+
+    // getKlineHistory 用 weekly 参数重新调用
+    await waitFor(() =>
+      expect(getKlineHistory).toHaveBeenCalledWith('600519', 365, 'weekly'),
+    );
+    // getSignals 不再额外调用（仍为 1 次）
+    expect(getSignals).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes resonance from signals to drilldown panel', async () => {
+    vi.resetModules();
+    setupChartMock();
+    const resonanceSignals: SignalsResponse = {
+      ...okSignals,
+      resonance: 'weekly_monthly',
+    };
+    vi.doMock('../../../api/stocks', () => ({
+      KLINE_DEFAULT_DAYS: 120,
+      stocksApi: {
+        getKlineHistory: vi.fn().mockResolvedValue([
+          { timestamp: 1718323200000, open: 1690, high: 1710, low: 1680, close: 1700, volume: 1000, turnover: 0 },
+        ]),
+        getSignals: vi.fn().mockResolvedValue(resonanceSignals),
+      },
+    }));
+
+    await renderPanel();
+
+    // 等待 signalGlyph overlay 注册，然后触发点击
+    await waitFor(() => expect(setOverlayClickCallbacks.length).toBeGreaterThan(0));
+    const [glyph] = buildSignalGlyphs(resonanceSignals.markers);
+    setOverlayClickCallbacks[0]({ overlay: { extendData: { glyph } } });
+
+    // 钻取面板应出现，且显示共振·周月徽标
+    expect(await screen.findByTestId('drilldown-resonance')).toHaveTextContent('共振·周月');
   });
 });

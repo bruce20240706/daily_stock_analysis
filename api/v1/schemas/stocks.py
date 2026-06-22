@@ -9,7 +9,7 @@
 2. 定义历史 K 线数据模型
 """
 
-from typing import Literal, Optional, List
+from typing import Literal, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -150,6 +150,9 @@ class SignalsResponse(BaseModel):
         ..., description="量价/规则与 LLM 一致性，仅在 LLM 点邻域计算"
     )
     degraded_reason: Optional[str] = Field(None, description="status=degraded 时的原因说明")
+    resonance: Literal["none", "weekly", "weekly_monthly"] = Field(
+        "none", description="多周期共振档位（M4-A）：高周期趋势与日线信号同向"
+    )
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -158,6 +161,7 @@ class SignalsResponse(BaseModel):
             "price_lines": {"entry": None, "stop": None, "target": None},
             "consistency": "consistent",
             "degraded_reason": None,
+            "resonance": "none",
         }
     })
 
@@ -189,6 +193,9 @@ class BoardEntry(BaseModel):
     ci_low: Optional[float] = Field(None, description="命中率置信区间下界（M3-A6），无则 null")
     ci_high: Optional[float] = Field(None, description="命中率置信区间上界（M3-A6），无则 null")
     baseline_excess: Optional[float] = Field(None, description="相对基准超额（M3-A6），无则 null")
+    resonance: Literal["none", "weekly", "weekly_monthly"] = Field(
+        "none", description="多周期共振档位（M4-A）"
+    )
     status: Literal["ok", "degraded"] = Field(..., description="单条状态")
     degraded_reason: Optional[str] = Field(None, description="status=degraded 时的原因说明")
 

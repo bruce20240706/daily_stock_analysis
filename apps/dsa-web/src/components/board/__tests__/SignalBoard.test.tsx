@@ -19,7 +19,7 @@ const mk = (over: Partial<BoardEntry>): BoardEntry => ({
   priceLines: { entry: 1700, stop: 1620, target: 1850 }, latestClose: 1660,
   hitRate: 0.62, hitSample: 18, verified: true,
   ciLow: null, ciHigh: null, baselineExcess: null,
-  status: 'ok', degradedReason: null, ...over,
+  status: 'ok', degradedReason: null, resonance: 'none', ...over,
 });
 
 describe('SignalBoard', () => {
@@ -126,5 +126,25 @@ describe('SignalBoard', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /工作台/ }));
     expect(mockNavigate).toHaveBeenCalledWith('/stock/BTC%2FUSDT');
+  });
+
+  it('shows resonance badge for weekly_monthly entry', () => {
+    render(
+      <MemoryRouter>
+        <SignalBoard entries={[mk({ code: '600519', name: '贵州茅台', resonance: 'weekly_monthly' })]} onRowClick={vi.fn()} />
+      </MemoryRouter>,
+    );
+    const badge = screen.getByTestId('board-resonance');
+    expect(badge).toHaveTextContent('共振·周月');
+    expect(badge).toHaveAttribute('aria-label', expect.stringContaining('共振'));
+  });
+
+  it('omits resonance badge when resonance is none', () => {
+    render(
+      <MemoryRouter>
+        <SignalBoard entries={[mk({ code: '600519', name: '贵州茅台', resonance: 'none' })]} onRowClick={vi.fn()} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('board-resonance')).not.toBeInTheDocument();
   });
 });

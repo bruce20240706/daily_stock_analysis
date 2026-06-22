@@ -60,4 +60,25 @@ describe('stocksApi.getBoard', () => {
     await stocksApi.getBoard();
     expect(get).toHaveBeenCalledWith('/api/v1/signals/board', { params: {} });
   });
+
+  it('maps resonance, defaulting to none when absent', async () => {
+    get.mockResolvedValueOnce({ data: {
+      as_of: 333, counts: { buy: 1, hold: 0, sell: 0, unavailable: 1 }, degraded_codes: [],
+      entries: [
+        { code: '600519', name: '贵州茅台', market: 'CN', action_group: 'buy',
+          rule_direction: 'bullish', llm_direction: 'bullish', consistency: 'consistent',
+          key_signals: [], price_lines: { entry: 1700, stop: 1620, target: 1850 },
+          latest_close: 1660, hit_rate: 0.62, hit_sample: 18, verified: true,
+          status: 'ok', degraded_reason: null, resonance: 'weekly_monthly' },
+        { code: '000001', name: '平安银行', market: 'CN', action_group: 'hold',
+          rule_direction: 'neutral', llm_direction: 'neutral', consistency: 'consistent',
+          key_signals: [], price_lines: { entry: null, stop: null, target: null },
+          latest_close: 10, hit_rate: null, hit_sample: null, verified: false,
+          status: 'ok', degraded_reason: null },
+      ],
+    }});
+    const res = await stocksApi.getBoard(120);
+    expect(res.entries[0].resonance).toBe('weekly_monthly');
+    expect(res.entries[1].resonance).toBe('none');
+  });
 });

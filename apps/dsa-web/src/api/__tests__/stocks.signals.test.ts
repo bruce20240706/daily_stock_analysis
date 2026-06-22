@@ -113,6 +113,19 @@ describe('stocksApi.getSignals', () => {
     expect(res.markers[0].baselineExcess).toBe(0.05);
   });
 
+  it('maps resonance, defaulting to none when absent', async () => {
+    get.mockResolvedValueOnce({ data: { status: 'ok', consistency: 'consistent', degraded_reason: null,
+      price_lines: { entry: 1700, stop: 1620, target: 1850 }, markers: [],
+      resonance: 'weekly' } });
+    const res = await stocksApi.getSignals('600519', 120);
+    expect(res.resonance).toBe('weekly');
+
+    get.mockResolvedValueOnce({ data: { status: 'ok', consistency: 'consistent', degraded_reason: null,
+      price_lines: { entry: 1700, stop: 1620, target: 1850 }, markers: [] } });
+    const res2 = await stocksApi.getSignals('600519', 120);
+    expect(res2.resonance).toBe('none');
+  });
+
   it('encodes crypto codes containing a slash for the {code:path} route', async () => {
     get.mockResolvedValueOnce({
       data: {

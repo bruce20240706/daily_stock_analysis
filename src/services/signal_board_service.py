@@ -17,6 +17,7 @@ import pandas as pd
 
 from src.config import parse_env_float, parse_env_int
 from src.core.trading_calendar import get_market_for_stock
+from src.services.multi_period_resonance import resonance_from_daily
 from src.services.signals_service import build_signals_payload, buy_signal_to_direction, STALE_TRADING_DAYS_DEFAULT
 from src.services.signal_hit_rate import resolve_marker_hit_fields
 from src.services.stock_service import StockService
@@ -29,6 +30,8 @@ from src.storage import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
+RESONANCE_DAILY_DAYS = 750  # 共振深抓日线天数（够月线 MA20 暖机）
+
 
 @dataclass
 class BoardSignals:
@@ -37,6 +40,7 @@ class BoardSignals:
     latest_close: Optional[float]
     name: Optional[str]
     market: Optional[str]
+    resonance: str = "none"
 
 
 def _infer_market(code: str) -> Optional[str]:
@@ -70,9 +74,10 @@ def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
             "status": "degraded", "markers": [],
             "price_lines": {"entry": None, "stop": None, "target": None},
             "consistency": "unknown", "degraded_reason": "无可用历史数据",
+            "resonance": "none",
         }
         return BoardSignals(signals_payload=payload, rule_direction=None,
-                            latest_close=None, name=name, market=market)
+                            latest_close=None, name=name, market=market, resonance="none")
 
     df = pd.DataFrame(rows)
     latest_bar_date = str(rows[-1].get("date"))
@@ -88,6 +93,8 @@ def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
         rule_signal = getattr(trend_result, "buy_signal", None)
     except Exception as exc:
         logger.warning("规则代表方向计算失败 code=%s err=%s", code, exc)
+
+    rule_dir = buy_signal_to_direction(rule_signal) if rule_signal is not None else "neutral"
 
     llm_record = None
     try:
@@ -116,10 +123,25 @@ def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
     price_levels = derive_price_levels(df, atr_mult=atr_mult, rr_target=rr_target)
     payload["price_lines"] = build_price_lines(price_levels).model_dump()
 
+    # 多周期共振：仅对方向性(bullish/bearish)做一次独立深抓（门控）；hold/中性不抓；失败降级 none。
+    resonance = "none"
+    if rule_dir in ("bullish", "bearish"):
+        try:
+            deep = service.get_history_data(stock_code=code, period="daily", days=RESONANCE_DAILY_DAYS)
+            deep_rows = deep.get("data", []) or []
+            if deep_rows:
+                resonance = resonance_from_daily(pd.DataFrame(deep_rows), rule_dir)
+        except Exception as exc:
+            logger.warning("共振计算失败 code=%s err=%s", code, exc)
+            resonance = "none"
+
+    payload["resonance"] = resonance
+
     return BoardSignals(
         signals_payload=payload,
-        rule_direction=buy_signal_to_direction(rule_signal) if rule_signal is not None else "neutral",
+        rule_direction=rule_dir,
         latest_close=latest_close, name=name, market=market,
+        resonance=resonance,
     )
 
 
@@ -174,6 +196,7 @@ def _entry_from_board_signals(code: str, bs: "BoardSignals") -> dict:
         "price_lines": payload.get("price_lines", {"entry": None, "stop": None, "target": None}),
         "latest_close": bs.latest_close,
         **_hit_fields_from_markers(markers),
+        "resonance": payload.get("resonance", "none"),
         "status": payload.get("status", "ok"), "degraded_reason": payload.get("degraded_reason"),
     }
 
@@ -186,6 +209,7 @@ def _degraded_entry(code: str, reason: str) -> dict:
         "price_lines": {"entry": None, "stop": None, "target": None},
         "latest_close": None, "hit_rate": None, "hit_sample": None, "verified": False,
         "ci_low": None, "ci_high": None, "baseline_excess": None,
+        "resonance": "none",
         "status": "degraded", "degraded_reason": reason,
     }
 

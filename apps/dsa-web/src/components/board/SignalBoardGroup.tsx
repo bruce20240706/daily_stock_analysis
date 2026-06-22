@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { BoardEntry } from '../../types/kline';
 import { cn } from '../../utils/cn';
 import { formatCi, formatExcess, formatHitRate, verifiedLabel } from '../../utils/credibility';
+import { resonanceLabel, resonanceTooltip } from '../../utils/resonance';
 
 const dirLabel: Record<string, string> = { bullish: '看多', bearish: '看空', neutral: '中性' };
 const consistencyLabel: Record<BoardEntry['consistency'], string> = {
@@ -56,6 +57,13 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
                   >{formatExcess(e.baselineExcess)}</span>
                 )}
                 <span className={cn(e.verified ? 'text-success' : 'text-secondary-text')}>{verifiedLabel(e.verified)}</span>
+                {resonanceLabel(e.resonance) && (
+                  <span
+                    data-testid="board-resonance"
+                    aria-label={resonanceTooltip(e.resonance)}
+                    className="ml-1 rounded bg-accent/15 px-1 text-accent"
+                  >{resonanceLabel(e.resonance)}</span>
+                )}
               </td>
               <td>
                 <button

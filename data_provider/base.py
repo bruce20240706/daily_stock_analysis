@@ -324,6 +324,23 @@ def canonical_stock_code(code: str) -> str:
     return (code or "").strip().upper()
 
 
+def attach_ma_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """在含 close（可选 volume）的帧上附 ma5/ma10/ma20 与 volume_ratio。
+
+    与日线 _calculate_indicators 同口径（rolling min_periods=1；volume_ratio 用前5日均量 shift(1)、NaN→1.0），
+    供日线与周/月线复用，避免均线公式漂移。不就地四舍五入（调用方按需 round）。
+    """
+    df = df.copy()
+    df['ma5'] = df['close'].rolling(window=5, min_periods=1).mean()
+    df['ma10'] = df['close'].rolling(window=10, min_periods=1).mean()
+    df['ma20'] = df['close'].rolling(window=20, min_periods=1).mean()
+    if 'volume' in df.columns:
+        avg_volume_5 = df['volume'].rolling(window=5, min_periods=1).mean()
+        df['volume_ratio'] = df['volume'] / avg_volume_5.shift(1)
+        df['volume_ratio'] = df['volume_ratio'].fillna(1.0)
+    return df
+
+
 class DataFetchError(Exception):
     """数据获取异常基类"""
     pass
@@ -560,33 +577,11 @@ class BaseFetcher(ABC):
         return df
     
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        计算技术指标
-        
-        计算指标：
-        - MA5, MA10, MA20: 移动平均线
-        - Volume_Ratio: 量比（今日成交量 / 5日平均成交量）
-        """
-        df = df.copy()
-        
-        # 移动平均线
-        df['ma5'] = df['close'].rolling(window=5, min_periods=1).mean()
-        df['ma10'] = df['close'].rolling(window=10, min_periods=1).mean()
-        df['ma20'] = df['close'].rolling(window=20, min_periods=1).mean()
-        
-        # 量比：当日成交量 / 5日平均成交量
-        # 注意：此处的 volume_ratio 是“日线成交量 / 前5日均量(shift 1)”的相对倍数，
-        # 与部分交易软件口径的“分时量比（同一时刻对比）”不同，含义更接近“放量倍数”。
-        # 该行为目前保留（按需求不改逻辑）。
-        avg_volume_5 = df['volume'].rolling(window=5, min_periods=1).mean()
-        df['volume_ratio'] = df['volume'] / avg_volume_5.shift(1)
-        df['volume_ratio'] = df['volume_ratio'].fillna(1.0)
-        
-        # 保留2位小数
+        """计算技术指标（MA5/10/20、volume_ratio），复用 attach_ma_indicators 同口径。"""
+        df = attach_ma_indicators(df)
         for col in ['ma5', 'ma10', 'ma20', 'volume_ratio']:
             if col in df.columns:
                 df[col] = df[col].round(2)
-        
         return df
     
     @staticmethod

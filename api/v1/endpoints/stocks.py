@@ -507,8 +507,8 @@ def get_stock_history(
     days: int = Query(
         120,
         ge=1,
-        le=365,
-        description="获取天数（日历回看天数；K 线抽屉默认 120，上限保守保持 365）",
+        le=1825,
+        description="获取天数（日历回看天数；日线默认 120；周/月线前端送更大窗口，上限放宽至 1825）",
     )
 ) -> StockHistoryResponse:
     """

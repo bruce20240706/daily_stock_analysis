@@ -103,6 +103,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 信号命中率回填(M2c)：复用 BacktestResult 历史方向命中率回填 SignalMarker 的 hit_rate/hit_sample，达样本阈值(沿用回测 eval_window_days 默认)置 verified，并接入 /signals 端点 rule marker（verified 不再恒 false）；命中率按 (分析, 评估窗口) 去重，杠杆 engine_version 变体不重复计样本；新增 SIGNAL_HIT_VERIFIED_MIN_SAMPLE 配置
 - [新功能] K 线抽屉支持规则/LLM 双轨标注（合并/并排）、点击钻取依据、入/损/标价位线，/signals 失败或 status=degraded 均降级为有图无标注
 - [新功能] 新增「个股工作台」(容器B)：可常驻可导航的单股深度页 /stock/:code，汇聚 K 线+量价信号+LLM 报告+历史，并提供页内动作(加自选/刷新分析/为该股建告警/复制链接)；从信号看板行、K 线抽屉、首页报告可「在工作台打开」。复用现有组件与端点，新增前端 stocksApi.getQuote 客户端，无新增后端端点
+- [新功能] 个股 K 线支持日/周/月周期切换（周/月线由日线本地聚合，市场无关）
+- [新功能] 日线信号新增多周期共振标记（高周期趋势与信号方向同向：周线共振/周月双共振），看板行与钻取面板可见
+- [改进] GET /api/v1/stocks/{code}/history 放宽 days 上限至 1825 以支撑周/月线窗口（纯加宽，向后兼容）
 
 ## [3.20.0] - 2026-06-03
 

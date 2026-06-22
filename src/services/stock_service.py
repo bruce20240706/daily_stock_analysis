@@ -10,12 +10,24 @@
 """
 
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 from src.repositories.stock_repo import StockRepository
 
 logger = logging.getLogger(__name__)
+
+_HISTORY_WARMUP_DAYS = {"daily": 0, "weekly": 200, "monthly": 800}
+_MAX_HISTORY_FETCH_DAYS = 3650
+_PERIOD_CAL_DAYS = {"weekly": 7, "monthly": 30}
+
+
+def _pct(v):
+    """涨跌幅取值：保持日线既有口径（0/缺失->None），并对周/月线首根 NaN 归 None。"""
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return None
+    return float(v) if v else None
 
 
 class StockService:
@@ -85,56 +97,31 @@ class StockService:
             logger.error(f"获取实时行情失败: {e}", exc_info=True)
             return None
     
-    def get_history_data(
-        self,
-        stock_code: str,
-        period: str = "daily",
-        days: int = 30
-    ) -> Dict[str, Any]:
-        """
-        获取股票历史行情
-        
-        Args:
-            stock_code: 股票代码
-            period: K 线周期 (daily/weekly/monthly)
-            days: 获取天数
-            
-        Returns:
-            历史行情数据字典
-            
-        Raises:
-            ValueError: 当 period 不是 daily 时抛出（weekly/monthly 暂未实现）
-        """
-        # 验证 period 参数，只支持 daily
-        if period != "daily":
-            raise ValueError(
-                f"暂不支持 '{period}' 周期，目前仅支持 'daily'。"
-                "weekly/monthly 聚合功能将在后续版本实现。"
-            )
-        
+    def get_history_data(self, stock_code: str, period: str = "daily", days: int = 30) -> Dict[str, Any]:
+        """获取股票历史行情（period ∈ daily/weekly/monthly；周/月线本地聚合自日线）。"""
+        if period not in ("daily", "weekly", "monthly"):
+            raise ValueError(f"暂不支持 '{period}' 周期，目前支持 daily/weekly/monthly。")
         try:
-            # 调用数据获取器获取历史数据
             from data_provider.base import DataFetcherManager
-            
             manager = DataFetcherManager()
-            df, source = manager.get_daily_data(stock_code, days=days)
-            
+            fetch_days = (days if period == "daily"
+                          else min(days + _HISTORY_WARMUP_DAYS[period], _MAX_HISTORY_FETCH_DAYS))
+            df, source = manager.get_daily_data(stock_code, days=fetch_days)
             if df is None or df.empty:
-                logger.warning(f"获取 {stock_code} 历史数据失败")
                 return {"stock_code": stock_code, "period": period, "data": []}
-            
-            # 获取股票名称
             stock_name = manager.get_stock_name(stock_code)
-            
-            # 转换为响应格式
+            if period != "daily":
+                from data_provider.resample import resample_ohlc
+                df = resample_ohlc(df, period)
+                if df.empty:
+                    return {"stock_code": stock_code, "stock_name": stock_name,
+                            "period": period, "data": []}
+                display_n = max(1, math.ceil(days / _PERIOD_CAL_DAYS[period]))
+                df = df.tail(display_n)
             data = []
             for _, row in df.iterrows():
                 date_val = row.get("date")
-                if hasattr(date_val, "strftime"):
-                    date_str = date_val.strftime("%Y-%m-%d")
-                else:
-                    date_str = str(date_val)
-                
+                date_str = date_val.strftime("%Y-%m-%d") if hasattr(date_val, "strftime") else str(date_val)
                 data.append({
                     "date": date_str,
                     "open": float(row.get("open", 0)),
@@ -143,16 +130,9 @@ class StockService:
                     "close": float(row.get("close", 0)),
                     "volume": float(row.get("volume", 0)) if row.get("volume") else None,
                     "amount": float(row.get("amount", 0)) if row.get("amount") else None,
-                    "change_percent": float(row.get("pct_chg", 0)) if row.get("pct_chg") else None,
+                    "change_percent": _pct(row.get("pct_chg")),
                 })
-            
-            return {
-                "stock_code": stock_code,
-                "stock_name": stock_name,
-                "period": period,
-                "data": data,
-            }
-            
+            return {"stock_code": stock_code, "stock_name": stock_name, "period": period, "data": data}
         except ImportError:
             logger.warning("DataFetcherManager 未找到，返回空数据")
             return {"stock_code": stock_code, "period": period, "data": []}
