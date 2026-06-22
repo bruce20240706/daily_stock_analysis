@@ -48,7 +48,7 @@ def test_build_signals_for_code_returns_board_signals(monkeypatch):
 
     bs = sbs.build_signals_for_code("600519", days=120)
 
-    assert set(bs.signals_payload) == {"status", "markers", "price_lines", "consistency", "degraded_reason", "resonance"}
+    assert set(bs.signals_payload) == {"status", "markers", "price_lines", "consistency", "degraded_reason", "resonance", "plan_quality"}
     assert bs.signals_payload["status"] == "ok"
     assert bs.signals_payload["resonance"] == "none"   # 深抓触发但 2 行桩数据不足以算 MA → resonance_from_daily 返回 none
     assert bs.rule_direction == "bullish"

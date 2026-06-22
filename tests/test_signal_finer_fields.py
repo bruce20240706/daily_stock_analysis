@@ -143,3 +143,187 @@ def test_marker_status_unmatched_timestamp_none():
     m = {"source": "rule", "timestamp": 999999, "horizon_bars": None, "status": None}
     compute_marker_statuses([m], dates, default_window=10)
     assert m["status"] is None
+
+
+# ---------------------------------------------------------------------------
+# Task 4 tests: _hit_fields_from_markers 扩展 + _augment_payload_finer_fields
+# ---------------------------------------------------------------------------
+
+import src.services.signal_board_service as _sbs
+
+
+def test_hit_fields_from_markers_includes_horizon_and_signal_status():
+    """_hit_fields_from_markers 返回首条 rule marker 的 horizon_bars + signal_status。"""
+    markers = [
+        {
+            "source": "rule", "signal_type": "a",
+            "hit_rate": 0.6, "hit_sample": 30,
+            "verified": True, "ci_low": 0.5, "ci_high": 0.7, "baseline_excess": 0.1,
+            "horizon_bars": 10, "status": "aging",
+        },
+        {
+            "source": "rule", "signal_type": "b",
+            "hit_rate": 0.9, "horizon_bars": 20, "status": "active",
+        },  # 第二条不应被取
+    ]
+    out = _sbs._hit_fields_from_markers(markers)
+    assert out["hit_rate"] == 0.6           # 第一条 rule marker
+    assert out["horizon_bars"] == 10        # 与 hit_rate 同源（同一条）
+    assert out["signal_status"] == "aging"  # 同一条的 status
+
+
+def test_hit_fields_from_markers_empty_has_horizon_keys():
+    """空列表 → 兜底 dict 含 horizon_bars=None, signal_status=None。"""
+    out = _sbs._hit_fields_from_markers([])
+    assert out["horizon_bars"] is None
+    assert out["signal_status"] is None
+
+
+def test_hit_fields_from_markers_no_rule_markers_returns_none_fields():
+    """只有 llm marker → 回退 dict 含 horizon_bars/signal_status None。"""
+    markers = [{"source": "llm", "signal_type": "llm_advice", "direction": "bullish"}]
+    out = _sbs._hit_fields_from_markers(markers)
+    assert out["hit_rate"] is None
+    assert out["horizon_bars"] is None
+    assert out["signal_status"] is None
+
+
+def test_hit_fields_from_markers_first_rule_wins():
+    """首条 rule marker 决定所有字段，第二条不应影响。"""
+    markers = [
+        {"source": "rule", "signal_type": "first", "hit_rate": 0.55,
+         "horizon_bars": 7, "status": "expired"},
+        {"source": "rule", "signal_type": "second", "hit_rate": 0.99,
+         "horizon_bars": 3, "status": "active"},
+    ]
+    out = _sbs._hit_fields_from_markers(markers)
+    assert out["hit_rate"] == 0.55
+    assert out["horizon_bars"] == 7
+    assert out["signal_status"] == "expired"
+
+
+def test_augment_payload_sets_plan_quality_high():
+    """全线 price_lines + consistent → plan_quality == 'high'。"""
+    payload = {
+        "price_lines": {"entry": 10.0, "stop": 9.0, "target": 12.0},
+        "consistency": "consistent",
+        "markers": [],
+    }
+    _sbs._augment_payload_finer_fields(payload, [])
+    assert payload["plan_quality"] == "high"
+
+
+def test_augment_payload_sets_plan_quality_none_when_all_price_lines_null():
+    """所有 price_lines 为 None → plan_quality == None。"""
+    payload = {
+        "price_lines": {"entry": None, "stop": None, "target": None},
+        "consistency": "consistent",
+        "markers": [],
+    }
+    _sbs._augment_payload_finer_fields(payload, [])
+    assert payload["plan_quality"] is None
+
+
+def test_augment_payload_sets_plan_quality_low_on_conflict():
+    """entry+stop 有值但 conflict → plan_quality == 'low'。"""
+    payload = {
+        "price_lines": {"entry": 10.0, "stop": 9.0, "target": None},
+        "consistency": "conflict",
+        "markers": [],
+    }
+    _sbs._augment_payload_finer_fields(payload, [])
+    assert payload["plan_quality"] == "low"
+
+
+def test_augment_payload_writes_marker_statuses():
+    """compute_marker_statuses 被调用：markers 的 status 字段被 in-place 填写。"""
+    ts_0 = date_str_to_epoch_ms("2026-06-16")  # bars_since = 2 (last is index 2)
+    ts_2 = date_str_to_epoch_ms("2026-06-18")  # bars_since = 0 → active
+
+    payload = {
+        "price_lines": {"entry": 10.0, "stop": 9.0, "target": 12.0},
+        "consistency": "consistent",
+        "markers": [
+            {"source": "rule", "signal_type": "a", "timestamp": ts_0,
+             "horizon_bars": None, "status": None},
+            {"source": "rule", "signal_type": "b", "timestamp": ts_2,
+             "horizon_bars": 5, "status": None},
+        ],
+    }
+    rows = [
+        {"date": "2026-06-16"},
+        {"date": "2026-06-17"},
+        {"date": "2026-06-18"},
+    ]
+    _sbs._augment_payload_finer_fields(payload, rows)
+
+    statuses = {m["signal_type"]: m["status"] for m in payload["markers"] if m["source"] == "rule"}
+    # marker b: bars_since=0 → active
+    assert statuses["b"] == "active"
+    # marker a: horizon_bars=None → default_window applies; bars_since=2
+    # default_window from get_config().signal_backtest_horizon_bars = 10
+    # bars_since(2) < 10 → aging
+    assert statuses["a"] == "aging"
+
+
+def test_d7_entry_from_board_signals_horizon_and_status_come_from_first_rule_marker():
+    """_entry_from_board_signals 中 horizon_bars/signal_status 必须与 hit_rate 同源（首条 rule marker）。"""
+    payload = {
+        "status": "ok",
+        "markers": [
+            {
+                "source": "rule", "signal_type": "a",
+                "hit_rate": 0.65, "hit_sample": 20, "verified": True,
+                "ci_low": 0.5, "ci_high": 0.8, "baseline_excess": 0.1,
+                "horizon_bars": 15, "status": "aging",
+            },
+            {
+                "source": "rule", "signal_type": "b",
+                "hit_rate": 0.90, "horizon_bars": 5, "status": "active",
+            },
+        ],
+        "price_lines": {"entry": 10.0, "stop": 9.0, "target": 12.0},
+        "consistency": "consistent",
+        "degraded_reason": None,
+        "resonance": "none",
+        "plan_quality": "high",
+    }
+    bs = _sbs.BoardSignals(
+        signals_payload=payload,
+        rule_direction="bullish",
+        latest_close=100.0,
+        name="TestStock",
+        market="CN",
+    )
+    entry = _sbs._entry_from_board_signals("600519", bs)
+    # hit_rate 来自首条 rule marker
+    assert entry["hit_rate"] == 0.65
+    # horizon_bars/signal_status 必须与 hit_rate 同源（首条）
+    assert entry["horizon_bars"] == 15
+    assert entry["signal_status"] == "aging"
+    # plan_quality 穿透
+    assert entry["plan_quality"] == "high"
+
+
+def test_d7_entry_plan_quality_none_when_missing_from_payload():
+    """payload 中无 plan_quality → entry 的 plan_quality 为 None。"""
+    payload = {
+        "status": "ok",
+        "markers": [],
+        "price_lines": {"entry": None, "stop": None, "target": None},
+        "consistency": "unknown",
+        "degraded_reason": None,
+        "resonance": "none",
+        # plan_quality 未设置
+    }
+    bs = _sbs.BoardSignals(
+        signals_payload=payload,
+        rule_direction="neutral",
+        latest_close=50.0,
+        name="X",
+        market="CN",
+    )
+    entry = _sbs._entry_from_board_signals("X", bs)
+    assert entry["plan_quality"] is None
+    assert entry["horizon_bars"] is None
+    assert entry["signal_status"] is None

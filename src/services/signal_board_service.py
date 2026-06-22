@@ -15,10 +15,13 @@ from typing import Optional
 
 import pandas as pd
 
-from src.config import parse_env_float, parse_env_int
+from src.config import get_config, parse_env_float, parse_env_int
 from src.core.trading_calendar import get_market_for_stock
 from src.services.multi_period_resonance import resonance_from_daily
-from src.services.signals_service import build_signals_payload, buy_signal_to_direction, STALE_TRADING_DAYS_DEFAULT
+from src.services.signals_service import (
+    build_signals_payload, buy_signal_to_direction, STALE_TRADING_DAYS_DEFAULT,
+    compute_plan_quality, compute_marker_statuses,
+)
 from src.services.signal_hit_rate import resolve_marker_hit_fields
 from src.services.stock_service import StockService
 from src.services.volume_price_signals import (
@@ -31,6 +34,16 @@ from src.storage import DatabaseManager
 logger = logging.getLogger(__name__)
 
 RESONANCE_DAILY_DAYS = 750  # 共振深抓日线天数（够月线 MA20 暖机）
+
+
+def _augment_payload_finer_fields(payload: dict, rows: list) -> None:
+    """编排层 compute-on-read：填 plan_quality（响应级）+ 各 rule marker 的 status（in-place）。"""
+    payload["plan_quality"] = compute_plan_quality(
+        payload.get("price_lines") or {}, payload.get("consistency", "unknown")
+    )
+    bar_dates = [str(r.get("date")) for r in rows]
+    default_window = int(get_config().signal_backtest_horizon_bars)
+    compute_marker_statuses(payload.get("markers") or [], bar_dates, default_window)
 
 
 @dataclass
@@ -123,6 +136,8 @@ def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
     price_levels = derive_price_levels(df, atr_mult=atr_mult, rr_target=rr_target)
     payload["price_lines"] = build_price_lines(price_levels).model_dump()
 
+    _augment_payload_finer_fields(payload, rows)
+
     # 多周期共振：仅对方向性(bullish/bearish)做一次独立深抓（门控）；hold/中性不抓；失败降级 none。
     resonance = "none"
     if rule_dir in ("bullish", "bearish"):
@@ -178,9 +193,12 @@ def _hit_fields_from_markers(markers: list) -> dict:
                 "ci_low": m.get("ci_low"),
                 "ci_high": m.get("ci_high"),
                 "baseline_excess": m.get("baseline_excess"),
+                "horizon_bars": m.get("horizon_bars"),
+                "signal_status": m.get("status"),
             }
     return {"hit_rate": None, "hit_sample": None, "verified": False,
-            "ci_low": None, "ci_high": None, "baseline_excess": None}
+            "ci_low": None, "ci_high": None, "baseline_excess": None,
+            "horizon_bars": None, "signal_status": None}
 
 
 def _entry_from_board_signals(code: str, bs: "BoardSignals") -> dict:
@@ -196,6 +214,7 @@ def _entry_from_board_signals(code: str, bs: "BoardSignals") -> dict:
         "price_lines": payload.get("price_lines", {"entry": None, "stop": None, "target": None}),
         "latest_close": bs.latest_close,
         **_hit_fields_from_markers(markers),
+        "plan_quality": payload.get("plan_quality"),
         "resonance": payload.get("resonance", "none"),
         "status": payload.get("status", "ok"), "degraded_reason": payload.get("degraded_reason"),
     }
