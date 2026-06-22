@@ -1273,6 +1273,28 @@ class NotificationService(
                                 f", {cf_data.get('dragon_tiger_latest_date', 'N/A')}",
                                 "",
                             ])
+                    # 融资融券（A股；presence-only；仅呈现、不喂 LLM、不改决策）
+                    margin_data = data_persp.get('margin_trading', {})
+                    if margin_data:
+                        margin_label = 'Margin Trading' if report_language == 'en' else '融资融券'
+                        fb_label = 'Financing Balance' if report_language == 'en' else '融资余额'
+                        fbuy_label = 'Financing Buy' if report_language == 'en' else '融资买入'
+                        sv_label = 'Short Volume' if report_language == 'en' else '融券余量'
+                        _fb = margin_data.get('financing_balance')
+                        _fbuy = margin_data.get('financing_buy')
+                        _sv = margin_data.get('short_volume')
+                        _exch = margin_data.get('exchange') or ''
+                        if report_language != 'en':
+                            _exch = {'SSE': '沪', 'SZSE': '深'}.get(_exch, _exch)
+                        _td = margin_data.get('trade_date') or 'N/A'
+                        report_lines.extend([
+                            f"**{margin_label}**: {fb_label} "
+                            f"{'N/A' if _fb is None else _fb} | "
+                            f"{fbuy_label} {'N/A' if _fbuy is None else _fbuy} | "
+                            f"{sv_label} {'N/A' if _sv is None else _sv}"
+                            f" ({_exch} {_td})",
+                            "",
+                        ])
 
                 # ========== 作战计划 ==========
                 battle = dashboard.get('battle_plan', {}) if dashboard else {}

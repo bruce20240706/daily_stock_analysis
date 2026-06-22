@@ -100,3 +100,74 @@ def test_fill_margin_does_not_touch_decision_stability():
     fill_margin_if_needed(result, _mctx("ok"))
     assert result.dashboard.get("decision_stability") is None
     assert result.decision_type == "buy"  # 决策不变
+
+
+# --- Task 5: both render paths (Python legacy + Jinja2) + zh/en ---
+from unittest import mock  # noqa: E402
+from src.analyzer import AnalysisResult  # noqa: E402
+from src.services.report_renderer import render as _render  # noqa: E402
+
+
+def _result_with_margin(report_language="zh"):
+    return AnalysisResult(
+        code="600519", name="贵州茅台", sentiment_score=72,
+        trend_prediction="看多", operation_advice="持有", analysis_summary="稳健",
+        report_language=report_language,
+        dashboard={"data_perspective": {"margin_trading": {
+            "financing_balance": "1.23亿", "financing_buy": "4500万",
+            "short_volume": "1000", "trade_date": "20260619", "exchange": "SSE",
+        }}},
+    )
+
+
+@mock.patch("src.notification.get_config")
+def test_notification_legacy_renders_margin_zh(mock_cfg):
+    from tests.test_notification import _make_config
+    from src.notification import NotificationService
+    mock_cfg.return_value = _make_config(report_renderer_enabled=False)
+    out = NotificationService().generate_dashboard_report(
+        [_result_with_margin("zh")], report_date="2026-06-19")
+    assert "融资融券" in out
+    assert "融资余额" in out
+    assert "1.23亿" in out
+    assert "20260619" in out
+    assert "沪" in out  # exchange SSE → 沪
+
+
+@mock.patch("src.notification.get_config")
+def test_notification_legacy_renders_margin_en(mock_cfg):
+    from tests.test_notification import _make_config
+    from src.notification import NotificationService
+    mock_cfg.return_value = _make_config(report_renderer_enabled=False, report_language="en")
+    out = NotificationService().generate_dashboard_report(
+        [_result_with_margin("en")], report_date="2026-06-19")
+    assert "Margin Trading" in out
+    assert "Financing Balance" in out
+    assert "SSE" in out
+
+
+@mock.patch("src.notification.get_config")
+def test_notification_legacy_margin_absent_not_rendered(mock_cfg):
+    from tests.test_notification import _make_config
+    from src.notification import NotificationService
+    mock_cfg.return_value = _make_config(report_renderer_enabled=False)
+    r = AnalysisResult(
+        code="600519", name="贵州茅台", sentiment_score=72, trend_prediction="看多",
+        operation_advice="持有", analysis_summary="x",
+        dashboard={"data_perspective": {"chip_structure": {"chip_health": "健康"}}})
+    out = NotificationService().generate_dashboard_report([r], report_date="2026-06-19")
+    assert "融资融券" not in out
+
+
+def test_jinja2_renders_margin_labels_zh():
+    out = _render("markdown", [_result_with_margin("zh")], summary_only=False)
+    assert "融资融券" in out
+    assert "融资余额" in out
+    assert "融券余量" in out
+
+
+def test_jinja2_renders_margin_labels_en():
+    out = _render("markdown", [_result_with_margin("en")], summary_only=False)
+    assert "Margin Trading" in out
+    assert "Financing Balance" in out
+    assert "Short Volume" in out
