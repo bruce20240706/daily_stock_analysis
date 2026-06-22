@@ -100,5 +100,5 @@ section 是否出现取 **OR 语义**：两块中只要任一 `status in {ok, pa
 
 - **仅 A 股**：港股、美股、crypto、ETF 均不支持，`capital_flow` section 缺席。
 - **龙虎榜仅存在性**：仅记录上榜次数与日期，不解析席位明细（买方/卖方席位名称、净额），不做基于席位的硬决策规则。
-- **北向资金 / 融资融券未纳入**：留待 M4-B-2 迭代补充。
+- **融资融券已纳入**（M4-B-2，见 [margin-trading.md](margin-trading.md)）；**北向资金**因交易所 2024 年停更个股级数据，无源可纳入（永久局限）。
 - **无专用 Web 组件**：与 `chip_structure` / `volume` 等 section 一致，资金面信息经 notification markdown 和报告 payload（`data_perspective.capital_flow`）呈现，前端不感知新字段时安全忽略。
