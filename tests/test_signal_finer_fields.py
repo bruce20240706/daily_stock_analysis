@@ -235,8 +235,11 @@ def test_augment_payload_sets_plan_quality_low_on_conflict():
     assert payload["plan_quality"] == "low"
 
 
-def test_augment_payload_writes_marker_statuses():
+def test_augment_payload_writes_marker_statuses(monkeypatch):
     """compute_marker_statuses 被调用：markers 的 status 字段被 in-place 填写。"""
+    import types as _t
+    monkeypatch.setattr(_sbs, "get_config",
+                        lambda: _t.SimpleNamespace(signal_backtest_horizon_bars=10))
     ts_0 = date_str_to_epoch_ms("2026-06-16")  # bars_since = 2 (last is index 2)
     ts_2 = date_str_to_epoch_ms("2026-06-18")  # bars_since = 0 → active
 
