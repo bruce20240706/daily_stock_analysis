@@ -49,3 +49,10 @@ const _MARKER_STATUS_LABEL: Record<string, string> = {
 export function markerStatusLabel(status: 'active' | 'aging' | 'expired' | null): string | null {
   return status == null ? null : (_MARKER_STATUS_LABEL[status] ?? null);
 }
+
+const _PLAN_QUALITY_LABEL: Record<string, string> = { high: '高', medium: '中', low: '低' };
+
+/** Maps plan quality code to Chinese display label, or null when absent. */
+export function planQualityLabel(planQuality: 'high' | 'medium' | 'low' | null): string | null {
+  return planQuality == null ? null : (_PLAN_QUALITY_LABEL[planQuality] ?? null);
+}

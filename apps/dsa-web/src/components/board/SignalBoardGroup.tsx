@@ -2,7 +2,7 @@ import type React from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { BoardEntry } from '../../types/kline';
 import { cn } from '../../utils/cn';
-import { formatCi, formatExcess, formatHitRate, formatHorizon, markerStatusLabel, verifiedLabel } from '../../utils/credibility';
+import { formatCi, formatExcess, formatHitRate, formatHorizon, markerStatusLabel, planQualityLabel, verifiedLabel } from '../../utils/credibility';
 import { resonanceLabel, resonanceTooltip } from '../../utils/resonance';
 
 const dirLabel: Record<string, string> = { bullish: '看多', bearish: '看空', neutral: '中性' };
@@ -67,7 +67,7 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
               </td>
               <td>
                 {e.planQuality != null && (
-                  <span data-testid="board-plan-quality">{e.planQuality}</span>
+                  <span data-testid="board-plan-quality">{planQualityLabel(e.planQuality)}</span>
                 )}
                 {e.horizonBars != null && (
                   <span data-testid="board-horizon">{formatHorizon(e.horizonBars)}</span>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatHitRate, formatCi, formatExcess, verifiedLabel, formatHorizon, markerStatusLabel } from '../credibility';
+import { formatHitRate, formatCi, formatExcess, verifiedLabel, formatHorizon, markerStatusLabel, planQualityLabel } from '../credibility';
 
 describe('credibility format', () => {
   it('formats hit rate with sample, empty when no sample', () => {
@@ -27,5 +27,11 @@ describe('credibility format', () => {
     expect(markerStatusLabel('aging')).toBe('窗口内');
     expect(markerStatusLabel('expired')).toBe('已过窗');
     expect(markerStatusLabel(null)).toBeNull();
+  });
+  it('labels plan quality', () => {
+    expect(planQualityLabel('high')).toBe('高');
+    expect(planQualityLabel('medium')).toBe('中');
+    expect(planQualityLabel('low')).toBe('低');
+    expect(planQualityLabel(null)).toBeNull();
   });
 });

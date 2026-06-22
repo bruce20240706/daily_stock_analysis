@@ -159,7 +159,7 @@ describe('SignalBoard', () => {
         />
       </MemoryRouter>,
     );
-    expect(screen.getByTestId('board-plan-quality')).toHaveTextContent('high');
+    expect(screen.getByTestId('board-plan-quality')).toHaveTextContent('高');
     expect(screen.getByTestId('board-horizon')).toHaveTextContent('窗口 10 根');
     expect(screen.getByTestId('board-signal-status')).toHaveTextContent('窗口内');
   });
