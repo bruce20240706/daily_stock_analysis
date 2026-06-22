@@ -130,6 +130,8 @@ class SignalMarker(BaseModel):
     ci_high: Optional[float] = Field(None, description="命中率置信区间上界（M3-A6），无则 null")
     baseline_excess: Optional[float] = Field(None, description="相对基准超额（M3-A6），无则 null")
     as_of: Optional[int] = Field(None, description="仅 source=llm：该 LLM 结论生成时间 epoch ms")
+    horizon_bars: Optional[int] = Field(None, description="该信号 hit_rate/CI 的验证前看窗口(bar 数);仅 rule、命中 signal_stats 时有值")
+    status: Optional[Literal["active", "aging", "expired"]] = Field(None, description="信号生命周期;仅 rule。active=最新bar/aging=窗口内/expired=窗口已过")
 
 
 class PriceLines(BaseModel):
@@ -153,6 +155,7 @@ class SignalsResponse(BaseModel):
     resonance: Literal["none", "weekly", "weekly_monthly"] = Field(
         "none", description="多周期共振档位（M4-A）：高周期趋势与日线信号同向"
     )
+    plan_quality: Optional[Literal["high", "medium", "low"]] = Field(None, description="交易计划质量:price_lines 完整度 + consistency;无 price_lines→null")
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -198,6 +201,9 @@ class BoardEntry(BaseModel):
     )
     status: Literal["ok", "degraded"] = Field(..., description="单条状态")
     degraded_reason: Optional[str] = Field(None, description="status=degraded 时的原因说明")
+    horizon_bars: Optional[int] = Field(None, description="代表信号的验证前看窗口(bar 数),与本行 hit_rate 同源")
+    signal_status: Optional[Literal["active", "aging", "expired"]] = Field(None, description="代表信号的生命周期(区别于 status 的 ok/degraded)")
+    plan_quality: Optional[Literal["high", "medium", "low"]] = Field(None, description="交易计划质量(该股响应级)")
 
 
 class BoardCounts(BaseModel):
