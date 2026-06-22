@@ -10,12 +10,22 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
+import time
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# 融资融券（RZRQ）按日全市场明细的模块级有界 memo。
+# key=(exchange, "YYYYMMDD")，value=非空全市场 DataFrame；仅缓存非空。
+# 长驻 systemd 进程下用 LRU 上限封顶，避免全市场 DataFrame 无界堆积。
+_MARGIN_MEMO_MAX = 4
+_MARGIN_MEMO_LOCK = threading.Lock()
+_margin_detail_memo: "OrderedDict[Tuple[str, str], pd.DataFrame]" = OrderedDict()
 
 _DIVIDEND_KEYWORD_MAP: Dict[str, List[str]] = {
     "per_share": [
@@ -529,4 +539,84 @@ class AkshareFundamentalAdapter:
         )
         result["status"] = "ok"
         result["source_chain"].append(f"dragon_tiger:{source}")
+        return result
+
+    def _margin_df_for(
+        self, exchange: str, fn_name: str, date_str: str
+    ) -> Optional[pd.DataFrame]:
+        """按 (exchange, date) 取全市场融资融券明细，带模块级有界 memo。
+
+        仅缓存非空 DataFrame（早盘空/预览快照不被钉死一整天）；锁只守护 dict
+        读写/淘汰，不持锁抓网络（冷缓存极少量重复在途抓取可接受）。
+        """
+        key = (exchange, date_str)
+        with _MARGIN_MEMO_LOCK:
+            cached = _margin_detail_memo.get(key)
+            if cached is not None:
+                _margin_detail_memo.move_to_end(key)
+                return cached
+        df, _source, _errors = self._call_df_candidates([(fn_name, {"date": date_str})])
+        if df is not None and not df.empty:
+            with _MARGIN_MEMO_LOCK:
+                _margin_detail_memo[key] = df
+                _margin_detail_memo.move_to_end(key)
+                while len(_margin_detail_memo) > _MARGIN_MEMO_MAX:
+                    _margin_detail_memo.popitem(last=False)
+        return df
+
+    def get_margin_detail(
+        self, stock_code: str, deadline: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """返回 A 股个股最新交易日融资融券（RZRQ）快照（fail-open）。
+
+        免 token akshare 沪深明细。presence-only：异常/无数据 → status='not_supported'，
+        绝不抛给调用方。交易所路由用 allow-list（6→SSE、0/3→SZSE，其余→not_supported），
+        天然排除北交所(4/8/9)/ETF(5/1)/B股(9/2)，无需 import base。
+        最新交易日 = smart-start（最近工作日）+ 有界回退 <=3 个工作日候选取首个非空
+        （非精确交易日历，节假日不建模）；命中日写入 trade_date，更旧日 → status='partial'。
+        """
+        result: Dict[str, Any] = {
+            "status": "not_supported",
+            "financing_balance": None,
+            "financing_buy": None,
+            "short_volume": None,
+            "trade_date": None,
+            "exchange": None,
+            "source_chain": [],
+            "errors": [],
+        }
+        pure_code = _normalize_code(stock_code)
+        if pure_code.startswith("6"):
+            exchange, fn_name = "SSE", "stock_margin_detail_sse"
+        elif pure_code.startswith(("0", "3")):
+            exchange, fn_name = "SZSE", "stock_margin_detail_szse"
+        else:
+            return result
+
+        candidates: List[str] = []
+        cursor = datetime.now()
+        while len(candidates) < 3:
+            if cursor.weekday() < 5:  # 周一至周五
+                candidates.append(cursor.strftime("%Y%m%d"))
+            cursor = cursor - timedelta(days=1)
+
+        for idx, date_str in enumerate(candidates):
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+            df = self._margin_df_for(exchange, fn_name, date_str)
+            if df is None or df.empty:
+                continue
+            row = _extract_latest_row(df, stock_code)
+            if row is None:
+                continue
+            result["financing_balance"] = _safe_float(_pick_by_keywords(row, ["融资余额"]))
+            result["financing_buy"] = _safe_float(
+                _pick_by_keywords(row, ["融资买入额", "融资买入"])
+            )
+            result["short_volume"] = _safe_float(_pick_by_keywords(row, ["融券余量"]))
+            result["trade_date"] = date_str
+            result["exchange"] = exchange
+            result["source_chain"].append(f"margin:{fn_name}")
+            result["status"] = "ok" if idx == 0 else "partial"
+            break
         return result
