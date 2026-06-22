@@ -2582,6 +2582,7 @@ class DataFetcherManager:
             "growth",
             "earnings",
             "institution",
+            "margin",
             "capital_flow",
             "dragon_tiger",
             "boards",
@@ -2612,6 +2613,12 @@ class DataFetcherManager:
                 [reason],
             ),
             "institution": self._build_fundamental_block(
+                "not_supported",
+                {},
+                [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
+                [reason],
+            ),
+            "margin": self._build_fundamental_block(
                 "not_supported",
                 {},
                 [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
@@ -2690,6 +2697,7 @@ class DataFetcherManager:
             "growth": {},
             "earnings": {},
             "institution": {},
+            "margin": {},
             "capital_flow": {},
             "dragon_tiger": {},
             "boards": {},
@@ -2780,7 +2788,7 @@ class DataFetcherManager:
 
         # institution / capital_flow / dragon_tiger / boards: keep as not_supported
         # for offshore markets — no equivalent data feed today.
-        for block in ("institution", "capital_flow", "dragon_tiger", "boards"):
+        for block in ("institution", "margin", "capital_flow", "dragon_tiger", "boards"):
             result_ctx[block] = self._build_fundamental_block(
                 "not_supported",
                 {},
@@ -2795,12 +2803,13 @@ class DataFetcherManager:
             "growth": growth_status,
             "earnings": earnings_status,
             "institution": "not_supported",
+            "margin": "not_supported",
             "capital_flow": "not_supported",
             "dragon_tiger": "not_supported",
             "boards": "not_supported",
         }
         result_ctx["coverage"] = block_statuses
-        for block in ("valuation", "growth", "earnings", "institution", "capital_flow", "dragon_tiger", "boards"):
+        for block in ("valuation", "growth", "earnings", "institution", "margin", "capital_flow", "dragon_tiger", "boards"):
             result_ctx["errors"].extend(result_ctx[block].get("errors", []))
             result_ctx["source_chain"].extend(result_ctx[block].get("source_chain", []))
 
@@ -2830,6 +2839,7 @@ class DataFetcherManager:
             "growth",
             "earnings",
             "institution",
+            "margin",
             "capital_flow",
             "dragon_tiger",
             "boards",
@@ -2905,6 +2915,7 @@ class DataFetcherManager:
             "growth": {},
             "earnings": {},
             "institution": {},
+            "margin": {},
             "capital_flow": {},
             "dragon_tiger": {},
             "boards": {},
@@ -3089,8 +3100,22 @@ class DataFetcherManager:
                 [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
                 ["etf not fully supported"],
             )
+            result_ctx["margin"] = self._build_fundamental_block(
+                "not_supported",
+                {},
+                [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
+                ["etf not fully supported"],
+            )
             result_ctx["status"] = "partial"
         else:
+            margin_budget = min(fetch_timeout, remaining_seconds)
+            margin_start = time.time()
+            result_ctx["margin"] = self.get_margin_context(
+                stock_code,
+                budget_seconds=margin_budget,
+            )
+            _consume_budget(int((time.time() - margin_start) * 1000))
+
             capital_flow_budget = min(fetch_timeout, remaining_seconds)
             capital_flow_start = time.time()
             result_ctx["capital_flow"] = self.get_capital_flow_context(
@@ -3117,6 +3142,7 @@ class DataFetcherManager:
             "growth": result_ctx["growth"].get("status", "not_supported"),
             "earnings": result_ctx["earnings"].get("status", "not_supported"),
             "institution": result_ctx["institution"].get("status", "not_supported"),
+            "margin": result_ctx.get("margin", {}).get("status", "not_supported"),
             "capital_flow": result_ctx["capital_flow"].get("status", "not_supported"),
             "dragon_tiger": result_ctx["dragon_tiger"].get("status", "not_supported"),
             "boards": result_ctx["boards"].get("status", "not_supported"),
@@ -3127,6 +3153,7 @@ class DataFetcherManager:
             "growth",
             "earnings",
             "institution",
+            "margin",
             "capital_flow",
             "dragon_tiger",
             "boards",
@@ -3265,6 +3292,72 @@ class DataFetcherManager:
                 payload.get("source_chain", []),
                 "dragon_tiger",
                 str(payload.get("status", "ok")),
+                cost_ms,
+            ),
+            list(payload.get("errors", [])) + ([err] if err else []),
+        )
+
+    def get_margin_context(self, stock_code: str, budget_seconds: Optional[float] = None) -> Dict[str, Any]:
+        """融资融券块（fail-open）。仅呈现、对决策只读。"""
+        from src.config import get_config
+
+        config = get_config()
+        stock_code = normalize_stock_code(stock_code)
+        timeout = float(budget_seconds if budget_seconds is not None else config.fundamental_fetch_timeout_seconds)
+        if _market_tag(stock_code) != "cn" or _is_etf_code(stock_code) or is_bse_code(stock_code):
+            return self._build_fundamental_block(
+                "not_supported",
+                {},
+                [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
+                ["not supported"],
+            )
+
+        if timeout <= 0:
+            return self._build_fundamental_block(
+                "failed",
+                {},
+                [{"provider": "fundamental_pipeline", "result": "failed", "duration_ms": 0}],
+                ["fundamental stage timeout"],
+            )
+        deadline = time.monotonic() + timeout
+        payload, err, cost_ms = self._run_with_retry(
+            lambda: self._fundamental_adapter.get_margin_detail(stock_code, deadline=deadline),
+            timeout,
+            "margin",
+        )
+        if not isinstance(payload, dict):
+            return self._build_fundamental_block(
+                "failed",
+                {},
+                [{"provider": "fundamental_pipeline", "result": "failed", "duration_ms": cost_ms}],
+                [err or "margin failed"],
+            )
+
+        adapter_status = str(payload.get("status", "not_supported"))
+        has_content = any(
+            payload.get(k) is not None
+            for k in ("financing_balance", "financing_buy", "short_volume")
+        )
+        if has_content:
+            margin_status = adapter_status if adapter_status in ("ok", "partial") else "partial"
+        elif adapter_status == "not_supported":
+            margin_status = "not_supported"
+        else:
+            margin_status = "partial"
+
+        return self._build_fundamental_block(
+            margin_status,
+            {
+                "financing_balance": payload.get("financing_balance"),
+                "financing_buy": payload.get("financing_buy"),
+                "short_volume": payload.get("short_volume"),
+                "trade_date": payload.get("trade_date"),
+                "exchange": payload.get("exchange"),
+            },
+            self._normalize_source_chain(
+                payload.get("source_chain", []),
+                "margin",
+                margin_status,
                 cost_ms,
             ),
             list(payload.get("errors", [])) + ([err] if err else []),
