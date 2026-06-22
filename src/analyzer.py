@@ -915,6 +915,58 @@ def fill_capital_flow_if_needed(
         logger.warning("[capital_flow] Fill failed, skipping: %s", e)
 
 
+def _build_margin_from_context(
+    fundamental_context: Optional[Dict[str, Any]], language: str = "zh"
+) -> Optional[Dict[str, Any]]:
+    """从 fundamental_context 的 margin 块确定性构建融资融券 section dict。
+
+    presence-only：margin 块 status 非 ok/partial（含非 A股/ETF/北交所的 not_supported）→ None。
+    仅呈现：返回纯 dict（冻结词表），绝不含 bias/决策字段；调用方对决策只读。
+    键名映射（D8）：读 fundamental_context["margin"]，写 dashboard.data_perspective["margin_trading"]。
+    language 形参为与 capital_flow 签名对齐保留；margin 无语言相关字段。
+    """
+    if not isinstance(fundamental_context, dict):
+        return None
+    mg = fundamental_context.get("margin")
+    mg = mg if isinstance(mg, dict) else {}
+    if str(mg.get("status") or "").strip().lower() not in ("ok", "partial"):
+        return None
+    data = mg.get("data") if isinstance(mg.get("data"), dict) else {}
+    return {
+        "financing_balance": data.get("financing_balance"),
+        "financing_buy": data.get("financing_buy"),
+        "short_volume": data.get("short_volume"),
+        "trade_date": data.get("trade_date"),
+        "exchange": data.get("exchange"),
+    }
+
+
+def fill_margin_if_needed(
+    result: "AnalysisResult", fundamental_context: Optional[Dict[str, Any]]
+) -> None:
+    """确定性把融资融券填进 data_perspective.margin_trading（in-place）。
+
+    presence-only + A股-gated；LLM 后、对决策只读（不喂 prompt、不碰 decision_stability）；
+    失败静默跳过、不阻断主流程。
+    """
+    if not result:
+        return
+    try:
+        built = _build_margin_from_context(
+            fundamental_context, language=getattr(result, "report_language", "zh")
+        )
+        if built is None:
+            return
+        dashboard = result.dashboard if isinstance(result.dashboard, dict) else {}
+        result.dashboard = dashboard
+        dp = dashboard.get("data_perspective") or {}
+        dashboard["data_perspective"] = dp
+        dp["margin_trading"] = built
+        logger.info("[margin] Filled margin-trading section from fundamental_context")
+    except Exception as e:
+        logger.warning("[margin] Fill failed, skipping: %s", e)
+
+
 def _dragon_tiger_prompt_line(fundamental_context: Optional[Dict[str, Any]]) -> str:
     """龙虎榜 presence-only prompt 行（标志级，非量级）；未上榜/状态不可用 → 空串。
 

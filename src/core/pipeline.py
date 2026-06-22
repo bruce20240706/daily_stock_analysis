@@ -31,6 +31,7 @@ from src.analyzer import (
     GeminiAnalyzer,
     AnalysisResult,
     fill_capital_flow_if_needed,
+    fill_margin_if_needed,
     fill_price_position_if_needed,
     normalize_chip_structure_availability,
     populate_decision_action_fields,
@@ -625,6 +626,10 @@ class StockAnalysisPipeline:
             if result:
                 fill_capital_flow_if_needed(result, fundamental_context)
 
+            # Step 7.6c: 融资融券 section（presence-only, A股, 仅呈现、对决策只读, NO prompt/decision_stability）
+            if result:
+                fill_margin_if_needed(result, fundamental_context)
+
             # Step 7.7: price_position fallback
             if result:
                 fill_price_position_if_needed(result, trend_result, realtime_quote)
@@ -1140,9 +1145,13 @@ class StockAnalysisPipeline:
                 normalize_chip_structure_availability(result, chip_data)
 
             # 资金面 section（主力资金流 + 龙虎榜呈现, presence-only, A股, 对决策只读）
-            # 与传统路径 Step 7.6b 同序：chip → capital_flow → price_position → stabilize
+            # 与传统路径 Step 7.6b 同序：chip → capital_flow → margin → price_position → stabilize
             if result:
                 fill_capital_flow_if_needed(result, fundamental_context)
+
+            # 融资融券 section（与传统路径 Step 7.6c 同序：chip → capital_flow → margin → price_position → stabilize）
+            if result:
+                fill_margin_if_needed(result, fundamental_context)
 
             # price_position fallback (same as non-agent path Step 7.7)
             if result:
