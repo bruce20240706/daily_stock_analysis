@@ -77,7 +77,8 @@ def resolve_marker_hit_fields(signal_type: str, code: str) -> dict:
     verified = sample >= min_sample AND ci_low > baseline_win_rate（超额判定）。
     缺桶/无样本时返回全 None 的 all-None dict（与 M2c 旧"无样本"路径表现一致）。
 
-    返回 keys: hit_rate, hit_sample, verified, ci_low, ci_high, baseline_excess。
+    返回 keys: hit_rate, hit_sample, verified, ci_low, ci_high, baseline_excess, horizon。
+    （horizon = 命中桶时的 signal_backtest_horizon_bars；无桶/无样本时为 None，由 M3.1 透出。）
     """
     _none = {"hit_rate": None, "hit_sample": None, "verified": False,
              "ci_low": None, "ci_high": None, "baseline_excess": None, "horizon": None}

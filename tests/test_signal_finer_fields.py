@@ -1,5 +1,14 @@
 # -*- coding: utf-8 -*-
+import types as _types
+
+import src.services.signal_board_service as _sbs
 from api.v1.schemas.stocks import SignalMarker, SignalsResponse, BoardEntry
+from src.services import signals_service as _ss
+from src.services.signals_service import (
+    compute_marker_statuses,
+    compute_plan_quality,
+    date_str_to_epoch_ms,
+)
 
 
 def _marker(**over):
@@ -51,10 +60,6 @@ def test_board_entry_finer_fields_default_none():
     assert e.horizon_bars is None and e.signal_status is None and e.plan_quality is None
 
 
-import types as _types
-from src.services import signals_service as _ss
-
-
 def test_marker_from_vpsignal_maps_horizon_and_status_default():
     sig = _types.SimpleNamespace(
         timestamp=1000, price=10.0, anchor="low", direction="bullish",
@@ -99,10 +104,6 @@ def test_resolver_none_path_horizon_none(monkeypatch):
     assert out["horizon"] is None and out["hit_rate"] is None
 
 
-from src.services.signals_service import compute_plan_quality, compute_marker_statuses
-from src.services.signals_service import date_str_to_epoch_ms
-
-
 def test_plan_quality_rules():
     full = {"entry": 1.0, "stop": 0.9, "target": 1.2}
     assert compute_plan_quality(full, "consistent") == "high"
@@ -145,11 +146,30 @@ def test_marker_status_unmatched_timestamp_none():
     assert m["status"] is None
 
 
+def test_marker_status_non_numeric_or_missing_timestamp_none():
+    """timestamp 缺失/非数值（实流恒为 epoch ms int）→ 不崩溃，status 置 None。"""
+    dates = ["2026-06-01", "2026-06-02"]
+    for bad in (None, "not-a-ts", object()):
+        m = {"source": "rule", "timestamp": bad, "horizon_bars": None, "status": "x"}
+        compute_marker_statuses([m], dates, default_window=10)
+        assert m["status"] is None
+    m_missing = {"source": "rule", "horizon_bars": None, "status": "x"}  # 无 timestamp 键
+    compute_marker_statuses([m_missing], dates, default_window=10)
+    assert m_missing["status"] is None
+
+
+def test_marker_status_zero_horizon_falls_back_to_default_window():
+    """horizon_bars=0 不是有效窗口 → 回退默认窗口（而非恒判 expired）。"""
+    dates = ["2026-06-15", "2026-06-16", "2026-06-17", "2026-06-18"]  # last idx 3
+    m = {"source": "rule", "timestamp": date_str_to_epoch_ms("2026-06-17"),
+         "horizon_bars": 0, "status": None}  # bars_since=1; W=default(5) → aging
+    compute_marker_statuses([m], dates, default_window=5)
+    assert m["status"] == "aging"
+
+
 # ---------------------------------------------------------------------------
 # Task 4 tests: _hit_fields_from_markers 扩展 + _augment_payload_finer_fields
 # ---------------------------------------------------------------------------
-
-import src.services.signal_board_service as _sbs
 
 
 def test_hit_fields_from_markers_includes_horizon_and_signal_status():

@@ -240,12 +240,18 @@ def compute_marker_statuses(markers: list, bar_dates: list, default_window: int)
     for m in markers:
         if m.get("source") != "rule":
             continue
-        idx = ts_to_idx.get(int(m.get("timestamp", -1)))
+        try:
+            idx = ts_to_idx.get(int(m.get("timestamp")))
+        except (TypeError, ValueError):
+            # timestamp 缺失/非数值（实流恒为 epoch ms int）→ 无法定位 bar，状态不可计算
+            idx = None
         if idx is None:
             m["status"] = None
             continue
         bars_since = last_idx - idx
-        w = m.get("horizon_bars") or default_window
+        # horizon_bars 为 0/None/非正 都不是有效窗口，回退默认窗口
+        hb = m.get("horizon_bars")
+        w = hb if isinstance(hb, int) and hb > 0 else default_window
         if bars_since <= 0:
             m["status"] = "active"
         elif bars_since < w:

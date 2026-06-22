@@ -73,6 +73,7 @@ def _bs(direction, *, status="ok", markers=None):
             "status": status, "markers": markers or [],
             "price_lines": {"entry": None, "stop": None, "target": None},
             "consistency": "consistent", "degraded_reason": None,
+            "resonance": "none", "plan_quality": None,
         },
         rule_direction=direction, latest_close=100.0, name="N", market="CN",
     )

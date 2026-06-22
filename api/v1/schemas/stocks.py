@@ -165,6 +165,7 @@ class SignalsResponse(BaseModel):
             "consistency": "consistent",
             "degraded_reason": None,
             "resonance": "none",
+            "plan_quality": None,
         }
     })
 
