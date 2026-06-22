@@ -154,3 +154,14 @@ plan_quality: Optional[Literal["high", "medium", "low"]] = Field(None, descripti
 3. `src/services/signal_board_service.py`:`build_signals_for_code` 内 price_lines 填完后算 plan_quality + 用 df 算各 rule marker 的 status;**扩展 `_hit_fields_from_markers` 一并返回代表 marker 的 horizon_bars/horizon_label/status**(结构保证 D7 同源);`_entry_from_board_signals` 用之 + 响应级 plan_quality;单测(含 D7 同源回归 + 计算层锁定 + degraded)。
 4. `apps/dsa-web`:kline 类型 + marker tooltip/信号详情 + 看板列渲染 + 前端单测。
 5. 文档:CHANGELOG 扁平行 + 信号字段专题说明 + 全量后端门禁 + 前端门禁。
+
+---
+
+## 附录:writing-plans 期对照真实代码的两处精化(2026-06-22,supersede 上文)
+
+写实现计划时把设计对照真实代码逐点坐实,有两处实现期精化(用户已知会),覆盖上文相关措辞:
+
+1. **`horizon_label` 不再是后端字段,改由前端格式化**(覆盖 §4.1/§4.2/§4.4 中"后端 horizon_label"措辞):坐实发现 `_marker_from_vpsignal` 无 `report_language`,且既有 marker `reason` 本就 Chinese-native 不随 report_language 本地化。故后端只出 `horizon_bars`(int);人读标签由前端 `apps/dsa-web/src/utils/credibility.ts` 的 `formatHorizon` 按 UI 语言格式化(更干净的 i18n,且与既有 marker 语言惯例一致)。`SignalMarker`/`BoardEntry` 不含 `horizon_label`。
+2. **看板生命周期字段命名为 `signal_status`**(覆盖 §4.1/§5 中 BoardEntry 的 `status` 措辞):`BoardEntry.status` 已占用为 `ok|degraded`,故看板生命周期字段用 `signal_status`(`active|aging|expired`);`SignalMarker` 仍用 `status`(该模型无冲突,与上文一致)。
+
+详见实现计划 `docs/superpowers/plans/2026-06-22-signal-finer-fields.md`。
