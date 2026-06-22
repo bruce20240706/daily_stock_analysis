@@ -80,7 +80,7 @@ def resolve_marker_hit_fields(signal_type: str, code: str) -> dict:
     返回 keys: hit_rate, hit_sample, verified, ci_low, ci_high, baseline_excess。
     """
     _none = {"hit_rate": None, "hit_sample": None, "verified": False,
-             "ci_low": None, "ci_high": None, "baseline_excess": None}
+             "ci_low": None, "ci_high": None, "baseline_excess": None, "horizon": None}
 
     market = get_market_for_stock(code)
     if market is None:
@@ -108,4 +108,5 @@ def resolve_marker_hit_fields(signal_type: str, code: str) -> dict:
         "ci_low": stat.ci_low,
         "ci_high": stat.ci_high,
         "baseline_excess": stat.excess,
+        "horizon": horizon,
     }

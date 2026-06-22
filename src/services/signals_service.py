@@ -153,6 +153,8 @@ def _marker_from_vpsignal(
         "ci_high": None,
         "baseline_excess": None,
         "as_of": None,
+        "horizon_bars": None,
+        "status": None,
     }
     if hit_fields_resolver is not None and code:
         try:
@@ -163,6 +165,7 @@ def _marker_from_vpsignal(
             marker["ci_low"] = fields.get("ci_low")
             marker["ci_high"] = fields.get("ci_high")
             marker["baseline_excess"] = fields.get("baseline_excess")
+            marker["horizon_bars"] = fields.get("horizon")
         except Exception:
             logger.warning(
                 "resolve_marker_hit_fields 失败，跳过回填 signal_type=%s code=%s",
@@ -206,6 +209,8 @@ def _llm_marker(
         "ci_high": None,
         "baseline_excess": None,
         "as_of": as_of,
+        "horizon_bars": None,
+        "status": None,
     }
 
 
