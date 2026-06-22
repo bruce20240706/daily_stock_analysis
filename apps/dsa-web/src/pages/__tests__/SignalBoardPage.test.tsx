@@ -29,7 +29,8 @@ const entry = (over: Partial<BoardEntry> = {}): BoardEntry => ({
   llmDirection: 'bullish', consistency: 'consistent', keySignals: ['volume_breakout'],
   priceLines: { entry: 1700, stop: 1620, target: 1850 }, latestClose: 1660,
   hitRate: 0.62, hitSample: 18, verified: true, ciLow: null, ciHigh: null, baselineExcess: null,
-  status: 'ok', degradedReason: null, resonance: 'none', ...over });
+  status: 'ok', degradedReason: null, resonance: 'none',
+  horizonBars: null, signalStatus: null, planQuality: null, ...over });
 
 const board = (entries: BoardEntry[]): SignalsBoardResponse => ({
   asOf: 1,

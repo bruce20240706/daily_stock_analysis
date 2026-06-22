@@ -1,7 +1,7 @@
 import type React from 'react';
 import type { ResonanceLevel, SignalMarker } from '../../types/kline';
 import { cn } from '../../utils/cn';
-import { formatCi, formatExcess, formatHitRate, verifiedLabel } from '../../utils/credibility';
+import { formatCi, formatExcess, formatHitRate, formatHorizon, markerStatusLabel, verifiedLabel } from '../../utils/credibility';
 import { resonanceLabel, resonanceTooltip } from '../../utils/resonance';
 
 interface SignalDrilldownPanelProps {
@@ -80,6 +80,12 @@ const MarkerCard: React.FC<{ marker: SignalMarker }> = ({ marker }) => {
           {verifiedLabel(marker.verified)}
         </span>
       </div>
+      {marker.horizonBars != null && (
+        <span data-testid="drilldown-horizon">{formatHorizon(marker.horizonBars)}</span>
+      )}
+      {marker.status != null && (
+        <span data-testid="drilldown-marker-status">{markerStatusLabel(marker.status)}</span>
+      )}
     </div>
   );
 };

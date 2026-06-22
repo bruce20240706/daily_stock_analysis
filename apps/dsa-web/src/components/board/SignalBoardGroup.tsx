@@ -2,7 +2,7 @@ import type React from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { BoardEntry } from '../../types/kline';
 import { cn } from '../../utils/cn';
-import { formatCi, formatExcess, formatHitRate, verifiedLabel } from '../../utils/credibility';
+import { formatCi, formatExcess, formatHitRate, formatHorizon, markerStatusLabel, verifiedLabel } from '../../utils/credibility';
 import { resonanceLabel, resonanceTooltip } from '../../utils/resonance';
 
 const dirLabel: Record<string, string> = { bullish: '看多', bearish: '看空', neutral: '中性' };
@@ -26,7 +26,7 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
           <tr className="text-xs text-secondary-text">
             <th className="text-left">标的</th><th>规则</th><th>LLM</th><th>一致性</th>
             <th className="text-left">关键量价信号</th><th>入/损/标</th><th>命中率</th>
-            <th>工作台</th>
+            <th>计划/窗口/状态</th><th>工作台</th>
           </tr>
         </thead>
         <tbody>
@@ -63,6 +63,17 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
                     aria-label={resonanceTooltip(e.resonance)}
                     className="ml-1 rounded bg-accent/15 px-1 text-accent"
                   >{resonanceLabel(e.resonance)}</span>
+                )}
+              </td>
+              <td>
+                {e.planQuality != null && (
+                  <span data-testid="board-plan-quality">{e.planQuality}</span>
+                )}
+                {e.horizonBars != null && (
+                  <span data-testid="board-horizon">{formatHorizon(e.horizonBars)}</span>
+                )}
+                {e.signalStatus != null && (
+                  <span data-testid="board-signal-status">{markerStatusLabel(e.signalStatus)}</span>
                 )}
               </td>
               <td>

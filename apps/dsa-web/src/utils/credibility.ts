@@ -35,3 +35,17 @@ export function formatExcess(baselineExcess: number | null): string | null {
 export function verifiedLabel(verified: boolean): string {
   return verified ? '已验证' : '未验证';
 }
+
+/** Formats horizon bars as '窗口 N 根' or null when absent. */
+export function formatHorizon(horizonBars: number | null): string | null {
+  return horizonBars == null ? null : `窗口 ${horizonBars} 根`;
+}
+
+const _MARKER_STATUS_LABEL: Record<string, string> = {
+  active: '最新', aging: '窗口内', expired: '已过窗',
+};
+
+/** Maps marker status code to display label, or null when absent. */
+export function markerStatusLabel(status: 'active' | 'aging' | 'expired' | null): string | null {
+  return status == null ? null : (_MARKER_STATUS_LABEL[status] ?? null);
+}

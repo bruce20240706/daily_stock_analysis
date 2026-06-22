@@ -23,6 +23,8 @@ const ruleMarker: SignalMarker = {
   ciHigh: null,
   baselineExcess: null,
   asOf: null,
+  horizonBars: null,
+  status: null,
 };
 
 const llmMarker: SignalMarker = {
@@ -102,5 +104,27 @@ describe('SignalDrilldownPanel', () => {
   it('omits resonance badge when none', () => {
     render(<SignalDrilldownPanel markers={[]} resonance="none" onClose={() => {}} />);
     expect(screen.queryByTestId('drilldown-resonance')).toBeNull();
+  });
+
+  it('shows horizon and status for rule marker with horizonBars and status set', () => {
+    const markerWithFields: SignalMarker = {
+      ...ruleMarker,
+      horizonBars: 5,
+      status: 'active',
+    };
+    render(<SignalDrilldownPanel markers={[markerWithFields]} onClose={vi.fn()} />);
+    expect(screen.getByTestId('drilldown-horizon')).toHaveTextContent('窗口 5 根');
+    expect(screen.getByTestId('drilldown-marker-status')).toHaveTextContent('最新');
+  });
+
+  it('omits horizon and status spans when null', () => {
+    const markerNoFields: SignalMarker = {
+      ...ruleMarker,
+      horizonBars: null,
+      status: null,
+    };
+    render(<SignalDrilldownPanel markers={[markerNoFields]} onClose={vi.fn()} />);
+    expect(screen.queryByTestId('drilldown-horizon')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('drilldown-marker-status')).not.toBeInTheDocument();
   });
 });

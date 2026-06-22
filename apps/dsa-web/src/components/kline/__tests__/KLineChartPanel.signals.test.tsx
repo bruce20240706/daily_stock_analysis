@@ -8,6 +8,7 @@ const okSignals: SignalsResponse = {
   consistency: 'consistent',
   degradedReason: null,
   resonance: 'none',
+  planQuality: null,
   priceLines: { entry: 1700.5, stop: 1620, target: 1850 },
   markers: [
     {
@@ -30,6 +31,8 @@ const okSignals: SignalsResponse = {
       ciHigh: null,
       baselineExcess: null,
       asOf: null,
+      horizonBars: null,
+      status: null,
     },
   ],
 };

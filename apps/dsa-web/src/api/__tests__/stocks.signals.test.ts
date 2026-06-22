@@ -126,6 +126,21 @@ describe('stocksApi.getSignals', () => {
     expect(res2.resonance).toBe('none');
   });
 
+  it('maps horizon_bars/status/plan_quality snake→camel', async () => {
+    get.mockResolvedValueOnce({ data: { status: 'ok', consistency: 'consistent',
+      degraded_reason: null, resonance: 'none', plan_quality: 'high',
+      price_lines: { entry: null, stop: null, target: null },
+      markers: [{ timestamp: 1, price: 1, anchor: 'low', direction: 'bullish',
+        signal_type: 'a', source: 'rule', confidence: 'high', is_daily_approx: false,
+        is_anomalous: false, reason: 'r', threshold: null, observed_value: null,
+        hit_rate: null, hit_sample: null, verified: false, ci_low: null, ci_high: null,
+        baseline_excess: null, as_of: null, horizon_bars: 10, status: 'active' }] } });
+    const res = await stocksApi.getSignals('600519');
+    expect(res.planQuality).toBe('high');
+    expect(res.markers[0].horizonBars).toBe(10);
+    expect(res.markers[0].status).toBe('active');
+  });
+
   it('encodes crypto codes containing a slash for the {code:path} route', async () => {
     get.mockResolvedValueOnce({
       data: {

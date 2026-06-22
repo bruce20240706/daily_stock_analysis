@@ -22,6 +22,8 @@ const ruleBull = (over: Partial<SignalMarker> = {}): SignalMarker => ({
   ciHigh: null,
   baselineExcess: null,
   asOf: null,
+  horizonBars: null,
+  status: null,
   ...over,
 });
 

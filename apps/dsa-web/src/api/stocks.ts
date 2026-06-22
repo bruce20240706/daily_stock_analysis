@@ -39,6 +39,8 @@ type RawSignalMarker = {
   ci_high: number | null;
   baseline_excess: number | null;
   as_of: number | null;
+  horizon_bars?: number | null;
+  status?: 'active' | 'aging' | 'expired' | null;
 };
 
 type RawSignalsResponse = {
@@ -48,6 +50,7 @@ type RawSignalsResponse = {
   price_lines: { entry: number | null; stop: number | null; target: number | null } | null;
   markers: RawSignalMarker[] | null;
   resonance?: ResonanceLevel | null;
+  plan_quality?: 'high' | 'medium' | 'low' | null;
 };
 
 const mapSignalMarker = (raw: RawSignalMarker): SignalMarker => ({
@@ -70,6 +73,8 @@ const mapSignalMarker = (raw: RawSignalMarker): SignalMarker => ({
   ciHigh: raw.ci_high ?? null,
   baselineExcess: raw.baseline_excess ?? null,
   asOf: raw.as_of ?? null,
+  horizonBars: raw.horizon_bars ?? null,
+  status: raw.status ?? null,
 });
 
 type RawBoardEntry = {
@@ -82,6 +87,9 @@ type RawBoardEntry = {
   verified: boolean; ci_low: number | null; ci_high: number | null; baseline_excess: number | null;
   status: BoardEntry['status']; degraded_reason: string | null;
   resonance?: ResonanceLevel | null;
+  horizon_bars?: number | null;
+  signal_status?: 'active' | 'aging' | 'expired' | null;
+  plan_quality?: 'high' | 'medium' | 'low' | null;
 };
 type RawBoardResponse = {
   as_of: number; entries: RawBoardEntry[] | null;
@@ -98,6 +106,9 @@ const mapBoardEntry = (r: RawBoardEntry): BoardEntry => ({
   verified: r.verified, ciLow: r.ci_low ?? null, ciHigh: r.ci_high ?? null, baselineExcess: r.baseline_excess ?? null,
   status: r.status, degradedReason: r.degraded_reason ?? null,
   resonance: r.resonance ?? 'none',
+  horizonBars: r.horizon_bars ?? null,
+  signalStatus: r.signal_status ?? null,
+  planQuality: r.plan_quality ?? null,
 });
 
 export const stocksApi = {
@@ -187,6 +198,7 @@ export const stocksApi = {
       },
       markers: (data.markers ?? []).map(mapSignalMarker),
       resonance: data.resonance ?? 'none',
+      planQuality: data.plan_quality ?? null,
     };
   },
 

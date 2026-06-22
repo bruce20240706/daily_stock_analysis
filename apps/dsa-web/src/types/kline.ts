@@ -46,6 +46,8 @@ export interface SignalMarker {
   ciHigh: number | null;
   baselineExcess: number | null;
   asOf: number | null; // epoch ms, llm only
+  horizonBars: number | null;
+  status: 'active' | 'aging' | 'expired' | null;
 }
 
 export interface PriceLines {
@@ -61,6 +63,7 @@ export interface SignalsResponse {
   priceLines: PriceLines;
   markers: SignalMarker[];
   resonance: ResonanceLevel;
+  planQuality: 'high' | 'medium' | 'low' | null;
 }
 
 // ============ Board contract (mirrors api/v1/schemas SignalsBoardResponse) ============
@@ -87,6 +90,9 @@ export interface BoardEntry {
   status: 'ok' | 'degraded';
   degradedReason: string | null;
   resonance: ResonanceLevel;
+  horizonBars: number | null;
+  signalStatus: 'active' | 'aging' | 'expired' | null;
+  planQuality: 'high' | 'medium' | 'low' | null;
 }
 
 export interface BoardCounts { buy: number; hold: number; sell: number; unavailable: number; }

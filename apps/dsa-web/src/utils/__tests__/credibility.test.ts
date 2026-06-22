@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatHitRate, formatCi, formatExcess, verifiedLabel } from '../credibility';
+import { formatHitRate, formatCi, formatExcess, verifiedLabel, formatHorizon, markerStatusLabel } from '../credibility';
 
 describe('credibility format', () => {
   it('formats hit rate with sample, empty when no sample', () => {
@@ -17,5 +17,15 @@ describe('credibility format', () => {
   it('verified label', () => {
     expect(verifiedLabel(true)).toBe('已验证');
     expect(verifiedLabel(false)).toBe('未验证');
+  });
+  it('formats horizon bars', () => {
+    expect(formatHorizon(10)).toBe('窗口 10 根');
+    expect(formatHorizon(null)).toBeNull();
+  });
+  it('labels marker status', () => {
+    expect(markerStatusLabel('active')).toBe('最新');
+    expect(markerStatusLabel('aging')).toBe('窗口内');
+    expect(markerStatusLabel('expired')).toBe('已过窗');
+    expect(markerStatusLabel(null)).toBeNull();
   });
 });

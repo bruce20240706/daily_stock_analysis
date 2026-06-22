@@ -61,6 +61,24 @@ describe('stocksApi.getBoard', () => {
     expect(get).toHaveBeenCalledWith('/api/v1/signals/board', { params: {} });
   });
 
+  it('maps horizon_bars/signal_status/plan_quality snake→camel for board entries', async () => {
+    get.mockResolvedValueOnce({ data: {
+      as_of: 999, counts: { buy: 1, hold: 0, sell: 0, unavailable: 0 }, degraded_codes: [],
+      entries: [
+        { code: '600519', name: '贵州茅台', market: 'CN', action_group: 'buy',
+          rule_direction: 'bullish', llm_direction: 'bullish', consistency: 'consistent',
+          key_signals: [], price_lines: { entry: 1700, stop: 1620, target: 1850 },
+          latest_close: 1660, hit_rate: 0.62, hit_sample: 18, verified: true,
+          status: 'ok', degraded_reason: null,
+          horizon_bars: 10, signal_status: 'aging', plan_quality: 'high' },
+      ],
+    }});
+    const res = await stocksApi.getBoard(120);
+    expect(res.entries[0].horizonBars).toBe(10);
+    expect(res.entries[0].signalStatus).toBe('aging');
+    expect(res.entries[0].planQuality).toBe('high');
+  });
+
   it('maps resonance, defaulting to none when absent', async () => {
     get.mockResolvedValueOnce({ data: {
       as_of: 333, counts: { buy: 1, hold: 0, sell: 0, unavailable: 1 }, degraded_codes: [],

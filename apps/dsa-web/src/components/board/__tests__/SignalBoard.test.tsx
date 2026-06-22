@@ -19,7 +19,9 @@ const mk = (over: Partial<BoardEntry>): BoardEntry => ({
   priceLines: { entry: 1700, stop: 1620, target: 1850 }, latestClose: 1660,
   hitRate: 0.62, hitSample: 18, verified: true,
   ciLow: null, ciHigh: null, baselineExcess: null,
-  status: 'ok', degradedReason: null, resonance: 'none', ...over,
+  status: 'ok', degradedReason: null, resonance: 'none',
+  horizonBars: null, signalStatus: null, planQuality: null,
+  ...over,
 });
 
 describe('SignalBoard', () => {
@@ -146,5 +148,33 @@ describe('SignalBoard', () => {
       </MemoryRouter>,
     );
     expect(screen.queryByTestId('board-resonance')).not.toBeInTheDocument();
+  });
+
+  it('shows plan quality, horizon and signal status columns when set', () => {
+    render(
+      <MemoryRouter>
+        <SignalBoard
+          entries={[mk({ code: '600519', name: '贵州茅台', planQuality: 'high', signalStatus: 'aging', horizonBars: 10 })]}
+          onRowClick={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('board-plan-quality')).toHaveTextContent('high');
+    expect(screen.getByTestId('board-horizon')).toHaveTextContent('窗口 10 根');
+    expect(screen.getByTestId('board-signal-status')).toHaveTextContent('窗口内');
+  });
+
+  it('omits plan quality, horizon and signal status spans when null', () => {
+    render(
+      <MemoryRouter>
+        <SignalBoard
+          entries={[mk({ code: '600519', name: '贵州茅台', planQuality: null, signalStatus: null, horizonBars: null })]}
+          onRowClick={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('board-plan-quality')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('board-horizon')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('board-signal-status')).not.toBeInTheDocument();
   });
 });
