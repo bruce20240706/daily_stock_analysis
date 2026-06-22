@@ -613,7 +613,9 @@ class AkshareFundamentalAdapter:
             result["financing_buy"] = _safe_float(
                 _pick_by_keywords(row, ["融资买入额", "融资买入"])
             )
-            result["short_volume"] = _safe_float(_pick_by_keywords(row, ["融券余量"]))
+            # 融券余量（股）：排除「融券余量金额」（元），避免列序导致取错值
+            _sv_cols = [c for c in row.index if "融券余量" in str(c) and "金额" not in str(c)]
+            result["short_volume"] = _safe_float(row.get(_sv_cols[0])) if _sv_cols else None
             result["trade_date"] = date_str
             result["exchange"] = exchange
             result["source_chain"].append(f"margin:{fn_name}")

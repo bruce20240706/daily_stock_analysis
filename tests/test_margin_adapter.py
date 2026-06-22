@@ -102,3 +102,18 @@ def test_margin_df_for_empty_not_cached(monkeypatch):
                         lambda cands: (None, None, []))
     adapter._margin_df_for("SSE", "stock_margin_detail_sse", "20260619")
     assert len(fa._margin_detail_memo) == 0
+
+
+def test_short_volume_excludes_amount_column_regardless_of_order(monkeypatch):
+    adapter = AkshareFundamentalAdapter()
+    # 列序故意把「融券余量金额」放在「融券余量」之前，验证不取错值
+    df = pd.DataFrame([{
+        "标的证券代码": "600519",
+        "融资余额": 1.0e8,
+        "融资买入额": 4.0e7,
+        "融券余量金额": 9.9e9,
+        "融券余量": 1000.0,
+    }])
+    monkeypatch.setattr(adapter, "_call_df_candidates", lambda cands: (df, cands[0][0], []))
+    out = adapter.get_margin_detail("600519")
+    assert out["short_volume"] == 1000.0
