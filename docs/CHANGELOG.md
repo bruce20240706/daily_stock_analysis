@@ -106,6 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 个股 K 线支持日/周/月周期切换（周/月线由日线本地聚合，市场无关）
 - [新功能] 日线信号新增多周期共振标记（高周期趋势与信号方向同向：周线共振/周月双共振），看板行与钻取面板可见
 - [改进] GET /api/v1/stocks/{code}/history 放宽 days 上限至 1825 以支撑周/月线窗口（纯加宽，向后兼容）
+- [新功能] 信号资产新增细粒度字段:horizon(胜率验证窗口,与 hit_rate 同源)/plan_quality(交易计划完整度+一致性,与可信度正交)/status(active/aging/expired 生命周期),实时 /signals + 信号看板 + K线 drilldown 呈现(transient-only,不进 DB/历史,对决策与既有字段只读)
 
 ## [3.20.0] - 2026-06-03
 

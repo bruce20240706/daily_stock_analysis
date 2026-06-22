@@ -403,7 +403,8 @@ def test_resolve_missing_bucket_is_sample_insufficient():
         Repo.return_value.get.return_value = None
         f = resolve_marker_hit_fields("x", "600519")
         assert f == {"hit_rate": None, "hit_sample": None, "verified": False,
-                     "ci_low": None, "ci_high": None, "baseline_excess": None}
+                     "ci_low": None, "ci_high": None, "baseline_excess": None,
+                     "horizon": None}
 
 
 def test_resolve_stat_with_zero_sample_returns_all_none():
@@ -421,7 +422,8 @@ def test_resolve_stat_with_zero_sample_returns_all_none():
         Repo.return_value.get.return_value = stat
         f = resolve_marker_hit_fields("volume_breakout", "600519")
         assert f == {"hit_rate": None, "hit_sample": None, "verified": False,
-                     "ci_low": None, "ci_high": None, "baseline_excess": None}
+                     "ci_low": None, "ci_high": None, "baseline_excess": None,
+                     "horizon": None}
 
 
 def test_resolve_marker_hit_fields_real_repo_roundtrip(tmp_path):
