@@ -81,6 +81,16 @@ class CapitalFlow(BaseModel):
     dragon_tiger_latest_date: Optional[str] = None
 
 
+class MarginTrading(BaseModel):
+    """融资融券（A股；最新交易日快照，presence-only）。"""
+
+    financing_balance: Optional[Union[int, float, str]] = None  # 融资余额（元）
+    financing_buy: Optional[Union[int, float, str]] = None      # 融资买入额（元）
+    short_volume: Optional[Union[int, float, str]] = None        # 融券余量（股）
+    trade_date: Optional[str] = None                            # YYYYMMDD（实际命中日）
+    exchange: Optional[str] = None                              # SSE / SZSE
+
+
 class DataPerspective(BaseModel):
     """Data perspective block."""
 
@@ -89,6 +99,7 @@ class DataPerspective(BaseModel):
     volume_analysis: Optional[VolumeAnalysis] = None
     chip_structure: Optional[ChipStructure] = None
     capital_flow: Optional[CapitalFlow] = None
+    margin_trading: Optional[MarginTrading] = None
 
 
 class Intelligence(BaseModel):
