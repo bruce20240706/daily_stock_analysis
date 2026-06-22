@@ -145,10 +145,13 @@ def _marker_from_vpsignal(
         "reason": sig.reason,
         "threshold": sig.threshold,
         "observed_value": sig.observed_value,
-        # 以下默认值；rule marker 经 resolver 回填
+        # 以下默认值；rule marker 经 resolver 回填（M2c/M3-A6）
         "hit_rate": None,
         "hit_sample": None,
         "verified": False,
+        "ci_low": None,
+        "ci_high": None,
+        "baseline_excess": None,
         "as_of": None,
     }
     if hit_fields_resolver is not None and code:
@@ -157,6 +160,9 @@ def _marker_from_vpsignal(
             marker["hit_rate"] = fields.get("hit_rate")
             marker["hit_sample"] = fields.get("hit_sample")
             marker["verified"] = bool(fields.get("verified", False))
+            marker["ci_low"] = fields.get("ci_low")
+            marker["ci_high"] = fields.get("ci_high")
+            marker["baseline_excess"] = fields.get("baseline_excess")
         except Exception:
             logger.warning(
                 "resolve_marker_hit_fields 失败，跳过回填 signal_type=%s code=%s",
@@ -196,6 +202,9 @@ def _llm_marker(
         "hit_rate": None,
         "hit_sample": None,
         "verified": False,
+        "ci_low": None,
+        "ci_high": None,
+        "baseline_excess": None,
         "as_of": as_of,
     }
 

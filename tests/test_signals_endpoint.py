@@ -300,3 +300,43 @@ def test_signals_endpoint_passes_vps_config_from_env(monkeypatch):
     assert isinstance(recorded["config"], VPSConfig), (
         "端点应传 VPSConfig.from_env() 实例，而非 None（否则 VPS_* 配置失效）"
     )
+
+
+# ─── Coverage 2 (A6)：端点 JSON 中 rule marker 的 ci_low/ci_high/baseline_excess 穿透 ───
+
+
+def test_signals_endpoint_ci_fields_in_rule_marker_json(monkeypatch):
+    """Coverage 2 (A6): resolver 返回 ci 字段时，端点序列化的 rule marker 必须包含这三个字段。"""
+    engine = SimpleNamespace(
+        markers=[_vpsignal(date_str_to_epoch_ms("2026-06-12"))],
+        status="ok", degraded_reason=None,
+    )
+    _patch_common(monkeypatch, engine_result=engine, rule_signal=BuySignal.BUY, llm_record=None)
+    monkeypatch.setattr(
+        sbs, "resolve_marker_hit_fields",
+        lambda signal_type, code: {
+            "hit_rate": 0.68,
+            "hit_sample": 20,
+            "verified": True,
+            "ci_low": 0.55,
+            "ci_high": 0.80,
+            "baseline_excess": 0.05,
+        },
+    )
+
+    resp = stocks_ep.get_stock_signals(stock_code="600519", days=120)
+
+    rule_markers = [m for m in resp.markers if m.source == "rule"]
+    assert len(rule_markers) >= 1, "应有 rule marker"
+    m = rule_markers[0]
+    assert m.ci_low == 0.55, f"ci_low 期望 0.55，实际 {m.ci_low}"
+    assert m.ci_high == 0.80, f"ci_high 期望 0.80，实际 {m.ci_high}"
+    assert m.baseline_excess == 0.05, f"baseline_excess 期望 0.05，实际 {m.baseline_excess}"
+    assert m.verified is True
+    assert m.hit_rate == 0.68
+    assert m.hit_sample == 20
+    # 序列化后字段名一致
+    dumped = m.model_dump()
+    assert dumped["ci_low"] == 0.55
+    assert dumped["ci_high"] == 0.80
+    assert dumped["baseline_excess"] == 0.05

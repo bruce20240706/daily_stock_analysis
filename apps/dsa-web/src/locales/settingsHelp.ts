@@ -877,6 +877,28 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响回测评估算法和结果。'],
     notes: ['除非明确要求切换版本，否则保持默认。'],
   },
+  'settings.backtest.SIGNAL_BACKTEST_ENABLED': {
+    title: '信号规则回测开关',
+    summary: '启用后，--signal-backtest 批作业和按 (信号类型×市场) 聚合的三重门回测统计将写入 signal_stats 表。',
+    usage: '设为 true 后可通过 python main.py --signal-backtest 对自选池运行批量信号回测；结果用于前端展示 Wilson CI 置信区间和基准超额。',
+    valueNotes: [
+      'false（默认）：不执行信号回测批作业，signal_stats 表不写入新数据。',
+      'true：启用后 --signal-backtest CLI 将触发对自选池全量股票的三重门回测。',
+    ],
+    impact: ['影响 /signals 端点命中率来源和前端可信度展示（置信区间、已验证标识）。'],
+    notes: ['首次启用建议先在少量股票上测试，确认回测耗时可接受。'],
+  },
+  'settings.backtest.SIGNAL_BACKTEST_HORIZON_BARS': {
+    title: '信号回测前瞻 Bar 数',
+    summary: '三重门信号回测的前瞻窗口（日线 bar 数），决定触发信号后多少根 K 线内判断止盈/止损/到期。',
+    usage: '默认 10，即信号触发后 10 根日线内到达目标价则胜出，触及止损则失败，否则到期。建议与持仓周期匹配。',
+    valueNotes: [
+      '越大覆盖越长的持仓周期，但评估窗口末端截断更多（近期样本不足）。',
+      '与 BACKTEST_EVAL_WINDOW_DAYS 独立，两者无耦合。',
+    ],
+    impact: ['影响 signal_stats 中 win/loss/sample 统计和 Wilson CI 宽窄。'],
+    notes: ['修改后需重新运行 --signal-backtest 才会更新 signal_stats。'],
+  },
   // ------------------------------------------------------------------
   // Report configuration
   // ------------------------------------------------------------------

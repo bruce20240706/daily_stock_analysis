@@ -51,10 +51,10 @@
 
 | signal_type | direction | confidence | 触发条件概述 |
 |-------------|-----------|------------|-------------|
-| `obv_bottom_divergence` | bullish | medium | OBV 低点抬升 + 价格创新低（底背离）；时间锚定确认 bar（枢轴 index + swing_k） |
-| `obv_top_divergence` | bearish | medium | OBV 高点下移 + 价格创新高（顶背离）；时间锚定确认 bar（枢轴 index + swing_k） |
+| `obv_bottom_divergence` | bullish | low/medium/high | OBV+CMF+MFI 多源共振底背离；置信度由共振源数决定（1源=low,2源=medium,3源=high）；时间锚定确认 bar |
+| `obv_top_divergence` | bearish | low/medium/high | OBV+CMF+MFI 多源共振顶背离；置信度由共振源数决定；时间锚定确认 bar |
 | `volume_breakout` | bullish | high | close >= high.rolling(N).max().shift(1) 且 rel_vol >= 阈值 |
-| `shrink_pullback` | bullish | medium | 回调幅度 <= ATR × 倍数 且段内 rel_vol <= 上界 |
+| `shrink_pullback` | bullish | medium | 回调幅度 <= ATR × 倍数 且段内 rel_vol <= 上界；reason 含量能形态档 |
 | `anchored_vwap_reclaim` | bullish | medium | 价格上穿锚定突破日 AVWAP |
 | `anchored_vwap_loss` | bearish | medium | 价格下穿锚定突破日 AVWAP |
 
@@ -102,7 +102,72 @@ rel_vol 分档（纵）× pct_chg 分档（横）：
 
 ---
 
-## 5. 鲁棒性契约
+## 5. M3-B 量价丰富度扩展
+
+### 5.1 CMF / MFI 量能指标
+
+M3-B 新增两个内部量能指标，仅用于背离检测，不单独产出 signal_type：
+
+| 指标 | 函数 | 窗口 | 量纲 | 说明 |
+|------|------|------|------|------|
+| CMF（Chaikin Money Flow）| `_cmf(high,low,close,volume,window)` | 14 bar（`_DIV_CMF_WINDOW`） | `[-1, 1]` | 量权资金流方向；window 内正值为净流入，负值为净流出 |
+| MFI（Money Flow Index）| `_mfi(high,low,close,volume,window)` | 14 bar（`_DIV_MFI_WINDOW`） | `[0, 100]` | 量权 RSI 变体；全上涨窗口（neg==0）标准定义为 100；flat 窗口（pos==neg==0）返回 NaN |
+
+两个窗口常量（`_DIV_CMF_WINDOW`、`_DIV_MFI_WINDOW`）目前固定为 14，与 `VPSConfig` 解耦，不通过环境变量配置。
+
+### 5.2 OBV + CMF + MFI 多源背离共振
+
+背离检测（`_detect_obv_divergence`）在 M3-B 升级为三源共振：
+
+**共振规则**
+
+| 共振源数 (k) | confidence | 行为 |
+|-------------|------------|------|
+| 3（OBV+CMF+MFI 全部同向背离） | `high` | 强置信背离信号 |
+| 2（任意两源同向背离） | `medium` | 中置信背离信号 |
+| 1（单源背离） | `low` | 弱提示，仍产出 marker（emit-low 规则） |
+| 0（无源背离） | — | 不产 marker |
+
+**signal_type 兼容性**：保持 `obv_bottom_divergence` / `obv_top_divergence`，不新增类型，原有 API / 看板契约不变。
+
+**reason 格式**（示例）：`"价格创新极值但量能指标未同步（OBV+CMF 背离，强度:medium）"`
+
+**强度分级**（`_divergence_strength_grade`）
+
+强度档由「共振源数 × 各源归一化背离幅度均值」决定：
+
+| 条件 | 强度档 |
+|------|--------|
+| k >= 3 且均值 > 0.15 | `strong` |
+| k >= 2 且均值 > 0.05 | `medium` |
+| 其余 | `weak` |
+
+各源归一化方式：OBV（无界累积量）→ `|curr-prev| / max(|curr|, |prev|, 1)`；CMF → `|curr-prev| / 2`；MFI → `|curr-prev| / 100`。
+
+### 5.3 量能形态分级
+
+`classify_volume_pattern(rel_vol, pct_chg, atr_norm, config)` 对每根 bar 做一次量能形态分级，结果注入相关信号的 `reason` 字段（作为语义标注），不单独产出 signal_type：
+
+| 返回值 | 触发条件（概述） |
+|--------|----------------|
+| `climax_volume` | rel_vol >= vol_high 且 pct_chg > eps（天量上涨） |
+| `dry_up` | rel_vol < vol_low（地量，任意方向） |
+| `shrink_pullback` | rel_vol ∈ [vol_low, vol_shrink) 且 pct_chg < -eps 且 \|pct_chg\| <= 1.5 × atr_norm |
+| `mild_expand` | rel_vol ∈ [vol_up, vol_high) 且 pct_chg > eps（温和放量上涨） |
+| `normal` | 其余所有组合（含跌幅超 ATR 边界的缩量下跌） |
+
+当前使用场景：`volume_breakout` reason 含 `[量能形态:xxx]`；`shrink_pullback` reason 含 `[量能形态:xxx]`。
+
+### 5.4 Crypto 参数差异化
+
+`VPSConfig.for_market(market)` 工厂方法（M3-B 新增）：
+- `market == "crypto"`：以 `VPS_CRYPTO_*` 三个值覆盖 `breakout_window`、`atr_period`、`breakout_rel_vol`，其余字段保持 `from_env()` 默认。
+- 其余市场（含 `None`、未知字符串）：直接返回 `from_env()`，行为字节一致。
+- 用法：`/signals` 端点传入 `VPSConfig.for_market(get_market_for_stock(code))`。
+
+---
+
+## 6. 鲁棒性契约
 
 | 场景 | 行为 |
 |------|------|
@@ -113,7 +178,7 @@ rel_vol 分档（纵）× pct_chg 分档（横）：
 
 ---
 
-## 6. B 类降权契约
+## 7. B 类降权契约
 
 B 类信号（VSA Upthrust / Spring / No Demand / No Supply）受以下约束：
 
@@ -127,7 +192,9 @@ B 类信号（VSA Upthrust / Spring / No Demand / No Supply）受以下约束：
 ## 7. VPS_* 可配项与默认值
 
 所有可配项均由 `VPSConfig.from_env()` 读取，覆盖 `VPSConfig` 默认值。
-`/signals` 端点已以 `compute_volume_price_signals(df, config=VPSConfig.from_env())` 接线，下列 13 个 `VPS_*` 变量真正生效；未配置时使用括号内默认值，不影响运行。
+`/signals` 端点已以 `compute_volume_price_signals(df, config=VPSConfig.from_env())` 接线，下列变量真正生效；未配置时使用括号内默认值，不影响运行。
+
+### 7.1 通用参数（所有市场）
 
 | 环境变量 | 默认值 | 约束 | 语义 |
 |----------|--------|------|------|
@@ -144,6 +211,16 @@ B 类信号（VSA Upthrust / Spring / No Demand / No Supply）受以下约束：
 | `VPS_PULLBACK_ATR_MULT` | `3.0` | >= 0.5 | 缩量回调最大回撤 = ATR × 倍数 |
 | `VPS_ATR_PERIOD` | `14` | >= 2，取整 | ATR 计算周期（Wilder） |
 | `VPS_B_CLASS_TOP_K` | `2` | >= 1，取整 | B 类每结果集保留最新 top-k 个 |
+
+### 7.2 Crypto 旁路参数（仅 crypto 市场生效）
+
+当 `VPSConfig.for_market("crypto")` 被调用时，下列三个参数会覆盖对应的通用值；其余参数保持通用默认，非 crypto 行为字节一致。
+
+| 环境变量 | 默认值 | 约束 | 语义 |
+|----------|--------|------|------|
+| `VPS_CRYPTO_BREAKOUT_WINDOW` | `20` | >= 2，取整 | crypto 放量突破 high.rolling 窗口（覆盖 VPS_BREAKOUT_WINDOW） |
+| `VPS_CRYPTO_ATR_PERIOD` | `14` | >= 2，取整 | crypto ATR 计算周期（覆盖 VPS_ATR_PERIOD） |
+| `VPS_CRYPTO_BREAKOUT_REL_VOL` | `2.0` | >= 1 | crypto 放量突破 rel_vol 阈值（覆盖 VPS_BREAKOUT_REL_VOL） |
 
 > **注意**：量基准口径（20 日）与 `_analyze_volume` 的 `VolumeStatus`（5 日）刻意分离，两者并存不互替。
 

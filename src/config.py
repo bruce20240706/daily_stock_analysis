@@ -894,7 +894,11 @@ class Config:
     backtest_neutral_band_pct: float = 2.0
     # 信号命中率回填(M2c)：hit_sample 达此阈值则 verified=true；缺省回落到 backtest_eval_window_days
     signal_hit_verified_min_sample: int = 0
-    
+    # 信号级回测开关(M3-A)：是否对量价信号运行前向回测
+    signal_backtest_enabled: bool = False
+    # 信号级回测前向窗口(M3-A)：回测时向前看几根 bar
+    signal_backtest_horizon_bars: int = 10
+
     # === 日志配置 ===
     log_dir: str = "./logs"  # 日志文件目录
     log_level: str = "INFO"  # 日志级别
@@ -1724,6 +1728,13 @@ class Config:
                 2.0,
                 field_name='BACKTEST_NEUTRAL_BAND_PCT',
                 minimum=0.0,
+            ),
+            signal_backtest_enabled=os.getenv('SIGNAL_BACKTEST_ENABLED', 'false').lower() == 'true',
+            signal_backtest_horizon_bars=parse_env_int(
+                os.getenv('SIGNAL_BACKTEST_HORIZON_BARS'),
+                10,
+                field_name='SIGNAL_BACKTEST_HORIZON_BARS',
+                minimum=1,
             ),
             log_dir=os.getenv('LOG_DIR', './logs'),
             log_level=os.getenv('LOG_LEVEL', 'INFO'),

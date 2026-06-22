@@ -403,6 +403,13 @@ def parse_arguments() -> argparse.Namespace:
         help='强制回测（即使已有回测结果也重新计算）'
     )
 
+    # === Signal Backtest ===
+    parser.add_argument(
+        '--signal-backtest',
+        action='store_true',
+        help='对自选池跑信号三重门回测并落 signal_stats'
+    )
+
     return parser.parse_args()
 
 
@@ -911,6 +918,15 @@ def main() -> int:
         return 0
 
     try:
+        # 模式0a: 信号三重门批回测
+        if getattr(args, 'signal_backtest', False):
+            logger.info("模式: 信号三重门批回测")
+            from src.services.signal_backtest_service import SignalBacktestService
+            stats = SignalBacktestService().run()
+            logger.info("信号回测完成: %s", stats)
+            print(stats)
+            return 0
+
         # 模式0: 回测
         if getattr(args, 'backtest', False):
             logger.info("模式: 回测")

@@ -19,6 +19,9 @@ const ruleMarker: SignalMarker = {
   hitRate: 0.62,
   hitSample: 18,
   verified: true,
+  ciLow: null,
+  ciHigh: null,
+  baselineExcess: null,
   asOf: null,
 };
 
@@ -36,6 +39,14 @@ const llmMarker: SignalMarker = {
   verified: false,
   asOf: 1718236800000,
 };
+
+const ruleMarker_withCi = (over: Partial<SignalMarker> = {}): SignalMarker => ({
+  ...ruleMarker,
+  ciLow: 0.55,
+  ciHigh: 0.8,
+  baselineExcess: 0.05,
+  ...over,
+});
 
 describe('SignalDrilldownPanel', () => {
   it('shows indicator value, threshold and hit rate for a rule marker', () => {
@@ -56,6 +67,19 @@ describe('SignalDrilldownPanel', () => {
     expect(screen.getByTestId('drilldown-as-of')).toBeInTheDocument();
     expect(screen.getByTestId('drilldown-hit-rate')).toHaveTextContent('暂无样本');
     expect(screen.getByTestId('drilldown-verified')).toHaveTextContent('未验证');
+  });
+
+  it('shows CI band and excess for a verified rule marker', () => {
+    render(<SignalDrilldownPanel markers={[ruleMarker_withCi()]} onClose={vi.fn()} />);
+    expect(screen.getByTestId('drilldown-ci')).toHaveTextContent('[55%–80%]');
+    expect(screen.getByTestId('drilldown-excess')).toHaveTextContent('超额 +5pp');
+    expect(screen.getByTestId('drilldown-verified')).toHaveTextContent('已验证');
+  });
+
+  it('omits CI and excess spans when ciLow/ciHigh/baselineExcess are null', () => {
+    render(<SignalDrilldownPanel markers={[ruleMarker]} onClose={vi.fn()} />);
+    expect(screen.queryByTestId('drilldown-ci')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('drilldown-excess')).not.toBeInTheDocument();
   });
 
   it('lists both markers when a merged/conflict glyph is opened and closes via the handler', () => {

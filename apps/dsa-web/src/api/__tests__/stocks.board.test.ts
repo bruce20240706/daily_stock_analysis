@@ -37,6 +37,24 @@ describe('stocksApi.getBoard', () => {
     expect(res.entries[1].ruleDirection).toBeNull();
   });
 
+  it('maps credibility CI and baseline excess (snake→camel) for board entries', async () => {
+    get.mockResolvedValueOnce({ data: {
+      as_of: 222, counts: { buy: 1, hold: 0, sell: 0, unavailable: 0 }, degraded_codes: [],
+      entries: [
+        { code: '600519', name: '贵州茅台', market: 'CN', action_group: 'buy',
+          rule_direction: 'bullish', llm_direction: 'bullish', consistency: 'consistent',
+          key_signals: ['volume_breakout'], price_lines: { entry: 1700, stop: 1620, target: 1850 },
+          latest_close: 1660, hit_rate: 0.68, hit_sample: 20, verified: true,
+          ci_low: 0.55, ci_high: 0.8, baseline_excess: 0.05,
+          status: 'ok', degraded_reason: null },
+      ],
+    }});
+    const res = await stocksApi.getBoard(120);
+    expect(res.entries[0].ciLow).toBe(0.55);
+    expect(res.entries[0].ciHigh).toBe(0.8);
+    expect(res.entries[0].baselineExcess).toBe(0.05);
+  });
+
   it('omits refresh when false-y and days when undefined', async () => {
     get.mockResolvedValueOnce({ data: { as_of: 1, counts: { buy:0,hold:0,sell:0,unavailable:0 }, degraded_codes: [], entries: [] }});
     await stocksApi.getBoard();

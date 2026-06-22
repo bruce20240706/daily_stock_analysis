@@ -41,6 +41,10 @@ class VPSConfig:
     pullback_atr_mult: float = 3.0      # 缩量回调最大回撤 = ATR * 倍数
     atr_period: int = 14
     b_class_top_k: int = 2              # B 类每结果集限流 top-k
+    # === 数字货币旁路阈值（M3-A）：不配置则回落到对应的日线口径默认值，非 crypto 行为字节一致 ===
+    crypto_breakout_window: int = 20    # VPS_CRYPTO_BREAKOUT_WINDOW（默认 = breakout_window）
+    crypto_atr_period: int = 14         # VPS_CRYPTO_ATR_PERIOD（默认 = atr_period）
+    crypto_breakout_rel_vol: float = 2.0  # VPS_CRYPTO_BREAKOUT_REL_VOL（默认 = breakout_rel_vol）
 
     @classmethod
     def from_env(cls) -> "VPSConfig":
@@ -58,7 +62,29 @@ class VPSConfig:
             pullback_atr_mult=parse_env_float(os.getenv("VPS_PULLBACK_ATR_MULT"), 3.0, field_name="VPS_PULLBACK_ATR_MULT", minimum=0.5),
             atr_period=int(parse_env_float(os.getenv("VPS_ATR_PERIOD"), 14.0, field_name="VPS_ATR_PERIOD", minimum=2.0)),
             b_class_top_k=int(parse_env_float(os.getenv("VPS_B_CLASS_TOP_K"), 2.0, field_name="VPS_B_CLASS_TOP_K", minimum=1.0)),
+            crypto_breakout_window=int(parse_env_float(os.getenv("VPS_CRYPTO_BREAKOUT_WINDOW"), 20.0, field_name="VPS_CRYPTO_BREAKOUT_WINDOW", minimum=2.0)),
+            crypto_atr_period=int(parse_env_float(os.getenv("VPS_CRYPTO_ATR_PERIOD"), 14.0, field_name="VPS_CRYPTO_ATR_PERIOD", minimum=2.0)),
+            crypto_breakout_rel_vol=parse_env_float(os.getenv("VPS_CRYPTO_BREAKOUT_REL_VOL"), 2.0, field_name="VPS_CRYPTO_BREAKOUT_REL_VOL", minimum=1.0),
         )
+
+    @classmethod
+    def for_market(cls, market: str | None) -> "VPSConfig":
+        """返回适合指定市场的 VPSConfig 实例。
+
+        crypto 市场：用 VPS_CRYPTO_* 值覆盖对应的主动计算字段（breakout_window、
+        atr_period、breakout_rel_vol），其余字段保持 from_env() 默认。
+        非 crypto（含 None、未知字符串）：直接返回 from_env()，行为字节一致。
+        """
+        base = cls.from_env()
+        if market == "crypto":
+            import dataclasses
+            return dataclasses.replace(
+                base,
+                breakout_window=base.crypto_breakout_window,
+                atr_period=base.crypto_atr_period,
+                breakout_rel_vol=base.crypto_breakout_rel_vol,
+            )
+        return base
 
 
 @dataclass(frozen=True)
@@ -476,6 +502,67 @@ def _price_bucket(pct_chg, config: VPSConfig) -> str | None:
     return "flat"
 
 
+def classify_volume_pattern(rel_vol: float, pct_chg: float, atr_norm: float, config: VPSConfig) -> str:
+    """量能形态分级：基于相对量比（rel_vol）、涨跌幅（pct_chg）和 ATR 归一化值（atr_norm）判定量能形态档位。
+
+    返回值（穷尽互斥）：
+    - 'climax_volume'    天量（rel_vol >= vol_high）且价格上涨
+    - 'dry_up'           地量（rel_vol < vol_low），量能极度萎缩
+    - 'shrink_pullback'  缩量回踩（rel_vol ∈ [vol_low, vol_shrink) 且 pct_chg < -eps
+                         且 abs(pct_chg) <= _SHRINK_PULLBACK_ATR_K * atr_norm）
+    - 'mild_expand'      温和放量（rel_vol ∈ [vol_up, vol_high) 且 pct_chg > eps）
+    - 'normal'           常规（其余所有组合，含缩量但跌幅超出 ATR 边界的剧烈下跌）
+
+    ATR 边界说明（shrink_pullback 核心守卫）：
+    - _SHRINK_PULLBACK_ATR_K = 1.5：shrink_pullback 要求 abs(pct_chg) <= 1.5 * atr_norm。
+      atr_norm = ATR / close，无量纲化后约等于该资产的"一个 ATR 当量的百分比跌幅"。
+      若跌幅超过 1.5 倍 ATR 当量，表明是一根相对剧烈的下跌（非温和缩量回踩），
+      此时 fall through 到 'normal'——atr_norm 由此成为决定性参数，而非仅供扩展。
+    - k=1.5 选择依据：Wilder ATR 衡量"正常波动幅度"；1.5 倍是 1σ 波动的合理上界，
+      既不会把正常日常小幅缩量下跌误排除，也能过滤暴跌误标缩量回踩。
+
+    参数：
+    - rel_vol:  当根成交量 / vol_ma，量比
+    - pct_chg:  涨跌幅（小数，如 -0.02 = -2%）
+    - atr_norm: ATR / close（无量纲化 ATR，与 pct_chg 同量纲可直接比较）
+    - config:   VPSConfig，阈值全部从此读取，无魔法数字
+
+    阈值来源（全部源自 VPSConfig 字段）：
+    - vol_low    (default 0.7)  : 地量上界
+    - vol_shrink (default 0.8)  : 缩量上界
+    - vol_up     (default 1.2)  : 正常量上界
+    - vol_high   (default 1.5)  : 放量下界 / 天量下界
+    - eps        (default 0.004): 价格平坦判定半带宽
+    """
+    # ATR 守卫系数：shrink_pullback 要求 abs(pct_chg) <= k * atr_norm
+    _SHRINK_PULLBACK_ATR_K = 1.5
+
+    vbucket = _volume_bucket(rel_vol, config)
+    pbucket = _price_bucket(pct_chg, config)
+
+    # 天量（high vol）且上涨
+    if vbucket == "high" and pbucket == "up":
+        return "climax_volume"
+
+    # 地量（low vol）：极度萎缩，无论价格方向
+    if vbucket == "low":
+        return "dry_up"
+
+    # 缩量回踩（shrink vol + 下跌）且跌幅未超出 ATR 边界
+    # abs(pct_chg) > k * atr_norm 表示剧烈下跌，fall through 到 normal
+    if vbucket == "shrink" and pbucket == "down":
+        if atr_norm > 0 and abs(pct_chg) <= _SHRINK_PULLBACK_ATR_K * atr_norm:
+            return "shrink_pullback"
+        # atr_norm <= 0（不可用）时保守地允许通过（向后兼容），跌幅过大则降为 normal
+
+    # 温和放量（up vol + 上涨）
+    if vbucket == "up" and pbucket == "up":
+        return "mild_expand"
+
+    # 其余所有组合：常规
+    return "normal"
+
+
 def _classify_vfx(
     *,
     rel_vol,
@@ -585,46 +672,168 @@ def _obv(close: pd.Series, volume: pd.Series) -> pd.Series:
     return (direction * volume).cumsum()
 
 
+def _cmf(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, window: int) -> pd.Series:
+    """Chaikin Money Flow：rolling(MFV之和) / rolling(volume之和)。
+    high==low 时 MFM 无法计算，填 0（资金无方向），避免 NaN 传播到整窗口。
+    rolling volume 为零时返回 NaN。
+    """
+    rng = (high - low).where((high - low) != 0)            # high==low → NaN
+    mfm = ((close - low) - (high - close)) / rng           # Money Flow Multiplier
+    mfv = mfm.fillna(0.0) * volume                         # Money Flow Volume
+    roll_vol = volume.rolling(window).sum()
+    return mfv.rolling(window).sum() / roll_vol.where(roll_vol != 0)
+
+
+def _mfi(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, window: int) -> pd.Series:
+    """Money Flow Index：基于典型价格与成交量的动量摆荡指标，范围 [0, 100]。
+
+    标准定义：neg flow == 0 且 pos > 0（全上涨窗口）→ money_ratio → ∞ → MFI = 100.0。
+    flat 窗口（pos == 0 且 neg == 0，无典型价格变化）→ MFI = NaN（流向未定义）。
+    结果在 [0, 100] 内，不产生 inf / NaN（flat 窗口除外）。
+    """
+    tp = (high + low + close) / 3.0                        # typical price
+    rmf = tp * volume                                      # raw money flow
+    delta = tp.diff()
+    pos = rmf.where(delta > 0, 0.0).rolling(window).sum()
+    neg = rmf.where(delta < 0, 0.0).rolling(window).sum()
+    mr = pos / neg.where(neg != 0)                         # neg==0 → NaN（暂用于计算）
+    result = 100 - (100 / (1 + mr))
+    # 全上涨窗口（neg==0 且 pos>0）：标准 MFI 定义为 100；flat 窗口（pos==0 且 neg==0）保留 NaN
+    all_up = (neg == 0) & (pos > 0)
+    result = result.where(~all_up, 100.0)
+    return result
+
+
+_DIV_CMF_WINDOW: int = 14   # CMF/MFI rolling 窗口（背离检测专用，与 VPSConfig 解耦）
+_DIV_MFI_WINDOW: int = 14
+
+
+def _divergence_strength_grade(sources_diverging: int, rel_divs: list[float]) -> str:
+    """根据共振源数与平均归一化背离幅度映射强度档（weak / medium / strong）。
+
+    rel_divs: 每个背离源的归一化背离量，各源已按自身量纲收敛到 [0, 1]：
+      - OBV：|curr-prev| / max(|curr|, |prev|, 1)，有界相对量
+      - CMF（[-1,1] 量纲）：|curr-prev| / 2，除以全域宽度
+      - MFI（[0,100] 量纲）：|curr-prev| / 100
+    规则：
+      - k == 3 且平均幅度 > 0.15 → strong
+      - k >= 2 且平均幅度 > 0.05 → medium
+      - 其余                      → weak
+    """
+    avg = sum(rel_divs) / len(rel_divs) if rel_divs else 0.0
+    if sources_diverging >= 3 and avg > 0.15:
+        return "strong"
+    if sources_diverging >= 2 and avg > 0.05:
+        return "medium"
+    return "weak"
+
+
 def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
-    """OBV 顶底背离检测：仅对已确认 swing pivot 对比较，无未来函数。"""
+    """多源量价背离检测（OBV + CMF + MFI）：仅对已确认 swing pivot 对比较，无未来函数。
+
+    共振规则（emit-low 单源弱提示）：
+      k == 3 → confidence="high"
+      k == 2 → confidence="medium"
+      k == 1 → confidence="low"（弱提示，不抑制）
+      k == 0 → 不出 marker
+    signal_type 保持 obv_top_divergence / obv_bottom_divergence（兼容 API / 看板契约）。
+    reason 含强度档（weak/medium/strong），由背离幅度 × 源数映射。
+    """
     close = prim["close"].astype(float).reset_index(drop=True)
-    obv_series = _obv(close, prim["volume"].astype(float).reset_index(drop=True))
+    vol = prim["volume"].astype(float).reset_index(drop=True)
+    high = prim["high"].astype(float).reset_index(drop=True)
+    low = prim["low"].astype(float).reset_index(drop=True)
+
+    obv_series = _obv(close, vol)
+    cmf_series = _cmf(high, low, close, vol, _DIV_CMF_WINDOW)
+    mfi_series = _mfi(high, low, close, vol, _DIV_MFI_WINDOW)
+
     pivots = _attach_pivot_timestamps(find_swing_pivots(close, config.swing_k), prim)
     out: list[VPSignal] = []
-    for kind, sig_type, cmp_price, cmp_obv, direction in (
+
+    for kind, sig_type, cmp_price, cmp_ind, direction in (
         ("high", "obv_top_divergence",    lambda a, b: a > b, lambda a, b: a <= b, "bearish"),
         ("low",  "obv_bottom_divergence", lambda a, b: a < b, lambda a, b: a >= b, "bullish"),
     ):
         same = [p for p in pivots if p.kind == kind]
         for prev, curr in zip(same, same[1:]):
-            price_extreme = cmp_price(curr.price, prev.price)
-            obv_lagging = cmp_obv(float(obv_series.iloc[curr.index]), float(obv_series.iloc[prev.index]))
-            if price_extreme and obv_lagging:
-                # x 锚定确认 bar(curr.index+swing_k，背离可知日)，y 锚定枢轴极值——消除 k 根可视前视。
-                conf_idx = curr.index + config.swing_k
-                out.append(VPSignal(
-                    timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[conf_idx]),
-                    price=curr.price,
-                    anchor=kind,
-                    direction=direction,
-                    signal_type=sig_type,
-                    confidence="medium",
-                    is_daily_approx=True,
-                    is_anomalous=False,
-                    reason="价格创新极值但 OBV 未同步（形态背离）",
-                    threshold=float(obv_series.iloc[prev.index]),
-                    observed_value=float(obv_series.iloc[curr.index]),
-                ))
+            if not cmp_price(curr.price, prev.price):
+                continue
+
+            # 各源在枢轴处的值（NaN 安全：NaN 不计入共振）
+            obv_prev = float(obv_series.iloc[prev.index])
+            obv_curr = float(obv_series.iloc[curr.index])
+            cmf_prev = float(cmf_series.iloc[prev.index])
+            cmf_curr = float(cmf_series.iloc[curr.index])
+            mfi_prev = float(mfi_series.iloc[prev.index])
+            mfi_curr = float(mfi_series.iloc[curr.index])
+
+            obv_div  = cmp_ind(obv_curr, obv_prev) and not math.isnan(obv_curr) and not math.isnan(obv_prev)
+            cmf_div  = cmp_ind(cmf_curr, cmf_prev) and not math.isnan(cmf_curr) and not math.isnan(cmf_prev)
+            mfi_div  = cmp_ind(mfi_curr, mfi_prev) and not math.isnan(mfi_curr) and not math.isnan(mfi_prev)
+
+            k = sum([obv_div, cmf_div, mfi_div])
+            if k == 0:
+                continue
+
+            # 置信度：源数越多越高
+            if k >= 3:
+                confidence = "high"
+            elif k >= 2:
+                confidence = "medium"
+            else:
+                confidence = "low"   # 单源弱提示（emit-low 规则）
+
+            # 强度档：按各源量纲归一化背离幅度 × 源数映射
+            # OBV：无界累积量 → 有界相对量 |curr-prev|/max(|curr|,|prev|,1) ∈ [0,1]
+            # CMF：[-1,1] 量纲 → |curr-prev|/2 ∈ [0,1]
+            # MFI：[0,100] 量纲 → |curr-prev|/100 ∈ [0,1]
+            rel_divs: list[float] = []
+            if obv_div:
+                denom_obv = max(abs(obv_curr), abs(obv_prev), 1.0)
+                rel_divs.append(min(abs(obv_curr - obv_prev) / denom_obv, 1.0))
+            if cmf_div:
+                rel_divs.append(min(abs(cmf_curr - cmf_prev) / 2.0, 1.0))
+            if mfi_div:
+                rel_divs.append(min(abs(mfi_curr - mfi_prev) / 100.0, 1.0))
+            grade = _divergence_strength_grade(k, rel_divs)
+
+            sources_desc = "+".join(
+                s for s, d in [("OBV", obv_div), ("CMF", cmf_div), ("MFI", mfi_div)] if d
+            )
+            # x 锚定确认 bar(curr.index+swing_k，背离可知日)，y 锚定枢轴极值——消除 k 根可视前视。
+            conf_idx = curr.index + config.swing_k
+            out.append(VPSignal(
+                timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[conf_idx]),
+                price=curr.price,
+                anchor=kind,
+                direction=direction,
+                signal_type=sig_type,
+                confidence=confidence,
+                is_daily_approx=True,
+                is_anomalous=False,
+                reason=f"价格创新极值但量能指标未同步（{sources_desc} 背离，强度:{grade}）",
+                threshold=float(obv_prev),
+                observed_value=float(obv_curr),
+            ))
     return out
 
 
 def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
-    """放量突破检测：close >= 过去 N 日 high 最大值（shift(1) 不含当日）且 rel_vol >= 阈值。"""
+    """放量突破检测：close >= 过去 N 日 high 最大值（shift(1) 不含当日）且 rel_vol >= 阈值。
+
+    ATR 预计算优化：atr(prim, config.atr_period) 在循环外统一计算一次（O(n)），
+    循环内通过 atr_series.iloc[i] 取当 bar 的 ATR 值。
+    Wilder ATR 的递推定义保证：atr_series.iloc[i] == atr(prim.iloc[:i+1], period).iloc[-1]，
+    两者语义完全等价，与原逐次切片计算结果一致。
+    """
     high = prim["high"].astype(float)
     close = prim["close"].astype(float)
     # shift(1): prior max excludes current bar — no self-reference
     prior_max = high.rolling(config.breakout_window).max().shift(1)
     rel_vol = prim["rel_vol"]
+    # 预计算完整 ATR 序列，避免循环内 O(n²) 逐次切片重算
+    atr_series = atr(prim, config.atr_period)
     out: list[VPSignal] = []
     for i in range(len(prim)):
         pm = prior_max.iloc[i]
@@ -632,6 +841,10 @@ def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
         if pd.isna(pm) or pd.isna(rv):
             continue
         if close.iloc[i] >= pm and rv >= config.breakout_rel_vol:
+            pct = float(prim["pct_chg"].iloc[i]) if not pd.isna(prim["pct_chg"].iloc[i]) else 0.0
+            atr_val = _last_finite(atr_series.iloc[:i + 1])
+            atr_norm = (atr_val / float(close.iloc[i])) if (atr_val is not None and float(close.iloc[i]) > 0) else 0.0
+            vol_pattern = classify_volume_pattern(float(rv), pct, atr_norm, config)
             out.append(VPSignal(
                 timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[i]),
                 price=float(close.iloc[i]),
@@ -641,7 +854,7 @@ def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
                 confidence="high",
                 is_daily_approx=True,
                 is_anomalous=False,
-                reason=f"放量突破近{config.breakout_window}日高点（不含当日）",
+                reason=f"放量突破近{config.breakout_window}日高点（不含当日）[量能形态:{vol_pattern}]",
                 threshold=float(pm),
                 observed_value=float(rv),
             ))
@@ -676,6 +889,16 @@ def _detect_shrink_pullback(prim: pd.DataFrame, config: VPSConfig) -> list[VPSig
         and not np.isnan(atr_now)
         and drawdown < config.pullback_atr_mult * atr_now
     ):
+        # 获取最新 bar 的量能形态档，注入 reason 语义
+        curr_rv = float(rel_vol.iloc[i]) if not pd.isna(rel_vol.iloc[i]) else float("nan")
+        curr_pct = float(prim["pct_chg"].iloc[i]) if not pd.isna(prim["pct_chg"].iloc[i]) else 0.0
+        close_now = float(close.iloc[i])
+        atr_norm_now = (atr_now / close_now) if close_now > 0 else 0.0
+        if not math.isnan(curr_rv):
+            vol_pattern = classify_volume_pattern(curr_rv, curr_pct, atr_norm_now, config)
+            reason_str = f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）[量能形态:{vol_pattern}]"
+        else:
+            reason_str = f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）"
         out.append(VPSignal(
             timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[i]),
             price=float(close.iloc[i]),
@@ -685,7 +908,7 @@ def _detect_shrink_pullback(prim: pd.DataFrame, config: VPSConfig) -> list[VPSig
             confidence="medium",
             is_daily_approx=True,
             is_anomalous=False,
-            reason=f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）",
+            reason=reason_str,
             threshold=config.pullback_atr_mult * atr_now,
             observed_value=drawdown,
         ))

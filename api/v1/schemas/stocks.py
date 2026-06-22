@@ -125,7 +125,10 @@ class SignalMarker(BaseModel):
     observed_value: Optional[float] = Field(None, description="实际观测值，无则 null")
     hit_rate: Optional[float] = Field(None, description="历史方向命中率（M2c 回填），无样本则 null")
     hit_sample: Optional[int] = Field(None, description="命中率样本数（M2c 回填），无则 null")
-    verified: bool = Field(False, description="hit_sample 达阈值则 True（M2c 回填）")
+    verified: bool = Field(False, description="hit_sample 达阈值且 ci_low>baseline 则 True（M3-A6）")
+    ci_low: Optional[float] = Field(None, description="命中率置信区间下界（M3-A6），无则 null")
+    ci_high: Optional[float] = Field(None, description="命中率置信区间上界（M3-A6），无则 null")
+    baseline_excess: Optional[float] = Field(None, description="相对基准超额（M3-A6），无则 null")
     as_of: Optional[int] = Field(None, description="仅 source=llm：该 LLM 结论生成时间 epoch ms")
 
 
@@ -182,7 +185,10 @@ class BoardEntry(BaseModel):
     latest_close: Optional[float] = Field(None, description="最新收盘价，无则 null")
     hit_rate: Optional[float] = Field(None, description="历史方向命中率，无样本则 null")
     hit_sample: Optional[int] = Field(None, description="命中率样本数，无则 null")
-    verified: bool = Field(False, description="hit_sample 达阈值则 True")
+    verified: bool = Field(False, description="hit_sample 达阈值且 ci_low>baseline 则 True（M3-A6）")
+    ci_low: Optional[float] = Field(None, description="命中率置信区间下界（M3-A6），无则 null")
+    ci_high: Optional[float] = Field(None, description="命中率置信区间上界（M3-A6），无则 null")
+    baseline_excess: Optional[float] = Field(None, description="相对基准超额（M3-A6），无则 null")
     status: Literal["ok", "degraded"] = Field(..., description="单条状态")
     degraded_reason: Optional[str] = Field(None, description="status=degraded 时的原因说明")
 

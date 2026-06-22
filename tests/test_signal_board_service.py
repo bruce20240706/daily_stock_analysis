@@ -5,6 +5,7 @@ import pytest
 
 from src.stock_analyzer import BuySignal
 import src.services.signal_board_service as sbs
+from src.services.volume_price_signals import VPSConfig
 
 
 @pytest.fixture(autouse=True)
@@ -126,6 +127,28 @@ def test_build_board_maps_markers_to_entry_fields(monkeypatch):
     assert e["consistency"] == "consistent"
 
 
+def test_build_board_maps_ci_fields_to_entry(monkeypatch):
+    """Coverage 1 (A6): ci_low/ci_high/baseline_excess 从第一条 rule marker 穿透到 BoardEntry。"""
+    markers = [
+        {
+            "source": "rule", "signal_type": "volume_breakout", "direction": "bullish",
+            "hit_rate": 0.68, "hit_sample": 20, "verified": True,
+            "ci_low": 0.55, "ci_high": 0.80, "baseline_excess": 0.05,
+        },
+        {
+            "source": "llm", "signal_type": "llm_advice", "direction": "bullish",
+        },
+    ]
+    monkeypatch.setattr(sbs, "build_signals_for_code",
+                        lambda code, *, days=120: _bs("bullish", markers=markers))
+    e = sbs.build_board(["AAA"], days=120, refresh=True)["entries"][0]
+    assert e["ci_low"] == 0.55
+    assert e["ci_high"] == 0.80
+    assert e["baseline_excess"] == 0.05
+    assert e["hit_rate"] == 0.68
+    assert e["verified"] is True
+
+
 def test_build_board_empty(monkeypatch):
     out = sbs.build_board([], days=120, refresh=True)
     assert out["entries"] == [] and out["counts"]["buy"] == 0
@@ -178,3 +201,53 @@ def test_build_board_does_not_cache_degraded(monkeypatch):
     assert calls["n"] == 2
     assert out["entries"][0]["action_group"] == "unavailable"
     assert out["entries"][0]["status"] == "degraded"
+
+
+def test_b4_board_engine_uses_for_market_config(monkeypatch):
+    """M8/B4 回归：build_signals_for_code 给 compute_volume_price_signals 的 config 必须
+    来自 VPSConfig.for_market(get_market_for_stock(code))，而非 from_env()。
+
+    - crypto code (BTC/USDT) + VPS_CRYPTO_BREAKOUT_WINDOW=7 → config.breakout_window == 7
+    - cn code (600519) → config.breakout_window == VPSConfig.for_market('cn').breakout_window
+    若 line ~81 回退为 from_env() 或用 _infer_market 作为引擎 market，此测试必须失败。
+    """
+    monkeypatch.setenv("VPS_BREAKOUT_WINDOW", "20")
+    monkeypatch.setenv("VPS_CRYPTO_BREAKOUT_WINDOW", "7")
+
+    captured: list = []
+
+    def spy_engine(df, config=None):
+        captured.append(config)
+        return SimpleNamespace(markers=[], status="ok", degraded_reason=None)
+
+    rows = [_bar(f"2026-06-{i+1:02d}", 100.0) for i in range(5)]
+
+    def fake_history(self, stock_code, period="daily", days=120):
+        return {"stock_name": "test", "data": rows}
+
+    monkeypatch.setattr(sbs.StockService, "get_history_data", fake_history)
+    monkeypatch.setattr(sbs, "compute_volume_price_signals", spy_engine)
+
+    class _A:
+        def __init__(self, *a, **k): pass
+        def analyze(self, df, code): return SimpleNamespace(buy_signal=None)
+    monkeypatch.setattr(sbs, "StockTrendAnalyzer", _A)
+
+    class _DB:
+        def get_latest_analysis_by_code(self, code): return None
+    monkeypatch.setattr(sbs.DatabaseManager, "get_instance", classmethod(lambda cls: _DB()))
+
+    # crypto code
+    captured.clear()
+    sbs.build_signals_for_code("BTC/USDT", days=120)
+    assert len(captured) == 1
+    assert captured[0] is not None
+    assert captured[0].breakout_window == VPSConfig.for_market("crypto").breakout_window
+    assert captured[0].breakout_window == 7  # 明确断言 crypto 值
+
+    # cn code
+    captured.clear()
+    sbs.build_signals_for_code("600519", days=120)
+    assert len(captured) == 1
+    assert captured[0] is not None
+    assert captured[0].breakout_window == VPSConfig.for_market("cn").breakout_window

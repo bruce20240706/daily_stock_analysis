@@ -35,6 +35,9 @@ type RawSignalMarker = {
   hit_rate: number | null;
   hit_sample: number | null;
   verified: boolean;
+  ci_low: number | null;
+  ci_high: number | null;
+  baseline_excess: number | null;
   as_of: number | null;
 };
 
@@ -62,6 +65,9 @@ const mapSignalMarker = (raw: RawSignalMarker): SignalMarker => ({
   hitRate: raw.hit_rate ?? null,
   hitSample: raw.hit_sample ?? null,
   verified: raw.verified,
+  ciLow: raw.ci_low ?? null,
+  ciHigh: raw.ci_high ?? null,
+  baselineExcess: raw.baseline_excess ?? null,
   asOf: raw.as_of ?? null,
 });
 
@@ -72,7 +78,8 @@ type RawBoardEntry = {
   consistency: BoardEntry['consistency']; key_signals: string[];
   price_lines: { entry: number | null; stop: number | null; target: number | null };
   latest_close: number | null; hit_rate: number | null; hit_sample: number | null;
-  verified: boolean; status: BoardEntry['status']; degraded_reason: string | null;
+  verified: boolean; ci_low: number | null; ci_high: number | null; baseline_excess: number | null;
+  status: BoardEntry['status']; degraded_reason: string | null;
 };
 type RawBoardResponse = {
   as_of: number; entries: RawBoardEntry[] | null;
@@ -86,7 +93,8 @@ const mapBoardEntry = (r: RawBoardEntry): BoardEntry => ({
   keySignals: r.key_signals ?? [],
   priceLines: { entry: r.price_lines?.entry ?? null, stop: r.price_lines?.stop ?? null, target: r.price_lines?.target ?? null },
   latestClose: r.latest_close ?? null, hitRate: r.hit_rate ?? null, hitSample: r.hit_sample ?? null,
-  verified: r.verified, status: r.status, degradedReason: r.degraded_reason ?? null,
+  verified: r.verified, ciLow: r.ci_low ?? null, ciHigh: r.ci_high ?? null, baselineExcess: r.baseline_excess ?? null,
+  status: r.status, degradedReason: r.degraded_reason ?? null,
 });
 
 export const stocksApi = {
