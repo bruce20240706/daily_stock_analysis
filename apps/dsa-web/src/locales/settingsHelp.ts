@@ -899,6 +899,72 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响 signal_stats 中 win/loss/sample 统计和 Wilson CI 宽窄。'],
     notes: ['修改后需重新运行 --signal-backtest 才会更新 signal_stats。'],
   },
+  'settings.backtest.CRYPTO_INTRADAY_BACKTEST_INTERVAL': {
+    title: '盘中回测 Bar 粒度',
+    summary: '盘中/分钟级回测所用的 K 线粒度（crypto MVP），支持 1m/5m/15m/1h。',
+    usage: '默认 5m；如需更细粒度回测可改为 1m，更粗粒度可改为 15m 或 1h。',
+    valueNotes: [
+      '粒度越细，数据量越大，回测耗时越长。',
+      '修改后对历史已跑数据无影响，仅影响下次运行。',
+    ],
+    impact: ['影响盘中回测的 K 线分辨率与回测结果精度。'],
+    notes: ['仅对 crypto 盘中回测生效，日线回测不受影响。'],
+  },
+  'settings.backtest.CRYPTO_INTRADAY_MINUTE_CACHE_TTL_S': {
+    title: '分钟取数缓存 TTL',
+    summary: '盘中分钟数据的本地缓存有效时长（秒），0 表示禁用缓存。',
+    usage: '默认 900（15 分钟）；频繁回测时可适当缩短，离线/调试场景可设为 0 禁用。',
+    valueNotes: [
+      '0 = 禁用缓存，每次都重新拉取数据（网络开销较大）。',
+      '数值越大，重复运行越快，但数据新鲜度越低。',
+    ],
+    impact: ['影响盘中回测数据的实时性与网络开销。'],
+    notes: ['修改后立即生效，无需重启。'],
+  },
+  'settings.backtest.CRYPTO_INTRADAY_BACKTEST_FEE_BPS': {
+    title: '盘中回测手续费',
+    summary: '盘中回测单边手续费（基点），默认 0 表示理想化无成本回测。',
+    usage: '默认 0；如需模拟真实交易成本，可设为交易所单边费率（如 Binance 现货 taker 约 10bps）。',
+    valueNotes: [
+      '1 基点 = 0.01%；10bps = 0.1%。',
+      '单边费率，买入和卖出各计一次。',
+    ],
+    impact: ['影响盘中回测的收益率和胜率计算。'],
+    notes: ['仅影响盘中回测结果，不影响真实下单。'],
+  },
+  'settings.backtest.CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS': {
+    title: '盘中回测滑点',
+    summary: '盘中回测单边滑点（基点），默认 0 表示理想化无滑点回测。',
+    usage: '默认 0；如需模拟市场冲击成本，可设为预估滑点（如 2bps）。',
+    valueNotes: [
+      '1 基点 = 0.01%；滑点与手续费共同构成交易成本。',
+      '单边滑点，买入和卖出各计一次。',
+    ],
+    impact: ['影响盘中回测的实际成本模拟精度。'],
+    notes: ['仅影响盘中回测结果，不影响真实下单。'],
+  },
+  'settings.backtest.INTRADAY_BACKTEST_ENABLED': {
+    title: '盘中回测定时任务',
+    summary: '是否在调度模式下启用盘中回测后台自动任务，默认关闭。',
+    usage: '默认 false；设为 true 后，调度模式会按 INTRADAY_BACKTEST_SCHEDULE_MINUTES 周期自动运行盘中回测。手动触发不受此开关影响。',
+    valueNotes: [
+      'false（默认）：仅支持手动触发盘中回测。',
+      'true：调度模式下自动周期性运行盘中回测。',
+    ],
+    impact: ['影响盘中回测是否进入定时调度队列。'],
+    notes: ['手动触发路径不受此开关影响。'],
+  },
+  'settings.backtest.INTRADAY_BACKTEST_SCHEDULE_MINUTES': {
+    title: '盘中回测调度周期',
+    summary: '盘中回测后台任务的执行周期（分钟），仅当 INTRADAY_BACKTEST_ENABLED=true 时生效。',
+    usage: '默认 60（每小时一次）；可根据行情频率调整，最小值 1。',
+    valueNotes: [
+      '仅在 INTRADAY_BACKTEST_ENABLED=true 时有效。',
+      '周期过短可能增加数据源压力。',
+    ],
+    impact: ['影响盘中回测自动任务的执行频率。'],
+    notes: ['修改后需重启服务生效。'],
+  },
   // ------------------------------------------------------------------
   // Report configuration
   // ------------------------------------------------------------------
