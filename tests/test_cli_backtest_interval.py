@@ -1,5 +1,8 @@
+import pathlib
 import subprocess
 import sys
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 def test_help_lists_backtest_interval():
@@ -7,6 +10,6 @@ def test_help_lists_backtest_interval():
         [sys.executable, "main.py", "--help"],
         capture_output=True,
         text=True,
-        cwd="/root/dsa-intraday",
+        cwd=str(REPO_ROOT),
     )
     assert "--backtest-interval" in (out.stdout + out.stderr)
