@@ -383,9 +383,13 @@ class BacktestService:
         analysis_date_to: Optional[date] = None,
         analysis_phase: Optional[str] = None,
         engine_version: Optional[str] = None,
+        interval: str = "1d",
     ) -> Dict[str, Any]:
+        from src.core.intraday_backtest import build_engine_version_tag
+        base_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
         if engine_version is None:
-            engine_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
+            # interval-aware default: '1d' → base ('v1'); '5m' → 'v1-5m'; etc.
+            engine_version = build_engine_version_tag(base_version, interval, 1)
         else:
             engine_version = str(engine_version)
 
@@ -407,6 +411,7 @@ class BacktestService:
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
                 phase_bucket=phase_bucket,
+                bar_interval=interval,
             )
 
         offset = max(page - 1, 0) * limit
@@ -419,6 +424,7 @@ class BacktestService:
             days=None,
             offset=offset,
             limit=limit,
+            bar_interval=interval,
         )
         items = []
         for result, stock_name, trend_prediction, _created_at, context_snapshot, raw_result, report_type in rows:
@@ -446,9 +452,13 @@ class BacktestService:
         analysis_date_to: Optional[date] = None,
         analysis_phase: Optional[str] = None,
         engine_version: Optional[str] = None,
+        interval: str = "1d",
     ) -> Optional[Dict[str, Any]]:
+        from src.core.intraday_backtest import build_engine_version_tag
+        base_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
         if engine_version is None:
-            engine_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
+            # interval-aware default: '1d' → base ('v1'); '5m' → 'v1-5m'; etc.
+            engine_version = build_engine_version_tag(base_version, interval, 1)
         else:
             engine_version = str(engine_version)
         lookup_code = OVERALL_SENTINEL_CODE if scope == "overall" else code
@@ -591,6 +601,7 @@ class BacktestService:
         analysis_date_from: Optional[date],
         analysis_date_to: Optional[date],
         phase_bucket: str,
+        bar_interval: Optional[str] = None,
     ) -> Dict[str, Any]:
         page_offset = max(page - 1, 0) * limit
         batch_size = max(100, min(500, limit * 4))
@@ -623,6 +634,7 @@ class BacktestService:
                 days=None,
                 offset=sql_offset,
                 limit=batch_limit,
+                bar_interval=bar_interval,
             )
             if not batch:
                 break
@@ -850,6 +862,8 @@ class BacktestService:
             "simulated_exit_price": row.simulated_exit_price,
             "simulated_exit_reason": row.simulated_exit_reason,
             "simulated_return_pct": row.simulated_return_pct,
+            "bar_interval": getattr(row, "bar_interval", "1d") or "1d",
+            "first_hit_bar_index": getattr(row, "first_hit_bar_index", None),
         }
 
     @staticmethod
