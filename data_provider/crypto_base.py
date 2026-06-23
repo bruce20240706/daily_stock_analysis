@@ -152,16 +152,33 @@ class CryptoExchangeBase(BaseFetcher):
         if not raw:
             raise DataFetchError(f"{self.name} 未取到 {stock_code} 的分钟 K 线 (interval={interval})")
         df = self._parse_klines(raw)
-        # _normalize_data 会把 date 毫秒时间戳转成 'YYYY-MM-DD' 字符串，丢失时分秒。
-        # 分钟数据需要保留完整时间戳，在此先提取 datetime 列，再走标准化流程。
-        if "date" in df.columns:
-            df["datetime"] = pd.to_datetime(df["date"], unit="ms")
-        df = self._normalize_data(df, stock_code)
-        df = self._clean_data(df)
-        # 确保 datetime 列存在（_normalize_data 不产出 datetime 列）
-        if "datetime" not in df.columns and "date" in df.columns:
-            df["datetime"] = pd.to_datetime(df["date"])
-        return df
+        # 分钟数据不能复用日线的 _normalize_data：后者把 date 毫秒时间戳转成 'YYYY-MM-DD'
+        # 字符串（丢失时分秒）并按日级字符串排序，跨同一天的分钟 bar 顺序不可靠。
+        # 因此这里就地做最小标准化，保留全精度 datetime（ms），且不计算技术指标。
+        return self._normalize_intraday(df, stock_code)
+
+    def _normalize_intraday(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
+        """分钟级标准化：保留全精度 datetime（由 ms 时间戳构建），数值化 OHLCV，不算指标。
+
+        输出列：code, datetime, open, high, low, close, volume, amount, pct_chg。
+        """
+        df = df.copy()
+        if "date" not in df.columns:
+            raise DataFetchError(f"{self.name} 分钟数据缺少 date 列")
+        # 全精度 datetime（毫秒），用于排序/清洗/输出，避免日级截断与排序错位。
+        df["datetime"] = pd.to_datetime(df["date"], unit="ms")
+        for col in ("open", "high", "low", "close", "volume", "amount"):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        if "amount" not in df.columns:
+            df["amount"] = None
+        # 去除关键列为空的行，再按全精度时间升序排序（与日线 _clean_data 语义一致）。
+        df = df.dropna(subset=["close", "volume"])
+        df = df.sort_values("datetime").reset_index(drop=True)
+        df["pct_chg"] = (df["close"].pct_change() * 100).fillna(0.0)
+        df["code"] = stock_code
+        keep = ["code", "datetime", "open", "high", "low", "close", "volume", "amount", "pct_chg"]
+        return df[[c for c in keep if c in df.columns]]
 
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         if not (is_crypto_code(stock_code) or is_perp_code(stock_code)):

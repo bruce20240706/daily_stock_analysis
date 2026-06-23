@@ -23,11 +23,12 @@ class OkxFetcher(CryptoExchangeBase):
         else:
             # OKX bar 参数格式与 Binance 相同（1m/5m/15m/1H 等），大写 H；暂不支持分页
             bar_param = interval.replace("h", "H")
-            limit = min(self._intraday_limit(days, interval), self.MAX_LIMIT)
-            if self._intraday_limit(days, interval) > self.MAX_LIMIT:
+            needed = self._intraday_limit(days, interval)
+            if needed > self.MAX_LIMIT:
                 raise NotImplementedError(
                     f"OkxFetcher: interval={interval} days={days} 超出单页上限({self.MAX_LIMIT})，暂不支持分页"
                 )
+            limit = needed
         data = self._http_get(
             f"{self.BASE_URL}/api/v5/market/candles",
             {"instId": symbol, "bar": bar_param, "limit": limit},
