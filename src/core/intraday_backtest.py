@@ -16,6 +16,13 @@ SUPPORTED_INTERVALS: tuple[str, ...] = ("1d", "1m", "5m", "15m", "1h")
 _MINUTES_PER_DAY = 1440  # crypto 24h
 
 
+def validate_interval(interval) -> str:
+    """Validate interval is in SUPPORTED_INTERVALS. Raises ValueError if not."""
+    if interval not in SUPPORTED_INTERVALS:
+        raise ValueError(f"unsupported interval: {interval!r}")
+    return interval
+
+
 def is_intraday_interval(interval: str) -> bool:
     """True 当 interval 为受支持的分钟粒度(不含 '1d')。"""
     return interval in INTRADAY_INTERVAL_MINUTES

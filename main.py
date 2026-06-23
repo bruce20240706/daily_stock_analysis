@@ -405,6 +405,7 @@ def parse_arguments() -> argparse.Namespace:
 
     parser.add_argument(
         '--backtest-interval', type=str, default='1d',
+        choices=["1d", "1m", "5m", "15m", "1h"],
         help="回测 bar 粒度(1d/1m/5m/15m/1h;默认 1d=日线;分钟仅 crypto)",
     )
 
