@@ -1008,6 +1008,16 @@ def main() -> int:
                 run_full_analysis(runtime_config, args, scheduled_stock_codes)
 
             background_tasks = []
+
+            # opt-in 盘中回测后台任务(INTRADAY_BACKTEST_ENABLED=true 时挂载)
+            from src.scheduler_wiring import maybe_register_intraday_backtest
+            _bt_collector = type("_Collector", (), {
+                "add_background_task": staticmethod(
+                    lambda **kw: background_tasks.append(kw)
+                )
+            })()
+            maybe_register_intraday_backtest(_bt_collector, config)
+
             if getattr(config, 'agent_event_monitor_enabled', False):
                 from src.services.alert_worker import AlertWorker
 
