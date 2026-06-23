@@ -28,8 +28,8 @@ class CryptoExchangeBase(BaseFetcher):
         """BTC/USDT -> 交易所符号（如 BTCUSDT / BTC-USDT）。"""
         raise NotImplementedError
 
-    def _request_klines(self, symbol: str, days: int) -> list:
-        """HTTP 取日线原始数据，返回交易所原始结构（list）。"""
+    def _request_klines(self, symbol: str, days: int, interval: str = "1d") -> list:
+        """HTTP 取 K 线原始数据，返回交易所原始结构（list）。interval 默认 '1d' 兼容日线调用。"""
         raise NotImplementedError
 
     def _parse_klines(self, raw: list) -> pd.DataFrame:
@@ -49,6 +49,11 @@ class CryptoExchangeBase(BaseFetcher):
     def _days_to_limit(self, days: int) -> int:
         buffer = 5  # 给 MA 计算留首行余量
         return max(1, min(int(days) + buffer, self.MAX_LIMIT))
+
+    def _intraday_limit(self, days: int, interval: str) -> int:
+        """分钟 K 线总条数 = days × bars_per_day(interval)，不加 buffer（不算指标）。"""
+        from src.core.intraday_backtest import bars_per_day
+        return int(days) * bars_per_day(interval)
 
     def _fetch_timeout(self) -> float:
         """请求超时秒数，可经 CRYPTO_FETCH_TIMEOUT_SECONDS 覆盖（默认沿用类属性 timeout）。
@@ -128,6 +133,35 @@ class CryptoExchangeBase(BaseFetcher):
         df["code"] = stock_code
         keep = ["code"] + STANDARD_COLUMNS
         return df[[c for c in keep if c in df.columns]]
+
+    def get_intraday_data(
+        self,
+        stock_code: str,
+        interval: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        days: int = 30,
+    ) -> pd.DataFrame:
+        """获取分钟级 K 线数据（纯 OHLCV + datetime，不计算技术指标）。
+
+        仅支持 crypto 代码；非 crypto 由门面层在路由时拒绝。
+        返回 DataFrame 列：datetime, open, high, low, close, volume（及 code/amount/pct_chg 如存在）。
+        """
+        symbol = self._to_exchange_symbol(stock_code)
+        raw = self._request_klines(symbol, days=days, interval=interval)
+        if not raw:
+            raise DataFetchError(f"{self.name} 未取到 {stock_code} 的分钟 K 线 (interval={interval})")
+        df = self._parse_klines(raw)
+        # _normalize_data 会把 date 毫秒时间戳转成 'YYYY-MM-DD' 字符串，丢失时分秒。
+        # 分钟数据需要保留完整时间戳，在此先提取 datetime 列，再走标准化流程。
+        if "date" in df.columns:
+            df["datetime"] = pd.to_datetime(df["date"], unit="ms")
+        df = self._normalize_data(df, stock_code)
+        df = self._clean_data(df)
+        # 确保 datetime 列存在（_normalize_data 不产出 datetime 列）
+        if "datetime" not in df.columns and "date" in df.columns:
+            df["datetime"] = pd.to_datetime(df["date"])
+        return df
 
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         if not (is_crypto_code(stock_code) or is_perp_code(stock_code)):
