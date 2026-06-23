@@ -63,7 +63,9 @@ class BacktestService:
             is_intraday_interval,
             build_engine_version_tag,
             derive_window_bar_count,
+            validate_interval,
         )
+        validate_interval(interval)
         base_version = str(getattr(config, "backtest_engine_version", "v1"))
         engine_version = build_engine_version_tag(base_version, interval, leverage)
         if perp_only:
@@ -137,16 +139,45 @@ class BacktestService:
                     continue
 
                 if intraday:
-                    # ----- 分钟路径：从 DataFetcherManager 拉分钟 K 线 -----
-                    # 历史候选：窗口起点 = analysis_date，终点 = analysis_date + eval_window_days
-                    # 传入 start_date/end_date 以锚定历史区间，避免拉取当前最新数据
-                    _window_end_date = analysis_date + timedelta(days=int(eval_window_days))
+                    # ----- 分钟路径：入场价 = 日线收盘（与日线路径一致），窗口从次日 00:00 UTC 起 -----
+                    # §4.1: 入场价取 analysis_date 日线收盘（AI 建议成立时点），与日线路径一致。
+                    # 前向窗口起点 = analysis_date 日线 bar 收盘时刻之后第一根分钟 bar，
+                    # 对应 crypto 24h bar 收盘 = analysis_date + 1 day 00:00 UTC。
+                    start_daily = self.stock_repo.get_start_daily(code=analysis.code, analysis_date=analysis_date)
+
+                    if start_daily is None or start_daily.close is None:
+                        self._try_fill_daily_data(code=analysis.code, analysis_date=analysis_date, eval_window_days=eval_window_days)
+                        start_daily = self.stock_repo.get_start_daily(code=analysis.code, analysis_date=analysis_date)
+
+                    if start_daily is None or start_daily.close is None:
+                        insufficient += 1
+                        results_to_save.append(
+                            BacktestResult(
+                                analysis_history_id=analysis.id,
+                                code=analysis.code,
+                                analysis_date=analysis_date,
+                                eval_window_days=int(eval_window_days),
+                                engine_version=str(engine_version),
+                                bar_interval=interval,
+                                eval_status="insufficient_data",
+                                evaluated_at=datetime.now(),
+                                operation_advice=analysis.operation_advice,
+                            )
+                        )
+                        continue
+
+                    # 入场价 = 日线收盘（AI 建议成立时点），与日线路径一致
+                    start_price = float(start_daily.close)
+                    start_date_for_eval = start_daily.date
+                    # 分钟窗口起点 = analysis_date + 1 day（日线 bar 收盘后第一根分钟 bar 所在自然日）
+                    _minute_window_start = start_daily.date + timedelta(days=1)
+                    _window_end_date = _minute_window_start + timedelta(days=int(eval_window_days))
                     from data_provider.base import DataFetcherManager
                     try:
                         fwd_df, _src = DataFetcherManager().get_intraday_data(
                             analysis.code,
                             interval=interval,
-                            start_date=analysis_date.isoformat(),
+                            start_date=_minute_window_start.isoformat(),
                             end_date=_window_end_date.isoformat(),
                             days=int(eval_window_days),
                         )
@@ -167,7 +198,6 @@ class BacktestService:
                         )
                         continue
                     forward_bars = self._df_to_bars(fwd_df)
-                    # 分钟路径：取第一根 bar 的价格作为 start_price
                     if not forward_bars:
                         insufficient += 1
                         results_to_save.append(
@@ -184,8 +214,6 @@ class BacktestService:
                             )
                         )
                         continue
-                    start_price = float(forward_bars[0].close)
-                    start_date_for_eval = analysis_date
                     is_perp = is_perp_code(analysis.code)
                     funding_cost_pct = 0.0
                 else:
@@ -385,7 +413,8 @@ class BacktestService:
         engine_version: Optional[str] = None,
         interval: str = "1d",
     ) -> Dict[str, Any]:
-        from src.core.intraday_backtest import build_engine_version_tag
+        from src.core.intraday_backtest import build_engine_version_tag, validate_interval
+        validate_interval(interval)
         base_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
         if engine_version is None:
             # interval-aware default: '1d' → base ('v1'); '5m' → 'v1-5m'; etc.
@@ -454,7 +483,8 @@ class BacktestService:
         engine_version: Optional[str] = None,
         interval: str = "1d",
     ) -> Optional[Dict[str, Any]]:
-        from src.core.intraday_backtest import build_engine_version_tag
+        from src.core.intraday_backtest import build_engine_version_tag, validate_interval
+        validate_interval(interval)
         base_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
         if engine_version is None:
             # interval-aware default: '1d' → base ('v1'); '5m' → 'v1-5m'; etc.

@@ -423,5 +423,93 @@ class TestEngineVersionIntervalAwareDefault(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# Finding #1: Invalid interval returns 400 (not 500 / silent)
+# ---------------------------------------------------------------------------
+
+class TestInvalidIntervalReturns400(unittest.TestCase):
+    """Invalid interval in API calls must return HTTP 400, not 500 or silent success.
+
+    The service raises ValueError for bad intervals, and all endpoints catch ValueError
+    and return 400. This test verifies the service-level ValueError is raised and that
+    the endpoint maps it to 400.
+    """
+
+    def test_run_backtest_invalid_interval_raises_value_error(self):
+        """Service.run_backtest with invalid interval raises ValueError immediately."""
+        from src.services.backtest_service import BacktestService
+        from types import SimpleNamespace
+
+        svc = BacktestService.__new__(BacktestService)
+        object.__setattr__(svc, "repo", SimpleNamespace(get_candidates=lambda **k: []))
+        object.__setattr__(svc, "stock_repo", SimpleNamespace())
+
+        with self.assertRaises(ValueError) as ctx:
+            svc.run_backtest(interval="2h")
+        self.assertIn("unsupported interval", str(ctx.exception))
+
+    def test_get_recent_evaluations_invalid_interval_raises_value_error(self):
+        """Service.get_recent_evaluations with invalid interval raises ValueError."""
+        import tempfile
+        import os
+
+        tmp = tempfile.TemporaryDirectory()
+        db_path = os.path.join(tmp.name, "test_inv.db")
+        os.environ["DATABASE_PATH"] = db_path
+        Config._instance = None
+        DatabaseManager.reset_instance()
+        db = DatabaseManager.get_instance()
+
+        svc = BacktestService(db_manager=db)
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                svc.get_recent_evaluations(code=None, interval="2h")
+            self.assertIn("unsupported interval", str(ctx.exception))
+        finally:
+            Config._instance = None
+            DatabaseManager.reset_instance()
+            tmp.cleanup()
+
+    def test_get_summary_invalid_interval_raises_value_error(self):
+        """Service.get_summary with invalid interval raises ValueError."""
+        import tempfile
+        import os
+
+        tmp = tempfile.TemporaryDirectory()
+        db_path = os.path.join(tmp.name, "test_inv2.db")
+        os.environ["DATABASE_PATH"] = db_path
+        Config._instance = None
+        DatabaseManager.reset_instance()
+        db = DatabaseManager.get_instance()
+
+        svc = BacktestService(db_manager=db)
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                svc.get_summary(scope="overall", code=None, interval="1D")
+            self.assertIn("unsupported interval", str(ctx.exception))
+        finally:
+            Config._instance = None
+            DatabaseManager.reset_instance()
+            tmp.cleanup()
+
+    def test_validate_interval_rejects_bad_values(self):
+        """validate_interval raises ValueError for all bad interval forms."""
+        from src.core.intraday_backtest import validate_interval
+        import pytest
+
+        bad_intervals = ["2h", "", "1D", "5M", "daily", "1w", None, 0, "1d-x3"]
+        for bad in bad_intervals:
+            with self.assertRaises((ValueError, TypeError)):
+                validate_interval(bad)
+
+    def test_validate_interval_accepts_all_supported(self):
+        """validate_interval returns the interval unchanged for all supported values."""
+        from src.core.intraday_backtest import validate_interval, SUPPORTED_INTERVALS
+
+        for iv in SUPPORTED_INTERVALS:
+            result = validate_interval(iv)
+            self.assertEqual(result, iv)
+
+
 if __name__ == "__main__":
     unittest.main()

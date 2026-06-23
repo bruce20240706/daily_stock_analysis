@@ -53,7 +53,7 @@ window_bar_count = eval_window_days × bars_per_day(interval)
 | `15m`    | 96          |
 | `1h`     | 24          |
 
-历史数据的起始锚点为 `analysis_date`（分析日期），向前延伸 `eval_window_days` 天。
+入场价取 `analysis_date` 当日的**日线收盘价**（与日线路径一致，代表 AI 建议成立时点）。分钟窗口起点为 `analysis_date + 1 day` 00:00 UTC（crypto 日线 bar 收盘后第一根分钟 bar），向前延伸 `eval_window_days` 天。
 
 ---
 
@@ -211,7 +211,7 @@ GET /api/v1/backtest/performance?interval=5m
 
 ### 9.3 历史窗口锚点
 
-分钟回测的价格路径起点固定为 `analysis_date`（日线分析日期），向未来延伸 `eval_window_days` 天。如果分析日期较早且所需分钟数据不可用，该条记录会被跳过并记录错误日志。
+分钟回测的**入场价**取 `analysis_date` 当日日线收盘价（与日线路径语义一致）。分钟**价格路径**起点为 `analysis_date + 1 day` 00:00 UTC（即 crypto 日线 bar 收盘后的第一根分钟 bar 所在时刻），向未来延伸 `eval_window_days` 天。如果分析日期较早且所需分钟数据不可用，该条记录会被跳过并记录错误日志。
 
 ---
 

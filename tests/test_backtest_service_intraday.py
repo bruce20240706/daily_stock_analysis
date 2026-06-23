@@ -7,7 +7,7 @@ All tests are fully offline: real DB / HTTP is never invoked.
 import json
 import os
 import tempfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
@@ -116,11 +116,16 @@ def test_intraday_tag_and_window_and_persistence(monkeypatch, tmp_path):
     monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
 
     # ---- mock _resolve_analysis_date ----
+    analysis_date_val = date(2026, 5, 1)
     monkeypatch.setattr(
         svc,
         "_resolve_analysis_date",
-        lambda analysis: date(2026, 5, 1),
+        lambda analysis: analysis_date_val,
     )
+
+    # ---- mock get_start_daily (Fix #2: intraday path now fetches daily bar for entry price) ----
+    _fake_daily_t2 = SimpleNamespace(date=analysis_date_val, close=100.0)
+    monkeypatch.setattr(svc.stock_repo, "get_start_daily", lambda code, analysis_date: _fake_daily_t2)
 
     # ---- mock get_intraday_data to return 576 bars ----
     fake_df = _minute_df(576, base=100.0)
@@ -139,7 +144,7 @@ def test_intraday_tag_and_window_and_persistence(monkeypatch, tmp_path):
         captured_eval_args.update(kwargs)
         return {
             "eval_status": "completed",
-            "analysis_date": date(2026, 5, 1),
+            "analysis_date": analysis_date_val,
             "eval_window_days": kwargs["config"].eval_window_days,
             "engine_version": kwargs["config"].engine_version,
             "operation_advice": "买入",
@@ -342,11 +347,13 @@ def test_intraday_non_crypto_skip_counter(monkeypatch, tmp_path):
 
 # ---------------------------------------------------------------------------
 # Test 6: service passes start_date to get_intraday_data (historical anchor)
+# After Fix #2: start_date = analysis_date + 1 day (window starts after daily close)
 # ---------------------------------------------------------------------------
 
 def test_intraday_service_passes_start_date(monkeypatch, tmp_path):
-    """interval='5m': service must pass start_date (the candidate's analysis window start)
-    to get_intraday_data, so the fetch is historically anchored — not anchored to 'now'.
+    """interval='5m': service must pass start_date to get_intraday_data.
+    After Fix #2: the start_date must be analysis_date + 1 day (the day AFTER daily bar close),
+    not analysis_date itself. This anchors the minute window after the daily close.
     """
     import os
 
@@ -364,8 +371,14 @@ def test_intraday_service_passes_start_date(monkeypatch, tmp_path):
 
     candidate = _fake_analysis(code="BTC/USDT:PERP", analysis_id=99)
     analysis_date = date(2024, 1, 15)
+    # Fix #2: window start = analysis_date + 1 day
+    expected_window_start = analysis_date + timedelta(days=1)  # 2024-01-16
     monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
     monkeypatch.setattr(svc, "_resolve_analysis_date", lambda a: analysis_date)
+
+    # Fix #2: mock get_start_daily to return a daily bar
+    _fake_daily_t6 = SimpleNamespace(date=analysis_date, close=105.0)
+    monkeypatch.setattr(svc.stock_repo, "get_start_daily", lambda code, analysis_date: _fake_daily_t6)
 
     captured_kwargs: Dict[str, Any] = {}
     fake_df = _minute_df(288, base=100.0)
@@ -420,15 +433,15 @@ def test_intraday_service_passes_start_date(monkeypatch, tmp_path):
         "service must pass start_date kwarg to get_intraday_data; "
         f"got kwargs={list(captured_kwargs.keys())}"
     )
-    # The start_date must equal the candidate's analysis_date (window start)
+    # Fix #2: The start_date must equal analysis_date + 1 day (window starts AFTER daily close)
     from datetime import date as date_cls
     passed_start = captured_kwargs["start_date"]
     # Accept date or ISO string representation
     if isinstance(passed_start, str):
         passed_start = date_cls.fromisoformat(passed_start)
-    assert passed_start == analysis_date, (
-        f"start_date passed to get_intraday_data must be analysis_date={analysis_date}, "
-        f"got {captured_kwargs['start_date']}"
+    assert passed_start == expected_window_start, (
+        f"Fix #2: start_date passed to get_intraday_data must be analysis_date+1={expected_window_start} "
+        f"(window starts AFTER daily bar close), got {captured_kwargs['start_date']}"
     )
 
 
@@ -468,6 +481,10 @@ def _make_intraday_svc_with_engine_return(monkeypatch, tmp_path, engine_return_p
     analysis_date = date(2026, 5, 1)
     monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
     monkeypatch.setattr(svc, "_resolve_analysis_date", lambda a: analysis_date)
+
+    # Fix #2: mock get_start_daily so intraday path can obtain daily close for entry price
+    _fake_daily_t6_cost = SimpleNamespace(date=analysis_date, close=100.0)
+    monkeypatch.setattr(svc.stock_repo, "get_start_daily", lambda code, analysis_date: _fake_daily_t6_cost)
 
     fake_df = _minute_df(288, base=100.0)
     from data_provider.base import DataFetcherManager
@@ -560,4 +577,270 @@ def test_cost_positive_deducts_round_trip(monkeypatch, tmp_path):
     assert abs(r.simulated_return_pct - expected) < 1e-9, (
         f"fee=5bp/slip=5bp: expected simulated_return_pct={expected}, "
         f"got {r.simulated_return_pct}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Finding #1: validate_interval regression tests
+# ---------------------------------------------------------------------------
+
+def test_invalid_interval_2h_raises_value_error():
+    """interval='2h' must raise ValueError at service level — not silently fallback to daily."""
+    svc = BacktestService.__new__(BacktestService)
+    object.__setattr__(svc, "repo", SimpleNamespace(get_candidates=lambda **k: []))
+    object.__setattr__(svc, "stock_repo", SimpleNamespace())
+
+    with pytest.raises(ValueError, match="unsupported interval"):
+        svc.run_backtest(interval="2h")
+
+
+def test_invalid_interval_empty_raises_value_error():
+    """interval='' must raise ValueError at service level."""
+    svc = BacktestService.__new__(BacktestService)
+    object.__setattr__(svc, "repo", SimpleNamespace(get_candidates=lambda **k: []))
+    object.__setattr__(svc, "stock_repo", SimpleNamespace())
+
+    with pytest.raises(ValueError, match="unsupported interval"):
+        svc.run_backtest(interval="")
+
+
+def test_invalid_interval_1D_raises_value_error():
+    """interval='1D' (uppercase) must raise ValueError — strict reject, no coercion."""
+    svc = BacktestService.__new__(BacktestService)
+    object.__setattr__(svc, "repo", SimpleNamespace(get_candidates=lambda **k: []))
+    object.__setattr__(svc, "stock_repo", SimpleNamespace())
+
+    with pytest.raises(ValueError, match="unsupported interval"):
+        svc.run_backtest(interval="1D")
+
+
+def test_invalid_interval_5M_raises_value_error():
+    """interval='5M' (uppercase) must raise ValueError — strict reject."""
+    svc = BacktestService.__new__(BacktestService)
+    object.__setattr__(svc, "repo", SimpleNamespace(get_candidates=lambda **k: []))
+    object.__setattr__(svc, "stock_repo", SimpleNamespace())
+
+    with pytest.raises(ValueError, match="unsupported interval"):
+        svc.run_backtest(interval="5M")
+
+
+def test_invalid_interval_does_not_touch_daily_db(monkeypatch, tmp_path):
+    """A rejected interval call must NOT write any BacktestResult (daily rows untouched)."""
+    import os
+
+    db_path = str(tmp_path / "t_invalid.db")
+    os.environ["DATABASE_PATH"] = db_path
+
+    from src.config import Config
+    from src.storage import DatabaseManager
+
+    Config._instance = None
+    DatabaseManager.reset_instance()
+    db = DatabaseManager.get_instance()
+
+    svc = BacktestService(db_manager=db)
+
+    # Provide a candidate so we know the rejection happens before candidate processing
+    candidate = _fake_analysis(code="BTC/USDT:PERP", analysis_id=77)
+    monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
+
+    save_called = {"n": 0}
+    monkeypatch.setattr(
+        svc.repo,
+        "save_results_batch",
+        lambda results, **kw: save_called.__setitem__("n", save_called["n"] + len(results)) or 0,
+    )
+
+    with pytest.raises(ValueError, match="unsupported interval"):
+        svc.run_backtest(interval="2h")
+
+    assert save_called["n"] == 0, (
+        "save_results_batch must NOT be called after interval validation error"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Finding #2: minute entry price == daily close; window start = analysis_date + 1 day
+# ---------------------------------------------------------------------------
+
+def test_intraday_entry_price_is_daily_close(monkeypatch, tmp_path):
+    """Finding #2: minute path must use daily bar close as start_price (NOT first minute bar close).
+
+    Daily bar close = 105.0 (stubbed get_start_daily).
+    First minute bar close = 100.0 (the minute DataFrame).
+    After fix: start_price passed to engine must be 105.0.
+    """
+    import os
+
+    db_path = str(tmp_path / "t_fix2_price.db")
+    os.environ["DATABASE_PATH"] = db_path
+
+    from src.config import Config
+    from src.storage import DatabaseManager
+
+    Config._instance = None
+    DatabaseManager.reset_instance()
+    db = DatabaseManager.get_instance()
+
+    svc = BacktestService(db_manager=db)
+
+    candidate = _fake_analysis(code="BTC/USDT:PERP", analysis_id=200)
+    analysis_date = date(2024, 1, 15)
+    monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
+    monkeypatch.setattr(svc, "_resolve_analysis_date", lambda a: analysis_date)
+
+    # Stub daily bar: close=105.0 (intentionally different from first minute bar)
+    fake_daily_bar = SimpleNamespace(date=analysis_date, close=105.0)
+    monkeypatch.setattr(svc.stock_repo, "get_start_daily", lambda code, analysis_date: fake_daily_bar)
+
+    # Minute df: first bar close = 100.0 (must NOT be used as start_price)
+    fake_df = _minute_df(288, base=100.0)
+    from data_provider.base import DataFetcherManager
+
+    monkeypatch.setattr(
+        DataFetcherManager,
+        "get_intraday_data",
+        lambda self, code, interval, **kw: (fake_df.copy(), "BinanceFetcher"),
+    )
+
+    captured_eval_args: Dict[str, Any] = {}
+    from src.core import backtest_engine as beng
+
+    def fake_evaluate_single(**kwargs):
+        captured_eval_args.update(kwargs)
+        return {
+            "eval_status": "completed",
+            "analysis_date": analysis_date,
+            "eval_window_days": kwargs["config"].eval_window_days,
+            "engine_version": kwargs["config"].engine_version,
+            "operation_advice": "买入",
+            "position_recommendation": "long",
+            "start_price": kwargs["start_price"],
+            "end_close": 110.0,
+            "max_high": 115.0,
+            "min_low": 95.0,
+            "stock_return_pct": 10.0,
+            "direction_expected": "up",
+            "direction_correct": True,
+            "outcome": "win",
+            "stop_loss": 90.0,
+            "take_profit": 120.0,
+            "hit_stop_loss": False,
+            "hit_take_profit": False,
+            "first_hit": "neither",
+            "first_hit_date": None,
+            "first_hit_trading_days": 3,
+            "simulated_entry_price": kwargs["start_price"],
+            "simulated_exit_price": 110.0,
+            "simulated_exit_reason": "window_end",
+            "simulated_return_pct": 10.0,
+        }
+
+    monkeypatch.setattr(beng.BacktestEngine, "evaluate_single", staticmethod(fake_evaluate_single))
+    monkeypatch.setattr(svc.repo, "save_results_batch", lambda results, **kw: len(results))
+    monkeypatch.setattr(svc, "_recompute_summaries", lambda **k: None)
+
+    out = svc.run_backtest(interval="5m", eval_window_days=1)
+
+    assert out["completed"] == 1, f"expected completed=1, got {out}"
+    actual_start_price = captured_eval_args.get("start_price")
+    assert actual_start_price == 105.0, (
+        f"Finding #2: minute path start_price must equal daily close (105.0), "
+        f"got {actual_start_price!r}. "
+        f"The first minute bar close (100.0) must NOT be used as entry price."
+    )
+
+
+def test_intraday_window_start_is_after_analysis_date(monkeypatch, tmp_path):
+    """Finding #2: minute window start must be analysis_date + 1 day (day after daily close).
+
+    analysis_date = 2024-01-15 → minute window start = 2024-01-16 (00:00 UTC).
+    The start_date passed to get_intraday_data must equal '2024-01-16', not '2024-01-15'.
+    """
+    import os
+
+    db_path = str(tmp_path / "t_fix2_window.db")
+    os.environ["DATABASE_PATH"] = db_path
+
+    from src.config import Config
+    from src.storage import DatabaseManager
+
+    Config._instance = None
+    DatabaseManager.reset_instance()
+    db = DatabaseManager.get_instance()
+
+    svc = BacktestService(db_manager=db)
+
+    candidate = _fake_analysis(code="BTC/USDT:PERP", analysis_id=201)
+    analysis_date = date(2024, 1, 15)
+    expected_window_start = date(2024, 1, 16)  # day AFTER analysis_date
+    monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
+    monkeypatch.setattr(svc, "_resolve_analysis_date", lambda a: analysis_date)
+
+    fake_daily_bar = SimpleNamespace(date=analysis_date, close=105.0)
+    monkeypatch.setattr(svc.stock_repo, "get_start_daily", lambda code, analysis_date: fake_daily_bar)
+
+    captured_intraday_kwargs: Dict[str, Any] = {}
+    fake_df = _minute_df(288, base=100.0)
+    from data_provider.base import DataFetcherManager
+
+    def fake_get_intraday(self, code, interval, **kw):
+        captured_intraday_kwargs.update(kw)
+        return fake_df.copy(), "BinanceFetcher"
+
+    monkeypatch.setattr(DataFetcherManager, "get_intraday_data", fake_get_intraday)
+
+    from src.core import backtest_engine as beng
+
+    def fake_evaluate_single(**kwargs):
+        return {
+            "eval_status": "completed",
+            "analysis_date": analysis_date,
+            "eval_window_days": kwargs["config"].eval_window_days,
+            "engine_version": kwargs["config"].engine_version,
+            "operation_advice": "买入",
+            "position_recommendation": "long",
+            "start_price": kwargs["start_price"],
+            "end_close": 110.0,
+            "max_high": 115.0,
+            "min_low": 95.0,
+            "stock_return_pct": 10.0,
+            "direction_expected": "up",
+            "direction_correct": True,
+            "outcome": "win",
+            "stop_loss": 90.0,
+            "take_profit": 120.0,
+            "hit_stop_loss": False,
+            "hit_take_profit": False,
+            "first_hit": "neither",
+            "first_hit_date": None,
+            "first_hit_trading_days": 3,
+            "simulated_entry_price": kwargs["start_price"],
+            "simulated_exit_price": 110.0,
+            "simulated_exit_reason": "window_end",
+            "simulated_return_pct": 10.0,
+        }
+
+    monkeypatch.setattr(beng.BacktestEngine, "evaluate_single", staticmethod(fake_evaluate_single))
+    monkeypatch.setattr(svc.repo, "save_results_batch", lambda results, **kw: len(results))
+    monkeypatch.setattr(svc, "_recompute_summaries", lambda **k: None)
+
+    out = svc.run_backtest(interval="5m", eval_window_days=1)
+
+    assert out["completed"] == 1, f"expected completed=1, got {out}"
+
+    passed_start_date = captured_intraday_kwargs.get("start_date")
+    assert passed_start_date is not None, (
+        "start_date must be passed to get_intraday_data"
+    )
+    # Accept date or ISO string
+    from datetime import date as date_cls
+    if isinstance(passed_start_date, str):
+        passed_date = date_cls.fromisoformat(passed_start_date)
+    else:
+        passed_date = passed_start_date
+
+    assert passed_date == expected_window_start, (
+        f"Finding #2: minute window start must be analysis_date + 1 day = {expected_window_start}, "
+        f"got {passed_date!r}. The window must start AFTER the daily bar close."
     )
