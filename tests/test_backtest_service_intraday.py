@@ -430,3 +430,134 @@ def test_intraday_service_passes_start_date(monkeypatch, tmp_path):
         f"start_date passed to get_intraday_data must be analysis_date={analysis_date}, "
         f"got {captured_kwargs['start_date']}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 6: 成本可选后处理
+# ---------------------------------------------------------------------------
+
+def _make_intraday_svc_with_engine_return(monkeypatch, tmp_path, engine_return_pct: float, fee_bps: float = 0.0, slippage_bps: float = 0.0):
+    """Helper shared by Task-6 cost tests.
+
+    Returns (svc, saved_results_list).
+    The mock engine returns simulated_return_pct=engine_return_pct.
+    Config's fee/slip are set via monkeypatch on the Config instance.
+    """
+    import os
+
+    db_path = str(tmp_path / "t6_cost.db")
+    os.environ["DATABASE_PATH"] = db_path
+
+    from src.config import Config
+    from src.storage import DatabaseManager
+
+    Config._instance = None
+    DatabaseManager.reset_instance()
+    db = DatabaseManager.get_instance()
+
+    svc = BacktestService(db_manager=db)
+
+    # Patch config's fee/slip attributes via get_config
+    original_get_config = None
+    from src import config as _config_mod
+    real_cfg = _config_mod.get_config()
+    monkeypatch.setattr(real_cfg, "crypto_intraday_backtest_fee_bps", fee_bps)
+    monkeypatch.setattr(real_cfg, "crypto_intraday_backtest_slippage_bps", slippage_bps)
+
+    candidate = _fake_analysis(code="BTC/USDT:PERP", analysis_id=101)
+    analysis_date = date(2026, 5, 1)
+    monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
+    monkeypatch.setattr(svc, "_resolve_analysis_date", lambda a: analysis_date)
+
+    fake_df = _minute_df(288, base=100.0)
+    from data_provider.base import DataFetcherManager
+
+    monkeypatch.setattr(
+        DataFetcherManager,
+        "get_intraday_data",
+        lambda self, code, interval, **kw: (fake_df.copy(), "BinanceFetcher"),
+    )
+
+    from src.core import backtest_engine as beng
+
+    def fake_evaluate_single(**kwargs):
+        return {
+            "eval_status": "completed",
+            "analysis_date": analysis_date,
+            "eval_window_days": kwargs["config"].eval_window_days,
+            "engine_version": kwargs["config"].engine_version,
+            "operation_advice": "买入",
+            "position_recommendation": "long",
+            "start_price": 100.0,
+            "end_close": 110.0,
+            "max_high": 115.0,
+            "min_low": 95.0,
+            "stock_return_pct": engine_return_pct,
+            "direction_expected": "up",
+            "direction_correct": True,
+            "outcome": "win",
+            "stop_loss": 90.0,
+            "take_profit": 120.0,
+            "hit_stop_loss": False,
+            "hit_take_profit": False,
+            "first_hit": "neither",
+            "first_hit_date": None,
+            "first_hit_trading_days": 3,
+            "simulated_entry_price": 100.0,
+            "simulated_exit_price": 110.0,
+            "simulated_exit_reason": "window_end",
+            "simulated_return_pct": engine_return_pct,
+        }
+
+    monkeypatch.setattr(beng.BacktestEngine, "evaluate_single", staticmethod(fake_evaluate_single))
+
+    saved_results: List[Any] = []
+
+    monkeypatch.setattr(svc.repo, "save_results_batch", lambda results, **kw: (saved_results.extend(results), len(results))[1])
+    monkeypatch.setattr(svc, "_recompute_summaries", lambda **k: None)
+
+    return svc, saved_results
+
+
+def test_cost_zero_keeps_return_unchanged(monkeypatch, tmp_path):
+    """fee=0, slip=0 → persisted simulated_return_pct equals engine's value (no mutation)."""
+    engine_val = 10.0
+    svc, saved_results = _make_intraday_svc_with_engine_return(
+        monkeypatch, tmp_path, engine_return_pct=engine_val, fee_bps=0.0, slippage_bps=0.0
+    )
+
+    out = svc.run_backtest(interval="5m", eval_window_days=1)
+
+    assert out["completed"] == 1, f"expected completed=1, got {out}"
+    assert len(saved_results) == 1, f"expected 1 saved result, got {len(saved_results)}"
+    r = saved_results[0]
+    assert r.simulated_return_pct == engine_val, (
+        f"fee=0/slip=0: persisted simulated_return_pct should equal engine value {engine_val}, "
+        f"got {r.simulated_return_pct}"
+    )
+
+
+def test_cost_positive_deducts_round_trip(monkeypatch, tmp_path):
+    """fee=5bp, slip=5bp → persisted simulated_return_pct = engine value − 0.20 pct points.
+
+    One round trip = 2 legs × (fee_bps + slippage_bps) / 100
+                   = 2 × (5 + 5) / 100 = 0.20 pct points.
+    """
+    engine_val = 10.0
+    fee_bps = 5.0
+    slip_bps = 5.0
+    expected = engine_val - 2.0 * (fee_bps + slip_bps) / 100.0  # 10.0 - 0.20 = 9.80
+
+    svc, saved_results = _make_intraday_svc_with_engine_return(
+        monkeypatch, tmp_path, engine_return_pct=engine_val, fee_bps=fee_bps, slippage_bps=slip_bps
+    )
+
+    out = svc.run_backtest(interval="5m", eval_window_days=1)
+
+    assert out["completed"] == 1, f"expected completed=1, got {out}"
+    assert len(saved_results) == 1, f"expected 1 saved result, got {len(saved_results)}"
+    r = saved_results[0]
+    assert abs(r.simulated_return_pct - expected) < 1e-9, (
+        f"fee=5bp/slip=5bp: expected simulated_return_pct={expected}, "
+        f"got {r.simulated_return_pct}"
+    )

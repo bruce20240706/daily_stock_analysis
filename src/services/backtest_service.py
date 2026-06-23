@@ -251,6 +251,16 @@ class BacktestService:
                     leverage=leverage,
                 )
 
+                # ★ Task 6: 分钟路径可选成本后处理（日线路径不变）
+                if intraday:
+                    from src.core.intraday_backtest import apply_round_trip_cost
+                    _fee = float(getattr(config, "crypto_intraday_backtest_fee_bps", 0.0))
+                    _slip = float(getattr(config, "crypto_intraday_backtest_slippage_bps", 0.0))
+                    if _fee or _slip:
+                        evaluation["simulated_return_pct"] = apply_round_trip_cost(
+                            evaluation.get("simulated_return_pct"), _fee, _slip
+                        )
+
                 status = evaluation.get("eval_status")
                 if status == "insufficient_data":
                     insufficient += 1
