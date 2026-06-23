@@ -479,6 +479,7 @@ class BacktestService:
                 engine_version=engine_version,
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
+                bar_interval=interval,
             )
             if count > self.MAX_DYNAMIC_SUMMARY_ROWS:
                 if phase_bucket is not None:
@@ -495,6 +496,7 @@ class BacktestService:
                     analysis_date_from=analysis_date_from,
                     analysis_date_to=analysis_date_to,
                     limit=self.MAX_DYNAMIC_SUMMARY_ROWS + 1,
+                    bar_interval=interval,
                 )
                 if len(rows_with_context) > self.MAX_DYNAMIC_SUMMARY_ROWS:
                     raise ValueError(
@@ -523,6 +525,7 @@ class BacktestService:
                 engine_version=engine_version,
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
+                bar_interval=interval,
             )
             return self._build_dynamic_summary(
                 rows=rows,

@@ -66,8 +66,8 @@ class BacktestResultItem(BaseModel):
     simulated_exit_price: Optional[float] = None
     simulated_exit_reason: Optional[str] = None
     simulated_return_pct: Optional[float] = None
-    bar_interval: Optional[str] = "1d"
-    first_hit_bar_index: Optional[int] = None
+    bar_interval: Optional[str] = Field("1d", description="bar 粒度（1d/1m/5m/15m/1h）")
+    first_hit_bar_index: Optional[int] = Field(None, description="首次触发 bar 序号（分钟级）")
 
 
 class BacktestResultsResponse(BaseModel):

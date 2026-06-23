@@ -200,6 +200,89 @@ class TestIntervalIsolation(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Test 2b: get_summary date-filtered branch isolates by interval
+# ---------------------------------------------------------------------------
+
+class TestSummaryIntervalIsolation(unittest.TestCase):
+    """get_summary date-filtered (dynamic) branch must isolate daily vs minute.
+
+    Entering the dynamic branch (analysis_date_from set) exercises
+    count_results / list_results, which Task 9 follow-up now passes
+    bar_interval into. With the same code + same eval_window_days, the daily
+    row (v1/1d) and minute row (v1-5m/5m) overlap on the date filter, so only
+    engine_version (interval-aware default) + bar_interval keep them apart.
+    """
+
+    def setUp(self) -> None:
+        self._temp_dir = tempfile.TemporaryDirectory()
+        db_path = os.path.join(self._temp_dir.name, "test_summary_interval.db")
+        os.environ["DATABASE_PATH"] = db_path
+        os.environ["BACKTEST_EVAL_WINDOW_DAYS"] = "10"
+        Config._instance = None
+        DatabaseManager.reset_instance()
+        self.db = DatabaseManager.get_instance()
+
+        self._date_from = date(2023, 12, 1)
+        self._date_to = date(2024, 12, 31)
+
+        with self.db.get_session() as session:
+            ah_daily = _seed_analysis(session, code="ETH-USDT:PERP", analysis_date=date(2024, 1, 1))
+            _seed_result(
+                session,
+                analysis_history_id=ah_daily.id,
+                code="ETH-USDT:PERP",
+                analysis_date=date(2024, 1, 1),
+                engine_version="v1",
+                bar_interval="1d",
+            )
+            ah_min = _seed_analysis(session, code="ETH-USDT:PERP", analysis_date=date(2024, 1, 2))
+            _seed_result(
+                session,
+                analysis_history_id=ah_min.id,
+                code="ETH-USDT:PERP",
+                analysis_date=date(2024, 1, 2),
+                engine_version="v1-5m",
+                bar_interval="5m",
+                first_hit_bar_index=3,
+            )
+            session.commit()
+
+    def tearDown(self) -> None:
+        Config._instance = None
+        DatabaseManager.reset_instance()
+        self._temp_dir.cleanup()
+
+    def _get_summary(self, interval: str):
+        service = BacktestService(self.db)
+        return service.get_summary(
+            scope="stock",
+            code="ETH-USDT:PERP",
+            eval_window_days=10,
+            interval=interval,
+            analysis_date_from=self._date_from,
+            analysis_date_to=self._date_to,
+        )
+
+    def test_daily_summary_reflects_only_daily_row(self):
+        """interval='1d' summary counts ONLY the daily row (engine_version='v1')."""
+        summary = self._get_summary(interval="1d")
+        assert summary is not None
+        assert summary["engine_version"] == "v1", summary["engine_version"]
+        assert summary["total_evaluations"] == 1, (
+            f"Expected 1 daily evaluation, got {summary['total_evaluations']}: {summary}"
+        )
+
+    def test_minute_summary_reflects_only_minute_row(self):
+        """interval='5m' summary counts ONLY the minute row (engine_version='v1-5m')."""
+        summary = self._get_summary(interval="5m")
+        assert summary is not None
+        assert summary["engine_version"] == "v1-5m", summary["engine_version"]
+        assert summary["total_evaluations"] == 1, (
+            f"Expected 1 minute evaluation, got {summary['total_evaluations']}: {summary}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Test 3: BacktestResultItem schema has the new fields
 # ---------------------------------------------------------------------------
 
