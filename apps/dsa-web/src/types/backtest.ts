@@ -64,6 +64,8 @@ export interface BacktestResultItem {
   simulatedExitPrice?: number;
   simulatedExitReason?: string;
   simulatedReturnPct?: number;
+  barInterval?: string;
+  firstHitBarIndex?: number | null;
 }
 
 export interface BacktestResultsResponse {

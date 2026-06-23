@@ -27,6 +27,14 @@ const PHASE_FILTER_OPTIONS: Array<{ value: BacktestPhaseFilter; label: string }>
   { value: 'unknown', label: '未知' },
 ];
 
+const INTERVAL_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '1d', label: '日线' },
+  { value: '1m', label: '1分' },
+  { value: '5m', label: '5分' },
+  { value: '15m', label: '15分' },
+  { value: '1h', label: '1时' },
+];
+
 // ============ Helpers ============
 
 function pct(value?: number | null): string {
@@ -271,6 +279,7 @@ const BacktestPage: React.FC = () => {
   const [analysisDateFrom, setAnalysisDateFrom] = useState('');
   const [analysisDateTo, setAnalysisDateTo] = useState('');
   const [phaseFilter, setPhaseFilter] = useState<BacktestPhaseFilter>('all');
+  const [intervalFilter, setIntervalFilter] = useState('1d');
   const [evalDays, setEvalDays] = useState('');
   const [forceRerun, setForceRerun] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
@@ -301,6 +310,7 @@ const BacktestPage: React.FC = () => {
     startDate?: string,
     endDate?: string,
     phase?: BacktestPhaseFilter,
+    interval?: string,
   ) => {
     setIsLoadingResults(true);
     try {
@@ -310,6 +320,7 @@ const BacktestPage: React.FC = () => {
         analysisDateFrom: startDate || undefined,
         analysisDateTo: endDate || undefined,
         analysisPhase: phase && phase !== 'all' ? phase : undefined,
+        interval: interval || undefined,
         page,
         limit: pageSize,
       });
@@ -332,6 +343,7 @@ const BacktestPage: React.FC = () => {
     startDate?: string,
     endDate?: string,
     phase?: BacktestPhaseFilter,
+    interval?: string,
   ) => {
     setIsLoadingPerf(true);
     try {
@@ -340,6 +352,7 @@ const BacktestPage: React.FC = () => {
         analysisDateFrom: startDate || undefined,
         analysisDateTo: endDate || undefined,
         analysisPhase: phase && phase !== 'all' ? phase : undefined,
+        interval: interval || undefined,
       });
       setOverallPerf(overall);
 
@@ -349,6 +362,7 @@ const BacktestPage: React.FC = () => {
           analysisDateFrom: startDate || undefined,
           analysisDateTo: endDate || undefined,
           analysisPhase: phase && phase !== 'all' ? phase : undefined,
+          interval: interval || undefined,
         });
         setStockPerf(stock);
       } else {
@@ -395,8 +409,8 @@ const BacktestPage: React.FC = () => {
       });
       setRunResult(response);
       // Refresh data with same eval_window_days
-      fetchResults(1, codeFilter.trim() || undefined, evalWindowDays, analysisDateFrom, analysisDateTo, phaseFilter);
-      fetchPerformance(codeFilter.trim() || undefined, evalWindowDays, analysisDateFrom, analysisDateTo, phaseFilter);
+      fetchResults(1, codeFilter.trim() || undefined, evalWindowDays, analysisDateFrom, analysisDateTo, phaseFilter, intervalFilter);
+      fetchPerformance(codeFilter.trim() || undefined, evalWindowDays, analysisDateFrom, analysisDateTo, phaseFilter, intervalFilter);
     } catch (err) {
       setRunError(getParsedApiError(err));
     } finally {
@@ -409,8 +423,8 @@ const BacktestPage: React.FC = () => {
     const code = codeFilter.trim() || undefined;
     const windowDays = evalDays ? parseInt(evalDays, 10) : undefined;
     setCurrentPage(1);
-    fetchResults(1, code, windowDays, analysisDateFrom, analysisDateTo, phaseFilter);
-    fetchPerformance(code, windowDays, analysisDateFrom, analysisDateTo, phaseFilter);
+    fetchResults(1, code, windowDays, analysisDateFrom, analysisDateTo, phaseFilter, intervalFilter);
+    fetchPerformance(code, windowDays, analysisDateFrom, analysisDateTo, phaseFilter, intervalFilter);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -423,15 +437,15 @@ const BacktestPage: React.FC = () => {
     const code = codeFilter.trim() || undefined;
     setEvalDays('1');
     setCurrentPage(1);
-    fetchResults(1, code, 1, analysisDateFrom, analysisDateTo, phaseFilter);
-    fetchPerformance(code, 1, analysisDateFrom, analysisDateTo, phaseFilter);
+    fetchResults(1, code, 1, analysisDateFrom, analysisDateTo, phaseFilter, intervalFilter);
+    fetchPerformance(code, 1, analysisDateFrom, analysisDateTo, phaseFilter, intervalFilter);
   };
 
   // Pagination
   const totalPages = Math.ceil(totalResults / pageSize);
   const handlePageChange = (page: number) => {
     const windowDays = evalDays ? parseInt(evalDays, 10) : undefined;
-    fetchResults(page, codeFilter.trim() || undefined, windowDays, analysisDateFrom, analysisDateTo, phaseFilter);
+    fetchResults(page, codeFilter.trim() || undefined, windowDays, analysisDateFrom, analysisDateTo, phaseFilter, intervalFilter);
   };
 
   return (
@@ -481,6 +495,19 @@ const BacktestPage: React.FC = () => {
             >
               {PHASE_FILTER_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <span className="text-xs text-muted-text">周期</span>
+            <select
+              value={intervalFilter}
+              onChange={(e) => setIntervalFilter(e.target.value)}
+              disabled={isRunning}
+              className={`${BACKTEST_COMPACT_INPUT_CLASS} w-24`}
+            >
+              {INTERVAL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </div>
@@ -636,6 +663,9 @@ const BacktestPage: React.FC = () => {
                       </th>
                       <th className="backtest-table-head-cell">结果</th>
                       <th className="backtest-table-head-cell">状态</th>
+                      {intervalFilter !== '1d' && (
+                        <th className="backtest-table-head-cell">首次命中(bar)</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -719,6 +749,11 @@ const BacktestPage: React.FC = () => {
                         </td>
                         <td className="backtest-table-cell">{outcomeBadge(row.outcome)}</td>
                         <td className="backtest-table-cell">{statusBadge(row.evalStatus)}</td>
+                        {intervalFilter !== '1d' && (
+                          <td className="backtest-table-cell tabular-nums text-secondary-text">
+                            {row.firstHitBarIndex != null ? row.firstHitBarIndex : '--'}
+                          </td>
+                        )}
                       </tr>
                       );
                     })}

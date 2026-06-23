@@ -153,6 +153,7 @@ class BacktestRepository:
         days: Optional[int],
         offset: int,
         limit: int,
+        bar_interval: Optional[str] = None,
     ) -> Tuple[List[BacktestResultContextRow], int]:
         with self.db.get_session() as session:
             conditions = self._build_result_conditions(
@@ -162,6 +163,7 @@ class BacktestRepository:
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
                 days=days,
+                bar_interval=bar_interval,
             )
 
             where_clause = and_(*conditions) if conditions else True
@@ -201,6 +203,7 @@ class BacktestRepository:
         days: Optional[int],
         offset: int,
         limit: int,
+        bar_interval: Optional[str] = None,
     ) -> List[BacktestResultContextRow]:
         """Return result rows plus AnalysisHistory.context_snapshot for dynamic filtering."""
         with self.db.get_session() as session:
@@ -211,6 +214,7 @@ class BacktestRepository:
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
                 days=days,
+                bar_interval=bar_interval,
             )
             where_clause = and_(*conditions) if conditions else True
             rows = session.execute(
@@ -241,6 +245,7 @@ class BacktestRepository:
         analysis_date_to: Optional[date] = None,
         days: Optional[int] = None,
         limit: Optional[int] = None,
+        bar_interval: Optional[str] = None,
     ) -> List[Tuple[BacktestResult, Optional[str]]]:
         with self.db.get_session() as session:
             conditions = self._build_result_conditions(
@@ -250,6 +255,7 @@ class BacktestRepository:
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
                 days=days,
+                bar_interval=bar_interval,
             )
             where_clause = and_(*conditions) if conditions else True
             query = (
@@ -271,6 +277,7 @@ class BacktestRepository:
         analysis_date_from: Optional[date] = None,
         analysis_date_to: Optional[date] = None,
         days: Optional[int] = None,
+        bar_interval: Optional[str] = None,
     ) -> int:
         """Return the number of matching BacktestResult rows without loading them."""
         with self.db.get_session() as session:
@@ -281,6 +288,7 @@ class BacktestRepository:
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
                 days=days,
+                bar_interval=bar_interval,
             )
             where_clause = and_(*conditions) if conditions else True
             count = session.execute(
@@ -300,6 +308,7 @@ class BacktestRepository:
         analysis_date_to: Optional[date] = None,
         days: Optional[int] = None,
         limit: Optional[int] = None,
+        bar_interval: Optional[str] = None,
     ) -> List[BacktestResult]:
         with self.db.get_session() as session:
             conditions = self._build_result_conditions(
@@ -309,6 +318,7 @@ class BacktestRepository:
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
                 days=days,
+                bar_interval=bar_interval,
             )
             where_clause = and_(*conditions) if conditions else True
             query = (
@@ -454,6 +464,7 @@ class BacktestRepository:
         analysis_date_from: Optional[date],
         analysis_date_to: Optional[date],
         days: Optional[int],
+        bar_interval: Optional[str] = None,
     ) -> List[object]:
         conditions = []
         if code:
@@ -469,4 +480,6 @@ class BacktestRepository:
         if days:
             cutoff = datetime.now() - timedelta(days=int(days))
             conditions.append(BacktestResult.evaluated_at >= cutoff)
+        if bar_interval is not None:
+            conditions.append(BacktestResult.bar_interval == bar_interval)
         return conditions

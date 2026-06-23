@@ -16,10 +16,22 @@ class OkxFetcher(CryptoExchangeBase):
     def _to_exchange_symbol(self, code: str) -> str:
         return code.strip().upper().replace("/", "-")
 
-    def _request_klines(self, symbol: str, days: int) -> list:
+    def _request_klines(self, symbol: str, days: int, interval: str = "1d", start_ms: int = None) -> list:
+        if interval == "1d":
+            bar_param = "1D"
+            limit = self._days_to_limit(days)
+        else:
+            # OKX bar 参数格式与 Binance 相同（1m/5m/15m/1H 等），大写 H；暂不支持分页
+            bar_param = interval.replace("h", "H")
+            needed = self._intraday_limit(days, interval)
+            if needed > self.MAX_LIMIT:
+                raise NotImplementedError(
+                    f"OkxFetcher: interval={interval} days={days} 超出单页上限({self.MAX_LIMIT})，暂不支持分页"
+                )
+            limit = needed
         data = self._http_get(
             f"{self.BASE_URL}/api/v5/market/candles",
-            {"instId": symbol, "bar": "1D", "limit": self._days_to_limit(days)},
+            {"instId": symbol, "bar": bar_param, "limit": limit},
         )
         return (data or {}).get("data", [])
 

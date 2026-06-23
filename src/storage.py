@@ -57,7 +57,7 @@ from src.config import get_config
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
-CURRENT_SCHEMA_VERSION = "2026-06-05-create-all-baseline"
+CURRENT_SCHEMA_VERSION = "2026-06-23-backtest-intraday-columns"
 
 # SQLAlchemy ORM 基类
 Base = declarative_base()
@@ -336,6 +336,10 @@ class BacktestResult(Base):
     first_hit = Column(String(16))  # take_profit/stop_loss/ambiguous/neither/not_applicable
     first_hit_date = Column(Date)
     first_hit_trading_days = Column(Integer)
+
+    # 盘中/分钟级回测维度(日线行:bar_interval='1d', first_hit_bar_index=NULL)
+    bar_interval = Column(String(8), nullable=False, default='1d', server_default='1d')
+    first_hit_bar_index = Column(Integer, nullable=True)
 
     # 模拟执行（long-only）
     simulated_entry_price = Column(Float)
@@ -892,6 +896,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
 
             # 创建所有表
             Base.metadata.create_all(self._engine)
+            self._ensure_backtest_intraday_columns()
             self._ensure_schema_migration_record()
 
             self._initialized = True
@@ -910,6 +915,32 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._SessionLocal = None
             self.__class__._instance = None
             raise
+
+    def _ensure_backtest_intraday_columns(self) -> None:
+        """幂等补列:老库的 backtest_results 缺 bar_interval/first_hit_bar_index 时 ALTER 补上。
+
+        create_all() 不会给既存表加列;SQLite 不支持 ADD COLUMN IF NOT EXISTS,
+        故先 PRAGMA table_info 探测再 ALTER。
+        """
+        try:
+            with self._engine.begin() as conn:
+                from sqlalchemy import text
+                existing = {
+                    r[1] for r in conn.execute(text("PRAGMA table_info(backtest_results)"))
+                }
+                if not existing:
+                    return  # 表尚未建(理论上 create_all 已建);留给 create_all
+                if "bar_interval" not in existing:
+                    conn.execute(text(
+                        "ALTER TABLE backtest_results ADD COLUMN bar_interval VARCHAR(8) "
+                        "NOT NULL DEFAULT '1d'"
+                    ))
+                if "first_hit_bar_index" not in existing:
+                    conn.execute(text(
+                        "ALTER TABLE backtest_results ADD COLUMN first_hit_bar_index INTEGER"
+                    ))
+        except Exception as exc:
+            logger.warning("补全 backtest_results 盘中列失败: %s", exc)
 
     def _ensure_schema_migration_record(self) -> None:
         session = self._SessionLocal()

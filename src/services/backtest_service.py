@@ -41,6 +41,7 @@ class BacktestService:
         min_age_days: Optional[int] = None,
         limit: int = 200,
         leverage: Optional[int] = None,
+        interval: str = "1d",
     ) -> Dict[str, Any]:
         config = get_config()
 
@@ -58,16 +59,29 @@ class BacktestService:
         leverage = max(1, min(125, leverage))  # service 兜底钳制（API Field 已拒越界，config 已钳下限）
         perp_only = leverage > 1
 
-        engine_version = str(getattr(config, "backtest_engine_version", "v1"))
+        from src.core.intraday_backtest import (
+            is_intraday_interval,
+            build_engine_version_tag,
+            derive_window_bar_count,
+            validate_interval,
+        )
+        validate_interval(interval)
+        base_version = str(getattr(config, "backtest_engine_version", "v1"))
+        engine_version = build_engine_version_tag(base_version, interval, leverage)
         if perp_only:
-            # 情景标签：去重、落库、汇总全程使用标签版本，与 1x 行按唯一键隔离共存
-            engine_version = f"{engine_version}-x{leverage}"
-            logger.info(f"杠杆情景回测: L={leverage}（仅 perp 候选, engine_version={engine_version}）")
+            logger.info(f"杠杆情景回测: L={leverage} (engine_version={engine_version})")
 
         neutral_band_pct = float(getattr(config, "backtest_neutral_band_pct", 2.0))
 
+        intraday = is_intraday_interval(interval)
+        if intraday:
+            window_bar_cnt = derive_window_bar_count(int(eval_window_days), interval)
+            eval_slice = window_bar_cnt
+        else:
+            eval_slice = int(eval_window_days)
+
         eval_config = EvaluationConfig(
-            eval_window_days=int(eval_window_days),
+            eval_window_days=eval_slice,
             neutral_band_pct=neutral_band_pct,
             engine_version=str(engine_version),
         )
@@ -90,13 +104,18 @@ class BacktestService:
 
         results_to_save: List[BacktestResult] = []
         skipped_non_perp = 0
+        skipped_unsupported = 0  # 分钟路径不支持的非 crypto 标的
 
-        from data_provider.base import is_perp_code
+        from data_provider.base import is_perp_code, is_crypto_code
 
         for analysis in candidates:
             if perp_only and not is_perp_code(analysis.code):
                 # SQL 粗滤漏网兜底（如 quote 非 USDT/USDC 的构造码）：杠杆情景只评估 perp
                 skipped_non_perp += 1
+                continue
+            if intraday and not (is_crypto_code(analysis.code) or is_perp_code(analysis.code)):
+                # 分钟路径仅支持 crypto/perp；非 crypto 跳过（单独计入 skipped_unsupported）
+                skipped_unsupported += 1
                 continue
             processed += 1
             touched_codes.add(analysis.code)
@@ -111,62 +130,146 @@ class BacktestService:
                             code=analysis.code,
                             eval_window_days=int(eval_window_days),
                             engine_version=str(engine_version),
+                            bar_interval=interval,
                             eval_status="error",
                             evaluated_at=datetime.now(),
                             operation_advice=analysis.operation_advice,
                         )
                     )
                     continue
-                start_daily = self.stock_repo.get_start_daily(code=analysis.code, analysis_date=analysis_date)
 
-                if start_daily is None or start_daily.close is None:
-                    self._try_fill_daily_data(code=analysis.code, analysis_date=analysis_date, eval_window_days=eval_window_days)
+                if intraday:
+                    # ----- 分钟路径：入场价 = 日线收盘（与日线路径一致），窗口从次日 00:00 UTC 起 -----
+                    # §4.1: 入场价取 analysis_date 日线收盘（AI 建议成立时点），与日线路径一致。
+                    # 前向窗口起点 = analysis_date 日线 bar 收盘时刻之后第一根分钟 bar，
+                    # 对应 crypto 24h bar 收盘 = analysis_date + 1 day 00:00 UTC。
                     start_daily = self.stock_repo.get_start_daily(code=analysis.code, analysis_date=analysis_date)
 
-                if start_daily is None or start_daily.close is None:
-                    insufficient += 1
-                    results_to_save.append(
-                        BacktestResult(
-                            analysis_history_id=analysis.id,
-                            code=analysis.code,
-                            analysis_date=analysis_date,
-                            eval_window_days=int(eval_window_days),
-                            engine_version=str(engine_version),
-                            eval_status="insufficient_data",
-                            evaluated_at=datetime.now(),
-                            operation_advice=analysis.operation_advice,
+                    if start_daily is None or start_daily.close is None:
+                        self._try_fill_daily_data(code=analysis.code, analysis_date=analysis_date, eval_window_days=eval_window_days)
+                        start_daily = self.stock_repo.get_start_daily(code=analysis.code, analysis_date=analysis_date)
+
+                    if start_daily is None or start_daily.close is None:
+                        insufficient += 1
+                        results_to_save.append(
+                            BacktestResult(
+                                analysis_history_id=analysis.id,
+                                code=analysis.code,
+                                analysis_date=analysis_date,
+                                eval_window_days=int(eval_window_days),
+                                engine_version=str(engine_version),
+                                bar_interval=interval,
+                                eval_status="insufficient_data",
+                                evaluated_at=datetime.now(),
+                                operation_advice=analysis.operation_advice,
+                            )
                         )
-                    )
-                    continue
+                        continue
 
-                forward_bars = self.stock_repo.get_forward_bars(
-                    code=analysis.code,
-                    analysis_date=start_daily.date,
-                    eval_window_days=int(eval_window_days),
-                )
+                    # 入场价 = 日线收盘（AI 建议成立时点），与日线路径一致
+                    start_price = float(start_daily.close)
+                    start_date_for_eval = start_daily.date
+                    # 分钟窗口起点 = analysis_date + 1 day（日线 bar 收盘后第一根分钟 bar 所在自然日）
+                    _minute_window_start = start_daily.date + timedelta(days=1)
+                    _window_end_date = _minute_window_start + timedelta(days=int(eval_window_days))
+                    from data_provider.base import DataFetcherManager
+                    try:
+                        fwd_df, _src = DataFetcherManager().get_intraday_data(
+                            analysis.code,
+                            interval=interval,
+                            start_date=_minute_window_start.isoformat(),
+                            end_date=_window_end_date.isoformat(),
+                            days=int(eval_window_days),
+                        )
+                    except Exception as exc:
+                        insufficient += 1
+                        results_to_save.append(
+                            BacktestResult(
+                                analysis_history_id=analysis.id,
+                                code=analysis.code,
+                                analysis_date=analysis_date,
+                                eval_window_days=int(eval_window_days),
+                                engine_version=str(engine_version),
+                                bar_interval=interval,
+                                eval_status="insufficient_data",
+                                evaluated_at=datetime.now(),
+                                operation_advice=analysis.operation_advice,
+                            )
+                        )
+                        continue
+                    forward_bars = self._df_to_bars(fwd_df)
+                    if not forward_bars:
+                        insufficient += 1
+                        results_to_save.append(
+                            BacktestResult(
+                                analysis_history_id=analysis.id,
+                                code=analysis.code,
+                                analysis_date=analysis_date,
+                                eval_window_days=int(eval_window_days),
+                                engine_version=str(engine_version),
+                                bar_interval=interval,
+                                eval_status="insufficient_data",
+                                evaluated_at=datetime.now(),
+                                operation_advice=analysis.operation_advice,
+                            )
+                        )
+                        continue
+                    is_perp = is_perp_code(analysis.code)
+                    funding_cost_pct = 0.0
+                else:
+                    # ----- 日线路径：原有逻辑，字节级不变 -----
+                    start_daily = self.stock_repo.get_start_daily(code=analysis.code, analysis_date=analysis_date)
 
-                if len(forward_bars) < int(eval_window_days):
-                    self._try_fill_daily_data(code=analysis.code, analysis_date=start_daily.date, eval_window_days=eval_window_days)
+                    if start_daily is None or start_daily.close is None:
+                        self._try_fill_daily_data(code=analysis.code, analysis_date=analysis_date, eval_window_days=eval_window_days)
+                        start_daily = self.stock_repo.get_start_daily(code=analysis.code, analysis_date=analysis_date)
+
+                    if start_daily is None or start_daily.close is None:
+                        insufficient += 1
+                        results_to_save.append(
+                            BacktestResult(
+                                analysis_history_id=analysis.id,
+                                code=analysis.code,
+                                analysis_date=analysis_date,
+                                eval_window_days=int(eval_window_days),
+                                engine_version=str(engine_version),
+                                eval_status="insufficient_data",
+                                evaluated_at=datetime.now(),
+                                operation_advice=analysis.operation_advice,
+                            )
+                        )
+                        continue
+
                     forward_bars = self.stock_repo.get_forward_bars(
                         code=analysis.code,
                         analysis_date=start_daily.date,
                         eval_window_days=int(eval_window_days),
                     )
 
-                is_perp = is_perp_code(analysis.code)
-                funding_cost_pct = 0.0
-                # 仅在 forward_bars 足量（不会落 insufficient_data）时才发起资金费抓取（OKX 主源，Binance fapi 兜底），避免对将被丢弃的行做无谓网络 I/O
-                if is_perp and len(forward_bars) >= int(eval_window_days) and getattr(config, "crypto_derivatives_enabled", True):
-                    funding_cost_pct = self._compute_perp_funding_cost_pct(
-                        code=analysis.code,
-                        start_date=start_daily.date,
-                        eval_window_days=int(eval_window_days),
-                    )
+                    if len(forward_bars) < int(eval_window_days):
+                        self._try_fill_daily_data(code=analysis.code, analysis_date=start_daily.date, eval_window_days=eval_window_days)
+                        forward_bars = self.stock_repo.get_forward_bars(
+                            code=analysis.code,
+                            analysis_date=start_daily.date,
+                            eval_window_days=int(eval_window_days),
+                        )
+
+                    is_perp = is_perp_code(analysis.code)
+                    funding_cost_pct = 0.0
+                    # 仅在 forward_bars 足量（不会落 insufficient_data）时才发起资金费抓取（OKX 主源，Binance fapi 兜底），避免对将被丢弃的行做无谓网络 I/O
+                    if is_perp and len(forward_bars) >= int(eval_window_days) and getattr(config, "crypto_derivatives_enabled", True):
+                        funding_cost_pct = self._compute_perp_funding_cost_pct(
+                            code=analysis.code,
+                            start_date=start_daily.date,
+                            eval_window_days=int(eval_window_days),
+                        )
+                    start_price = float(start_daily.close)
+                    start_date_for_eval = start_daily.date
 
                 evaluation = BacktestEngine.evaluate_single(
                     operation_advice=analysis.operation_advice,
-                    analysis_date=start_daily.date,
-                    start_price=float(start_daily.close),
+                    analysis_date=start_date_for_eval,
+                    start_price=start_price,
                     forward_bars=forward_bars,
                     stop_loss=analysis.stop_loss,
                     take_profit=analysis.take_profit,
@@ -175,6 +278,16 @@ class BacktestService:
                     funding_cost_pct=funding_cost_pct,
                     leverage=leverage,
                 )
+
+                # ★ Task 6: 分钟路径可选成本后处理（日线路径不变）
+                if intraday:
+                    from src.core.intraday_backtest import apply_round_trip_cost
+                    _fee = float(getattr(config, "crypto_intraday_backtest_fee_bps", 0.0))
+                    _slip = float(getattr(config, "crypto_intraday_backtest_slippage_bps", 0.0))
+                    if _fee or _slip:
+                        evaluation["simulated_return_pct"] = apply_round_trip_cost(
+                            evaluation.get("simulated_return_pct"), _fee, _slip
+                        )
 
                 status = evaluation.get("eval_status")
                 if status == "insufficient_data":
@@ -189,8 +302,10 @@ class BacktestService:
                         analysis_history_id=analysis.id,
                         code=analysis.code,
                         analysis_date=evaluation.get("analysis_date"),
-                        eval_window_days=int(evaluation.get("eval_window_days") or eval_window_days),
+                        # ★ 始终持久化日历天数（非引擎回显的 eval_slice）
+                        eval_window_days=int(eval_window_days),
                         engine_version=str(evaluation.get("engine_version") or engine_version),
+                        bar_interval=interval,
                         eval_status=str(evaluation.get("eval_status") or "error"),
                         evaluated_at=datetime.now(),
                         operation_advice=evaluation.get("operation_advice"),
@@ -209,7 +324,13 @@ class BacktestService:
                         hit_take_profit=evaluation.get("hit_take_profit"),
                         first_hit=evaluation.get("first_hit"),
                         first_hit_date=evaluation.get("first_hit_date"),
-                        first_hit_trading_days=evaluation.get("first_hit_trading_days"),
+                        # ★ 分钟路径：first_hit_trading_days 引擎值路由到 bar_index；日线路径不变
+                        first_hit_trading_days=(
+                            None if intraday else evaluation.get("first_hit_trading_days")
+                        ),
+                        first_hit_bar_index=(
+                            evaluation.get("first_hit_trading_days") if intraday else None
+                        ),
                         simulated_entry_price=evaluation.get("simulated_entry_price"),
                         simulated_exit_price=evaluation.get("simulated_exit_price"),
                         simulated_exit_reason=evaluation.get("simulated_exit_reason"),
@@ -227,6 +348,7 @@ class BacktestService:
                         analysis_date=self._resolve_analysis_date(analysis),
                         eval_window_days=int(eval_window_days),
                         engine_version=str(engine_version),
+                        bar_interval=interval,
                         eval_status="error",
                         evaluated_at=datetime.now(),
                         operation_advice=analysis.operation_advice,
@@ -246,6 +368,8 @@ class BacktestService:
 
         if skipped_non_perp:
             logger.info(f"杠杆情景回测跳过非 perp 候选 {skipped_non_perp} 条")
+        if skipped_unsupported:
+            logger.info(f"分钟路径跳过不支持的非 crypto 候选 {skipped_unsupported} 条")
 
         return {
             "processed": processed,
@@ -253,6 +377,7 @@ class BacktestService:
             "completed": completed,
             "insufficient": insufficient,
             "errors": errors,
+            "skipped_unsupported": skipped_unsupported,
         }
 
     def _compute_perp_funding_cost_pct(self, *, code: str, start_date: date, eval_window_days: int) -> float:
@@ -286,9 +411,14 @@ class BacktestService:
         analysis_date_to: Optional[date] = None,
         analysis_phase: Optional[str] = None,
         engine_version: Optional[str] = None,
+        interval: str = "1d",
     ) -> Dict[str, Any]:
+        from src.core.intraday_backtest import build_engine_version_tag, validate_interval
+        validate_interval(interval)
+        base_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
         if engine_version is None:
-            engine_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
+            # interval-aware default: '1d' → base ('v1'); '5m' → 'v1-5m'; etc.
+            engine_version = build_engine_version_tag(base_version, interval, 1)
         else:
             engine_version = str(engine_version)
 
@@ -310,6 +440,7 @@ class BacktestService:
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
                 phase_bucket=phase_bucket,
+                bar_interval=interval,
             )
 
         offset = max(page - 1, 0) * limit
@@ -322,6 +453,7 @@ class BacktestService:
             days=None,
             offset=offset,
             limit=limit,
+            bar_interval=interval,
         )
         items = []
         for result, stock_name, trend_prediction, _created_at, context_snapshot, raw_result, report_type in rows:
@@ -349,9 +481,14 @@ class BacktestService:
         analysis_date_to: Optional[date] = None,
         analysis_phase: Optional[str] = None,
         engine_version: Optional[str] = None,
+        interval: str = "1d",
     ) -> Optional[Dict[str, Any]]:
+        from src.core.intraday_backtest import build_engine_version_tag, validate_interval
+        validate_interval(interval)
+        base_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
         if engine_version is None:
-            engine_version = str(getattr(get_config(), "backtest_engine_version", "v1"))
+            # interval-aware default: '1d' → base ('v1'); '5m' → 'v1-5m'; etc.
+            engine_version = build_engine_version_tag(base_version, interval, 1)
         else:
             engine_version = str(engine_version)
         lookup_code = OVERALL_SENTINEL_CODE if scope == "overall" else code
@@ -372,6 +509,7 @@ class BacktestService:
                 engine_version=engine_version,
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
+                bar_interval=interval,
             )
             if count > self.MAX_DYNAMIC_SUMMARY_ROWS:
                 if phase_bucket is not None:
@@ -388,6 +526,7 @@ class BacktestService:
                     analysis_date_from=analysis_date_from,
                     analysis_date_to=analysis_date_to,
                     limit=self.MAX_DYNAMIC_SUMMARY_ROWS + 1,
+                    bar_interval=interval,
                 )
                 if len(rows_with_context) > self.MAX_DYNAMIC_SUMMARY_ROWS:
                     raise ValueError(
@@ -416,6 +555,7 @@ class BacktestService:
                 engine_version=engine_version,
                 analysis_date_from=analysis_date_from,
                 analysis_date_to=analysis_date_to,
+                bar_interval=interval,
             )
             return self._build_dynamic_summary(
                 rows=rows,
@@ -494,6 +634,7 @@ class BacktestService:
         analysis_date_from: Optional[date],
         analysis_date_to: Optional[date],
         phase_bucket: str,
+        bar_interval: Optional[str] = None,
     ) -> Dict[str, Any]:
         page_offset = max(page - 1, 0) * limit
         batch_size = max(100, min(500, limit * 4))
@@ -526,6 +667,7 @@ class BacktestService:
                 days=None,
                 offset=sql_offset,
                 limit=batch_limit,
+                bar_interval=bar_interval,
             )
             if not batch:
                 break
@@ -753,6 +895,8 @@ class BacktestService:
             "simulated_exit_price": row.simulated_exit_price,
             "simulated_exit_reason": row.simulated_exit_reason,
             "simulated_return_pct": row.simulated_return_pct,
+            "bar_interval": getattr(row, "bar_interval", "1d") or "1d",
+            "first_hit_bar_index": getattr(row, "first_hit_bar_index", None),
         }
 
     @staticmethod
@@ -885,3 +1029,35 @@ class BacktestService:
         summary["code"] = None if summary.get("code") == OVERALL_SENTINEL_CODE else summary.get("code")
         summary["computed_at"] = datetime.now().isoformat()
         return summary
+
+    @staticmethod
+    def _df_to_bars(df) -> list:
+        """分钟 DataFrame → 引擎可消费的 Bar namedtuple 列表。
+
+        字段：date（Python date，来自 'datetime' 列，一律提取 .date() 保持与日线一致）、
+        high、low、close、open。
+        列表按 DataFrame 行序排列（调用方已保证升序）。
+        精度（时分秒）由 first_hit_bar_index 承载，不依赖 bar.date。
+        """
+        from collections import namedtuple
+
+        Bar = namedtuple("Bar", ["date", "high", "low", "close", "open"])
+        out = []
+        for _, r in df.iterrows():
+            dt_val = r.get("datetime") if hasattr(r, "get") else r["datetime"]
+            # ★ FINDING #2: normalize to plain Python date (pd.Timestamp IS a datetime
+            #   subclass, NOT a date — daily bars use date objects, minute bars must match).
+            if hasattr(dt_val, "date") and callable(dt_val.date):
+                bar_date = dt_val.date()
+            else:
+                bar_date = dt_val
+            out.append(
+                Bar(
+                    date=bar_date,
+                    high=float(r["high"]),
+                    low=float(r["low"]),
+                    close=float(r["close"]),
+                    open=float(r.get("open", r["close"])) if hasattr(r, "get") else float(r["open"]),
+                )
+            )
+        return out

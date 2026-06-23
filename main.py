@@ -403,6 +403,12 @@ def parse_arguments() -> argparse.Namespace:
         help='强制回测（即使已有回测结果也重新计算）'
     )
 
+    parser.add_argument(
+        '--backtest-interval', type=str, default='1d',
+        choices=["1d", "1m", "5m", "15m", "1h"],
+        help="回测 bar 粒度(1d/1m/5m/15m/1h;默认 1d=日线;分钟仅 crypto)",
+    )
+
     # === Signal Backtest ===
     parser.add_argument(
         '--signal-backtest',
@@ -937,6 +943,7 @@ def main() -> int:
                 code=getattr(args, 'backtest_code', None),
                 force=getattr(args, 'backtest_force', False),
                 eval_window_days=getattr(args, 'backtest_days', None),
+                interval=getattr(args, 'backtest_interval', '1d'),
             )
             logger.info(
                 f"回测完成: processed={stats.get('processed')} saved={stats.get('saved')} "
@@ -1002,6 +1009,16 @@ def main() -> int:
                 run_full_analysis(runtime_config, args, scheduled_stock_codes)
 
             background_tasks = []
+
+            # opt-in 盘中回测后台任务(INTRADAY_BACKTEST_ENABLED=true 时挂载)
+            from src.scheduler_wiring import maybe_register_intraday_backtest
+            _bt_collector = type("_Collector", (), {
+                "add_background_task": staticmethod(
+                    lambda **kw: background_tasks.append(kw)
+                )
+            })()
+            maybe_register_intraday_backtest(_bt_collector, config)
+
             if getattr(config, 'agent_event_monitor_enabled', False):
                 from src.services.alert_worker import AlertWorker
 

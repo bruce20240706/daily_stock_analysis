@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +18,7 @@ class BacktestRunRequest(BaseModel):
     min_age_days: Optional[int] = Field(None, ge=0, le=365, description="分析记录最小天龄（0=不限）")
     limit: int = Field(200, ge=1, le=2000, description="最多处理的分析记录数")
     leverage: Optional[int] = Field(None, ge=1, le=125, description="perp 杠杆情景（默认取配置 CRYPTO_BACKTEST_LEVERAGE；1=与现状一致；仅 perp 标的生效；L>1 结果按 engine_version 标签 v1-xN 落库，读取需显式传 engine_version）")
+    interval: Optional[Literal["1d", "1m", "5m", "15m", "1h"]] = Field("1d", description="bar 粒度（1d/1m/5m/15m/1h；默认 1d 日线）")
 
 
 class BacktestRunResponse(BaseModel):
@@ -65,6 +66,8 @@ class BacktestResultItem(BaseModel):
     simulated_exit_price: Optional[float] = None
     simulated_exit_reason: Optional[str] = None
     simulated_return_pct: Optional[float] = None
+    bar_interval: Optional[str] = Field("1d", description="bar 粒度（1d/1m/5m/15m/1h）")
+    first_hit_bar_index: Optional[int] = Field(None, description="首次触发 bar 序号（分钟级）")
 
 
 class BacktestResultsResponse(BaseModel):

@@ -19,9 +19,29 @@ class CoinbaseFetcher(CryptoExchangeBase):
     def _to_exchange_symbol(self, code: str) -> str:
         return code.strip().upper().replace("/", "-")
 
-    def _request_klines(self, symbol: str, days: int) -> list:
+    # Coinbase granularity mapping (seconds)
+    _GRANULARITY_MAP = {
+        "1m": 60,
+        "5m": 300,
+        "15m": 900,
+        "1h": 3600,
+        "1d": 86400,
+    }
+
+    def _request_klines(self, symbol: str, days: int, interval: str = "1d", start_ms: int = None) -> list:
+        granularity = self._GRANULARITY_MAP.get(interval)
+        if granularity is None:
+            raise NotImplementedError(
+                f"CoinbaseFetcher: interval={interval!r} not supported"
+            )
+        if interval != "1d":
+            limit = self._intraday_limit(days, interval)
+            if limit > self.MAX_LIMIT:
+                raise NotImplementedError(
+                    f"CoinbaseFetcher: interval={interval} days={days} 超出单页上限({self.MAX_LIMIT})，暂不支持分页"
+                )
         return self._http_get(
-            f"{self.BASE_URL}/products/{symbol}/candles", {"granularity": 86400}
+            f"{self.BASE_URL}/products/{symbol}/candles", {"granularity": granularity}
         )
 
     def _parse_klines(self, raw: list) -> pd.DataFrame:

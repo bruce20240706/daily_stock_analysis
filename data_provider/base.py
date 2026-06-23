@@ -476,9 +476,20 @@ class BaseFetcher(ABC):
         """
         return None
 
+    def get_intraday_data(
+        self,
+        stock_code: str,
+        interval: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        days: int = 30,
+    ) -> pd.DataFrame:
+        """获取分钟级 K 线数据（默认不支持，子类按需覆盖）。"""
+        raise NotImplementedError(f"[{self.name}] 暂不支持分钟级数据")
+
     def get_daily_data(
         self,
-        stock_code: str, 
+        stock_code: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         days: int = 30
@@ -597,10 +608,50 @@ class BaseFetcher(ABC):
         time.sleep(sleep_time)
 
 
+# ---- 分钟 K 线进程内 TTL 缓存（key=(code, interval, days) -> (timestamp, df)）----
+_INTRADAY_CACHE: Dict[Tuple[str, str, int], Tuple[float, "pd.DataFrame"]] = {}
+_INTRADAY_CACHE_LOCK = RLock()
+
+
+def _get_intraday_config():
+    """获取分钟缓存 TTL 配置；延迟导入避免循环依赖。"""
+    try:
+        from src.config import get_config
+        return get_config()
+    except Exception:
+        return None
+
+
+def _intraday_cache_get(key: Tuple[str, str, int]) -> Optional["pd.DataFrame"]:
+    """若缓存命中且未过期，返回 DataFrame；否则返回 None。"""
+    cfg = _get_intraday_config()
+    ttl = getattr(cfg, "crypto_intraday_minute_cache_ttl_s", 0) if cfg else 0
+    if ttl <= 0:
+        return None
+    with _INTRADAY_CACHE_LOCK:
+        entry = _INTRADAY_CACHE.get(key)
+    if entry is None:
+        return None
+    ts, df = entry
+    if time.time() - ts > ttl:
+        return None
+    return df.copy()
+
+
+def _intraday_cache_set(key: Tuple[str, str, int], df: "pd.DataFrame") -> None:
+    """写入缓存（TTL=0 时不写入）。"""
+    cfg = _get_intraday_config()
+    ttl = getattr(cfg, "crypto_intraday_minute_cache_ttl_s", 0) if cfg else 0
+    if ttl <= 0:
+        return
+    with _INTRADAY_CACHE_LOCK:
+        _INTRADAY_CACHE[key] = (time.time(), df.copy())
+
+
 class DataFetcherManager:
     """
     数据源策略管理器
-    
+
     职责：
     1. 管理多个数据源（按优先级排序）
     2. 自动故障切换（Failover）
@@ -1422,6 +1473,76 @@ class DataFetcherManager:
         logger.error(f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}")
         raise DataFetchError(error_summary)
     
+    def get_intraday_data(
+        self,
+        stock_code: str,
+        interval: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        days: int = 30,
+    ) -> Tuple[pd.DataFrame, str]:
+        """获取分钟级 K 线数据（仅 crypto/crypto_perp）。
+
+        路由策略：
+        - 非 crypto 代码直接抛 DataFetchError。
+        - 按市场过滤 fetcher，再按 capability="intraday_data" 过滤。
+        - 依次尝试各 fetcher，返回首个非空结果 (df, fetcher_name)。
+        - 带进程内 TTL 缓存，key=(code, interval, days)；TTL=0 时不缓存。
+
+        Returns:
+            Tuple[DataFrame, str]: (纯 OHLCV+datetime 的 DataFrame，成功的 fetcher 名称)
+
+        Raises:
+            DataFetchError: 非 crypto 代码或所有 fetcher 均失败时抛出。
+        """
+        stock_code = normalize_stock_code(stock_code)
+
+        if not (is_crypto_code(stock_code) or is_perp_code(stock_code)):
+            raise DataFetchError(f"{stock_code} 暂不支持分钟级数据（仅 crypto）")
+
+        # 缓存命中
+        cache_key: Tuple[str, str, int] = (stock_code, interval, days)
+        cached = _intraday_cache_get(cache_key)
+        if cached is not None:
+            logger.debug("[intraday_cache] 命中: %s interval=%s days=%s", stock_code, interval, days)
+            return cached, "cache"
+
+        fetchers = self._get_fetchers_snapshot()
+        market = "crypto_perp" if is_perp_code(stock_code) else "crypto"
+        fetchers = self._filter_daily_fetchers_for_market(fetchers, market)
+        fetchers = self._filter_fetchers_by_capability(fetchers, capability="intraday_data")
+
+        if not fetchers:
+            raise DataFetchError(f"{stock_code} 无可用分钟数据源（interval={interval}）")
+
+        errors: List[str] = []
+        for fetcher in fetchers:
+            try:
+                df = self._call_fetcher_method(
+                    fetcher,
+                    "get_intraday_data",
+                    stock_code=stock_code,
+                    interval=interval,
+                    start_date=start_date,
+                    end_date=end_date,
+                    days=days,
+                )
+                if df is not None and not df.empty:
+                    _intraday_cache_set(cache_key, df)
+                    return df, fetcher.name
+            except NotImplementedError as exc:
+                errors.append(f"{fetcher.name}: NotImplementedError({exc})")
+                logger.debug("[intraday] %s 不支持 interval=%s，跳过: %s", fetcher.name, interval, exc)
+            except Exception as exc:
+                error_type, error_reason = summarize_exception(exc)
+                errors.append(f"{fetcher.name}: ({error_type}) {error_reason}")
+                logger.warning(
+                    "[intraday] %s %s interval=%s 失败: %s %s",
+                    fetcher.name, stock_code, interval, error_type, error_reason,
+                )
+
+        raise DataFetchError(f"{stock_code} 分钟数据获取失败 (interval={interval}): {errors}")
+
     @property
     def available_fetchers(self) -> List[str]:
         """返回可用数据源名称列表"""

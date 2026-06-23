@@ -899,6 +899,14 @@ class Config:
     # 信号级回测前向窗口(M3-A)：回测时向前看几根 bar
     signal_backtest_horizon_bars: int = 10
 
+    # 盘中/分钟级回测(crypto MVP;默认与现状一致)
+    crypto_intraday_backtest_interval: str = "5m"
+    crypto_intraday_minute_cache_ttl_s: int = 900
+    crypto_intraday_backtest_fee_bps: float = 0.0
+    crypto_intraday_backtest_slippage_bps: float = 0.0
+    intraday_backtest_enabled: bool = False
+    intraday_backtest_schedule_minutes: int = 60
+
     # === 日志配置 ===
     log_dir: str = "./logs"  # 日志文件目录
     log_level: str = "INFO"  # 日志级别
@@ -1880,6 +1888,29 @@ class Config:
                 DEFAULT_ALPHASIFT_INSTALL_SPEC
                 if os.getenv('ALPHASIFT_INSTALL_SPEC') is None
                 else os.getenv('ALPHASIFT_INSTALL_SPEC', '').strip()
+            ),
+            # 盘中/分钟级回测(crypto MVP)
+            crypto_intraday_backtest_interval=(
+                os.getenv('CRYPTO_INTRADAY_BACKTEST_INTERVAL', '5m') or '5m'
+            ),
+            crypto_intraday_minute_cache_ttl_s=parse_env_int(
+                os.getenv('CRYPTO_INTRADAY_MINUTE_CACHE_TTL_S'), 900,
+                field_name='CRYPTO_INTRADAY_MINUTE_CACHE_TTL_S', minimum=0,
+            ),
+            crypto_intraday_backtest_fee_bps=parse_env_float(
+                os.getenv('CRYPTO_INTRADAY_BACKTEST_FEE_BPS'), 0.0,
+                field_name='CRYPTO_INTRADAY_BACKTEST_FEE_BPS', minimum=0.0,
+            ),
+            crypto_intraday_backtest_slippage_bps=parse_env_float(
+                os.getenv('CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS'), 0.0,
+                field_name='CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS', minimum=0.0,
+            ),
+            intraday_backtest_enabled=parse_env_bool(
+                os.getenv('INTRADAY_BACKTEST_ENABLED'), False,
+            ),
+            intraday_backtest_schedule_minutes=parse_env_int(
+                os.getenv('INTRADAY_BACKTEST_SCHEDULE_MINUTES'), 60,
+                field_name='INTRADAY_BACKTEST_SCHEDULE_MINUTES', minimum=1,
             ),
         )
     

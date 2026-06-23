@@ -65,8 +65,16 @@ def run_backtest(
             min_age_days=request.min_age_days,
             limit=request.limit,
             leverage=request.leverage,
+            interval=request.interval or "1d",
         )
         return BacktestRunResponse(**stats)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_params", "message": str(exc)},
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"回测执行失败: {exc}", exc_info=True)
         raise HTTPException(
@@ -93,6 +101,7 @@ def get_backtest_results(
     analysis_date_to: Optional[date] = Query(None, description="分析日期结束（含）"),
     analysis_phase: Optional[BacktestAnalysisPhaseQuery] = Query(None, description="分析阶段过滤：premarket/intraday/postmarket/unknown"),
     engine_version: Optional[str] = Query(None, min_length=1, max_length=16, description="引擎版本过滤（默认取配置基础版本，如 v1；杠杆情景行需显式传标签，如 v1-x3）"),
+    interval: str = Query("1d", description="bar 粒度（1d/1m/5m/15m/1h；默认 1d）"),
     page: int = Query(1, ge=1, description="页码"),
     limit: int = Query(20, ge=1, le=200, description="每页数量"),
     db_manager: DatabaseManager = Depends(get_database_manager),
@@ -109,6 +118,7 @@ def get_backtest_results(
             analysis_date_to=analysis_date_to,
             analysis_phase=analysis_phase,
             engine_version=engine_version,
+            interval=interval,
         )
         items = [BacktestResultItem(**item) for item in data.get("items", [])]
         return BacktestResultsResponse(
@@ -149,6 +159,7 @@ def get_overall_performance(
     analysis_date_to: Optional[date] = Query(None, description="分析日期结束（含）"),
     analysis_phase: Optional[BacktestAnalysisPhaseQuery] = Query(None, description="分析阶段过滤：premarket/intraday/postmarket/unknown"),
     engine_version: Optional[str] = Query(None, min_length=1, max_length=16, description="引擎版本过滤（默认取配置基础版本，如 v1；杠杆情景行需显式传标签，如 v1-x3）"),
+    interval: str = Query("1d", description="bar 粒度（1d/1m/5m/15m/1h；默认 1d）"),
     db_manager: DatabaseManager = Depends(get_database_manager),
 ) -> PerformanceMetrics:
     try:
@@ -162,6 +173,7 @@ def get_overall_performance(
             analysis_date_to=analysis_date_to,
             analysis_phase=analysis_phase,
             engine_version=engine_version,
+            interval=interval,
         )
         if summary is None:
             raise HTTPException(
@@ -202,6 +214,7 @@ def get_stock_performance(
     analysis_date_to: Optional[date] = Query(None, description="分析日期结束（含）"),
     analysis_phase: Optional[BacktestAnalysisPhaseQuery] = Query(None, description="分析阶段过滤：premarket/intraday/postmarket/unknown"),
     engine_version: Optional[str] = Query(None, min_length=1, max_length=16, description="引擎版本过滤（默认取配置基础版本，如 v1；杠杆情景行需显式传标签，如 v1-x3）"),
+    interval: str = Query("1d", description="bar 粒度（1d/1m/5m/15m/1h；默认 1d）"),
     db_manager: DatabaseManager = Depends(get_database_manager),
 ) -> PerformanceMetrics:
     try:
@@ -215,6 +228,7 @@ def get_stock_performance(
             analysis_date_to=analysis_date_to,
             analysis_phase=analysis_phase,
             engine_version=engine_version,
+            interval=interval,
         )
         if summary is None:
             raise HTTPException(
