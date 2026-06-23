@@ -268,9 +268,15 @@ def test_intraday_non_crypto_skipped(monkeypatch, tmp_path):
 def test_df_to_bars_shape_and_date():
     """_df_to_bars converts minute DataFrame rows to bar objects.
     Each bar has: date, high, low, close, open.
-    bar.date is set from 'datetime' column.
+    bar.date must be a plain Python date (not pd.Timestamp / datetime.datetime).
     """
+    from datetime import date as date_cls, datetime as dt_cls
+    import pandas as pd
+
     df = _minute_df(3)
+    # Ensure the 'datetime' column contains pd.Timestamps as produced by _normalize_intraday
+    df["datetime"] = pd.to_datetime(df["datetime"])
+
     bars = BacktestService._df_to_bars(df)
     assert len(bars) == 3
     b = bars[0]
@@ -283,3 +289,144 @@ def test_df_to_bars_shape_and_date():
     assert b.low == 95.0
     assert b.close == 100.0
     assert b.open == 100.0
+
+    # ★ FINDING #2: date must be a plain Python date, NOT pd.Timestamp or datetime
+    assert isinstance(b.date, date_cls), (
+        f"bar.date must be a Python date, got {type(b.date)}"
+    )
+    assert not isinstance(b.date, dt_cls), (
+        f"bar.date must NOT be a datetime (pd.Timestamp IS datetime subclass), got {type(b.date)}"
+    )
+    # type() is exact check — pd.Timestamp is NOT `date`, it's `datetime`
+    assert type(b.date) is date_cls, (
+        f"bar.date type must be exactly datetime.date, got {type(b.date)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 5: non-crypto skip uses skipped_unsupported counter (not skipped_non_perp)
+# ---------------------------------------------------------------------------
+
+def test_intraday_non_crypto_skip_counter(monkeypatch, tmp_path):
+    """interval='5m' + A-share code → skipped_unsupported counter incremented,
+    and 'skipped_unsupported' key present in return dict.
+    """
+    import os
+
+    db_path = str(tmp_path / "t5_counter.db")
+    os.environ["DATABASE_PATH"] = db_path
+
+    from src.config import Config
+    from src.storage import DatabaseManager
+
+    Config._instance = None
+    DatabaseManager.reset_instance()
+    db = DatabaseManager.get_instance()
+
+    svc = BacktestService(db_manager=db)
+
+    candidate = _fake_analysis(code="600519", analysis_id=20)
+    monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
+    monkeypatch.setattr(svc, "_resolve_analysis_date", lambda a: date(2026, 5, 1))
+
+    out = svc.run_backtest(interval="5m", eval_window_days=2)
+
+    assert out["processed"] == 0, "non-crypto must not be processed"
+    assert "skipped_unsupported" in out, (
+        "'skipped_unsupported' key must be in return dict for non-crypto minute skips"
+    )
+    assert out["skipped_unsupported"] == 1, (
+        f"skipped_unsupported should be 1 for one A-share code, got {out.get('skipped_unsupported')}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 6: service passes start_date to get_intraday_data (historical anchor)
+# ---------------------------------------------------------------------------
+
+def test_intraday_service_passes_start_date(monkeypatch, tmp_path):
+    """interval='5m': service must pass start_date (the candidate's analysis window start)
+    to get_intraday_data, so the fetch is historically anchored — not anchored to 'now'.
+    """
+    import os
+
+    db_path = str(tmp_path / "t5_anchor.db")
+    os.environ["DATABASE_PATH"] = db_path
+
+    from src.config import Config
+    from src.storage import DatabaseManager
+
+    Config._instance = None
+    DatabaseManager.reset_instance()
+    db = DatabaseManager.get_instance()
+
+    svc = BacktestService(db_manager=db)
+
+    candidate = _fake_analysis(code="BTC/USDT:PERP", analysis_id=99)
+    analysis_date = date(2024, 1, 15)
+    monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
+    monkeypatch.setattr(svc, "_resolve_analysis_date", lambda a: analysis_date)
+
+    captured_kwargs: Dict[str, Any] = {}
+    fake_df = _minute_df(288, base=100.0)
+
+    from data_provider.base import DataFetcherManager
+
+    def fake_get_intraday(self, code, interval, **kw):
+        captured_kwargs.update(kw)
+        return fake_df.copy(), "BinanceFetcher"
+
+    monkeypatch.setattr(DataFetcherManager, "get_intraday_data", fake_get_intraday)
+
+    # Mock engine so we don't need real bars to evaluate
+    from src.core import backtest_engine as beng
+
+    def fake_evaluate_single(**kwargs):
+        return {
+            "eval_status": "completed",
+            "analysis_date": analysis_date,
+            "eval_window_days": kwargs["config"].eval_window_days,
+            "engine_version": kwargs["config"].engine_version,
+            "operation_advice": "买入",
+            "position_recommendation": "long",
+            "start_price": 100.0,
+            "end_close": 110.0,
+            "max_high": 115.0,
+            "min_low": 95.0,
+            "stock_return_pct": 10.0,
+            "direction_expected": "up",
+            "direction_correct": True,
+            "outcome": "win",
+            "stop_loss": 90.0,
+            "take_profit": 120.0,
+            "hit_stop_loss": False,
+            "hit_take_profit": False,
+            "first_hit": "neither",
+            "first_hit_date": None,
+            "first_hit_trading_days": 3,
+            "simulated_entry_price": 100.0,
+            "simulated_exit_price": 110.0,
+            "simulated_exit_reason": "window_end",
+            "simulated_return_pct": 10.0,
+        }
+
+    monkeypatch.setattr(beng.BacktestEngine, "evaluate_single", staticmethod(fake_evaluate_single))
+    monkeypatch.setattr(svc.repo, "save_results_batch", lambda results, **kw: len(results))
+    monkeypatch.setattr(svc, "_recompute_summaries", lambda **k: None)
+
+    out = svc.run_backtest(interval="5m", eval_window_days=1)
+
+    assert "start_date" in captured_kwargs, (
+        "service must pass start_date kwarg to get_intraday_data; "
+        f"got kwargs={list(captured_kwargs.keys())}"
+    )
+    # The start_date must equal the candidate's analysis_date (window start)
+    from datetime import date as date_cls
+    passed_start = captured_kwargs["start_date"]
+    # Accept date or ISO string representation
+    if isinstance(passed_start, str):
+        passed_start = date_cls.fromisoformat(passed_start)
+    assert passed_start == analysis_date, (
+        f"start_date passed to get_intraday_data must be analysis_date={analysis_date}, "
+        f"got {captured_kwargs['start_date']}"
+    )

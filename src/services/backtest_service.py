@@ -102,6 +102,7 @@ class BacktestService:
 
         results_to_save: List[BacktestResult] = []
         skipped_non_perp = 0
+        skipped_unsupported = 0  # 分钟路径不支持的非 crypto 标的
 
         from data_provider.base import is_perp_code, is_crypto_code
 
@@ -111,8 +112,8 @@ class BacktestService:
                 skipped_non_perp += 1
                 continue
             if intraday and not (is_crypto_code(analysis.code) or is_perp_code(analysis.code)):
-                # 分钟路径仅支持 crypto/perp；非 crypto 跳过（计入 skipped_non_perp）
-                skipped_non_perp += 1
+                # 分钟路径仅支持 crypto/perp；非 crypto 跳过（单独计入 skipped_unsupported）
+                skipped_unsupported += 1
                 continue
             processed += 1
             touched_codes.add(analysis.code)
@@ -137,11 +138,16 @@ class BacktestService:
 
                 if intraday:
                     # ----- 分钟路径：从 DataFetcherManager 拉分钟 K 线 -----
+                    # 历史候选：窗口起点 = analysis_date，终点 = analysis_date + eval_window_days
+                    # 传入 start_date/end_date 以锚定历史区间，避免拉取当前最新数据
+                    _window_end_date = analysis_date + timedelta(days=int(eval_window_days))
                     from data_provider.base import DataFetcherManager
                     try:
                         fwd_df, _src = DataFetcherManager().get_intraday_data(
                             analysis.code,
                             interval=interval,
+                            start_date=analysis_date.isoformat(),
+                            end_date=_window_end_date.isoformat(),
                             days=int(eval_window_days),
                         )
                     except Exception as exc:
@@ -324,6 +330,8 @@ class BacktestService:
 
         if skipped_non_perp:
             logger.info(f"杠杆情景回测跳过非 perp 候选 {skipped_non_perp} 条")
+        if skipped_unsupported:
+            logger.info(f"分钟路径跳过不支持的非 crypto 候选 {skipped_unsupported} 条")
 
         return {
             "processed": processed,
@@ -331,6 +339,7 @@ class BacktestService:
             "completed": completed,
             "insufficient": insufficient,
             "errors": errors,
+            "skipped_unsupported": skipped_unsupported,
         }
 
     def _compute_perp_funding_cost_pct(self, *, code: str, start_date: date, eval_window_days: int) -> float:
@@ -968,8 +977,10 @@ class BacktestService:
     def _df_to_bars(df) -> list:
         """分钟 DataFrame → 引擎可消费的 Bar namedtuple 列表。
 
-        字段：date（来自 'datetime' 列原始值）、high、low、close、open。
+        字段：date（Python date，来自 'datetime' 列，一律提取 .date() 保持与日线一致）、
+        high、low、close、open。
         列表按 DataFrame 行序排列（调用方已保证升序）。
+        精度（时分秒）由 first_hit_bar_index 承载，不依赖 bar.date。
         """
         from collections import namedtuple
 
@@ -977,9 +988,15 @@ class BacktestService:
         out = []
         for _, r in df.iterrows():
             dt_val = r.get("datetime") if hasattr(r, "get") else r["datetime"]
+            # ★ FINDING #2: normalize to plain Python date (pd.Timestamp IS a datetime
+            #   subclass, NOT a date — daily bars use date objects, minute bars must match).
+            if hasattr(dt_val, "date") and callable(dt_val.date):
+                bar_date = dt_val.date()
+            else:
+                bar_date = dt_val
             out.append(
                 Bar(
-                    date=dt_val,
+                    date=bar_date,
                     high=float(r["high"]),
                     low=float(r["low"]),
                     close=float(r["close"]),

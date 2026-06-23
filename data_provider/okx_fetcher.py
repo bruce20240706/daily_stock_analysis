@@ -16,7 +16,7 @@ class OkxFetcher(CryptoExchangeBase):
     def _to_exchange_symbol(self, code: str) -> str:
         return code.strip().upper().replace("/", "-")
 
-    def _request_klines(self, symbol: str, days: int, interval: str = "1d") -> list:
+    def _request_klines(self, symbol: str, days: int, interval: str = "1d", start_ms: int = None) -> list:
         if interval == "1d":
             bar_param = "1D"
             limit = self._days_to_limit(days)

@@ -38,7 +38,7 @@ def test_crypto_intraday_returns_ohlc_without_indicators(monkeypatch):
     page = [_BAR_0, _BAR_1, _BAR_2]
     captured = {}
 
-    def fake_request_klines(self, symbol, days, interval="1d"):
+    def fake_request_klines(self, symbol, days, interval="1d", start_ms=None):
         captured["interval"] = interval
         return page
 
@@ -69,7 +69,7 @@ def test_manager_get_intraday_data_crypto(monkeypatch):
 
     page = [_BAR_0, _BAR_1]
 
-    def fake_request_klines(self, symbol, days, interval="1d"):
+    def fake_request_klines(self, symbol, days, interval="1d", start_ms=None):
         return page
 
     monkeypatch.setattr(BinanceFetcher, "_request_klines", fake_request_klines)
@@ -98,7 +98,7 @@ def test_manager_intraday_cache_ttl_zero_skips_cache(monkeypatch):
     """TTL=0 -> no caching: the second call recomputes (fetcher invoked twice)."""
     call_count = {"n": 0}
 
-    def fake_request_klines(self, symbol, days, interval="1d"):
+    def fake_request_klines(self, symbol, days, interval="1d", start_ms=None):
         call_count["n"] += 1
         return [_BAR_0, _BAR_1]
 
@@ -122,7 +122,7 @@ def test_manager_intraday_cache_ttl_positive_hits_cache(monkeypatch):
     """Positive TTL -> second call served from cache (fetcher invoked once)."""
     call_count = {"n": 0}
 
-    def fake_request_klines(self, symbol, days, interval="1d"):
+    def fake_request_klines(self, symbol, days, interval="1d", start_ms=None):
         call_count["n"] += 1
         return [_BAR_0, _BAR_1]
 
@@ -218,3 +218,136 @@ def test_binance_paging_terminates_on_empty(monkeypatch):
     out = f._request_klines("BTCUSDT", days=8, interval="5m")
     assert out == []
     assert calls["n"] == 1  # stopped after first empty page
+
+
+# ---------------------------------------------------------------------------
+# Finding #1 (CRITICAL): historical anchor — start_date threads to HTTP startTime
+# ---------------------------------------------------------------------------
+
+def _make_historical_page(start_ms, count, interval_ms):
+    """Build count fake kline rows starting at start_ms with given interval."""
+    rows = []
+    t = start_ms
+    for _ in range(count):
+        close = t + interval_ms - 1
+        rows.append([t, "100", "102", "99", "101", "10", close, "1010"])
+        t += interval_ms
+    return rows
+
+
+def test_historical_anchor_single_page(monkeypatch):
+    """When start_date is provided and result fits in one page,
+    the HTTP request's startTime must equal the historical start (NOT now-days).
+
+    Specifically: get_intraday_data(..., start_date='2024-01-15', days=1)
+    must pass startTime = ms(2024-01-15T00:00:00Z) to Binance, not now-1day.
+    """
+    from data_provider.binance_fetcher import BinanceFetcher
+    import datetime
+
+    # Anchor now to a known value to confirm it is NOT used as the startTime.
+    anchor_now_ms = 2_000_000_000_000  # far in the future
+    monkeypatch.setattr(BinanceFetcher, "_now_ms", staticmethod(lambda: anchor_now_ms))
+
+    historical_date = "2024-01-15"
+    historical_ms = int(
+        datetime.datetime(2024, 1, 15, 0, 0, 0, tzinfo=datetime.timezone.utc).timestamp() * 1000
+    )
+
+    interval_ms = 5 * 60 * 1000  # 5m
+    captured_params = {}
+
+    def fake_http_get(self, url, params):
+        captured_params.update(params)
+        # Return a small page (< MAX_LIMIT) to simulate single-page path
+        return _make_historical_page(historical_ms, 288, interval_ms)
+
+    monkeypatch.setattr(BinanceFetcher, "_http_get", fake_http_get)
+
+    f = BinanceFetcher()
+    # days=1 → limit = 1*288 = 288 ≤ MAX_LIMIT(1000) → single-page path
+    # With start_date given, startTime must be anchored to historical_ms
+    f.get_intraday_data("BTC/USDT", interval="5m", start_date=historical_date, days=1)
+
+    assert "startTime" in captured_params, (
+        "startTime must be passed in HTTP request when start_date is provided"
+    )
+    assert captured_params["startTime"] == historical_ms, (
+        f"startTime must be historical_ms={historical_ms} (2024-01-15), "
+        f"got {captured_params.get('startTime')} — anchor must NOT be now-days"
+    )
+
+
+def test_historical_anchor_multi_page(monkeypatch):
+    """When start_date is provided and result requires multiple pages,
+    the FIRST page's startTime must be anchored to the historical start.
+    """
+    from data_provider.binance_fetcher import BinanceFetcher
+    import datetime
+
+    anchor_now_ms = 2_000_000_000_000
+    monkeypatch.setattr(BinanceFetcher, "_now_ms", staticmethod(lambda: anchor_now_ms))
+
+    historical_date = "2024-01-10"
+    historical_ms = int(
+        datetime.datetime(2024, 1, 10, 0, 0, 0, tzinfo=datetime.timezone.utc).timestamp() * 1000
+    )
+    interval_ms = 5 * 60 * 1000
+
+    first_start_times = []
+    call_count = {"n": 0}
+
+    def fake_http_get(self, url, params):
+        start = params["startTime"]
+        if call_count["n"] == 0:
+            first_start_times.append(start)
+        call_count["n"] += 1
+        # Return MAX_LIMIT (1000) bars so paging continues until count limit hit
+        return _make_historical_page(start, 1000, interval_ms)
+
+    monkeypatch.setattr(BinanceFetcher, "_http_get", fake_http_get)
+
+    f = BinanceFetcher()
+    # days=8 → limit = 8*288 = 2304 > 1000 → triggers _page_klines (multi-page)
+    f.get_intraday_data("BTC/USDT", interval="5m", start_date=historical_date, days=8)
+
+    assert len(first_start_times) == 1
+    assert first_start_times[0] == historical_ms, (
+        f"first page startTime must be historical_ms={historical_ms} (2024-01-10), "
+        f"got {first_start_times[0]} — must NOT anchor to now-days"
+    )
+
+
+def test_no_start_date_keeps_now_minus_days_anchor(monkeypatch):
+    """Without start_date (Task 4 / recent-data path),
+    the anchor must remain now - days*86400*1000 (backward compat).
+    """
+    from data_provider.binance_fetcher import BinanceFetcher
+
+    anchor_now_ms = 2_000_000_000_000
+    monkeypatch.setattr(BinanceFetcher, "_now_ms", staticmethod(lambda: anchor_now_ms))
+
+    interval_ms = 5 * 60 * 1000
+    first_start_times = []
+    call_count = {"n": 0}
+
+    def fake_http_get(self, url, params):
+        start = params["startTime"]
+        if call_count["n"] == 0:
+            first_start_times.append(start)
+        call_count["n"] += 1
+        return _make_historical_page(start, 1000, interval_ms)
+
+    monkeypatch.setattr(BinanceFetcher, "_http_get", fake_http_get)
+
+    f = BinanceFetcher()
+    days = 8
+    # start_date=None → classic "now - days" anchor must be unchanged
+    f.get_intraday_data("BTC/USDT", interval="5m", days=days)
+
+    expected_start = anchor_now_ms - days * 86400 * 1000
+    assert len(first_start_times) == 1
+    assert first_start_times[0] == expected_start, (
+        f"Without start_date, startTime must be now-days={expected_start}, "
+        f"got {first_start_times[0]}"
+    )

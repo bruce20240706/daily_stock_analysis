@@ -28,7 +28,7 @@ class CoinbaseFetcher(CryptoExchangeBase):
         "1d": 86400,
     }
 
-    def _request_klines(self, symbol: str, days: int, interval: str = "1d") -> list:
+    def _request_klines(self, symbol: str, days: int, interval: str = "1d", start_ms: int = None) -> list:
         granularity = self._GRANULARITY_MAP.get(interval)
         if granularity is None:
             raise NotImplementedError(

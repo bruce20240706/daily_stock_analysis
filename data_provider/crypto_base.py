@@ -28,8 +28,13 @@ class CryptoExchangeBase(BaseFetcher):
         """BTC/USDT -> 交易所符号（如 BTCUSDT / BTC-USDT）。"""
         raise NotImplementedError
 
-    def _request_klines(self, symbol: str, days: int, interval: str = "1d") -> list:
-        """HTTP 取 K 线原始数据，返回交易所原始结构（list）。interval 默认 '1d' 兼容日线调用。"""
+    def _request_klines(self, symbol: str, days: int, interval: str = "1d", start_ms: int = None) -> list:
+        """HTTP 取 K 线原始数据，返回交易所原始结构（list）。
+
+        interval 默认 '1d' 兼容日线调用。
+        start_ms（毫秒时间戳）若提供，则作为历史窗口锚点（从该时刻起向前拉取），
+        而非从"当前时间 - days"锚定；不提供时保持原有"近 N 天"行为（向后兼容）。
+        """
         raise NotImplementedError
 
     def _parse_klines(self, raw: list) -> pd.DataFrame:
@@ -146,9 +151,30 @@ class CryptoExchangeBase(BaseFetcher):
 
         仅支持 crypto 代码；非 crypto 由门面层在路由时拒绝。
         返回 DataFrame 列：datetime, open, high, low, close, volume（及 code/amount/pct_chg 如存在）。
+
+        start_date：若提供（ISO 字符串或 date 对象），则将 00:00:00 UTC 时刻转为毫秒时间戳，
+        作为历史锚点传入 _request_klines（由 Binance 等翻页实现使用）；
+        不提供时保持原有"近 N 天"行为（向后兼容 Task 4 / 实时分析路径）。
+        end_date：预留参数，当前子类实现可选忽略（未来可用于截断窗口）。
         """
         symbol = self._to_exchange_symbol(stock_code)
-        raw = self._request_klines(symbol, days=days, interval=interval)
+
+        # Derive historical start anchor from start_date (if provided)
+        start_ms: Optional[int] = None
+        if start_date is not None:
+            try:
+                import datetime as _dt
+                if isinstance(start_date, _dt.date):
+                    _d = start_date
+                else:
+                    _d = _dt.date.fromisoformat(str(start_date))
+                start_ms = int(
+                    _dt.datetime(_d.year, _d.month, _d.day, tzinfo=_dt.timezone.utc).timestamp() * 1000
+                )
+            except Exception:
+                pass  # fall back to no anchor (recent-days behavior)
+
+        raw = self._request_klines(symbol, days=days, interval=interval, start_ms=start_ms)
         if not raw:
             raise DataFetchError(f"{self.name} 未取到 {stock_code} 的分钟 K 线 (interval={interval})")
         df = self._parse_klines(raw)
