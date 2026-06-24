@@ -286,6 +286,38 @@ def is_bse_code(code: str) -> bool:
 
     return c.startswith(("92", "43", "81", "82", "83", "87", "88"))
 
+
+_SH_A_PREFIXES = ("600", "601", "603", "605", "688")
+_SZ_A_PREFIXES = ("000", "001", "002", "003", "300", "301")
+
+
+def is_a_share_code(code: str) -> bool:
+    """判定是否为 A 股(沪深主板/科创/创业 + 北交所)。
+
+    先排除 crypto/perp 与港股(5 位或 HK 前缀),再要求 normalize 后为 6 位纯数字
+    且落在沪/深 A 股前缀或北交所规则内。沪 B(900xxx)经 is_bse_code 排除。
+    """
+    if is_crypto_code(code) or is_perp_code(code):
+        return False
+    if _is_hk_market(code):
+        return False
+    c = normalize_stock_code(code)
+    if not (len(c) == 6 and c.isdigit()):
+        return False
+    if c.startswith(_SH_A_PREFIXES) or c.startswith(_SZ_A_PREFIXES):
+        return True
+    return is_bse_code(c)
+
+
+def market_of(code: str) -> str:
+    """分钟回测市场归类:crypto(含 perp)/ cn。其他(港股/美股等)抛 ValueError。"""
+    if is_crypto_code(code) or is_perp_code(code):
+        return "crypto"
+    if is_a_share_code(code):
+        return "cn"
+    raise ValueError(f"无分钟市场归类: {code!r}")
+
+
 def is_st_stock(name: str) -> bool:
     """
     Check if the stock is an ST or *ST stock based on its name.
