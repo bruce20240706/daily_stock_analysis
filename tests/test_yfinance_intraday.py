@@ -43,7 +43,9 @@ def test_yfinance_intraday_5m_normalize_and_tz_naive(monkeypatch):
     assert captured["interval"] == "5m" and captured["tickers"] == "AAPL"
     assert {"datetime", "open", "high", "low", "close", "volume"} <= set(df.columns)
     assert list(df["datetime"]) == sorted(df["datetime"])
-    assert getattr(pd.to_datetime(df["datetime"]).dt, "tz", None) is None   # tz-naive(美东墙钟)
+    assert getattr(pd.to_datetime(df["datetime"]).dt, "tz", None) is None   # tz-naive
+    # 墙钟值:去时区须保留美东墙钟 09:30(而非 tz_convert 到 UTC 再去 tz → 会偏移到 13:30)
+    assert pd.to_datetime(df["datetime"]).iloc[0] == pd.Timestamp("2026-06-22 09:30:00")
     assert "ma20" not in df.columns
     assert df.iloc[0]["close"] == 101.0
 

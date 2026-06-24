@@ -305,6 +305,7 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 ### 11.5 限制
 
 - **批量可靠性**：yfinance 抓取 Yahoo，大批量（数百候选）可能限频/瞬断；入口已包 `@retry` 指数退避，仍可能偶发失败 → 该条 `insufficient_data`/error 计数。美股分钟回测建议小批量/手动触发。
+- **5m/15m 大窗口受 yfinance 60 天上限约束**：取数窗口含周末/节假日缓冲（`max(N*2, N*3//2+14)` 自然日），当 `eval_window_days` 偏大（约 ≥40）时整窗会超出 yfinance 5m/15m 的 60 天可得范围 → 整体落 `insufficient_data`。大窗口请改用 `1h`（≈730 天，见 [§11.3](#113-可用-band关键限制)）。
 - **成本**：沿用 crypto 对称 `fee/slippage`（默认 0）；美股无印花税（仅极小 SEC/TAF 费），不单独建模。
 - **复权基准漂移**：yfinance `auto_adjust=True`，与库内日线收盘入场价的复权锚点可能不同步（同 A 股 §10.5），窗口短/无公司行动时可忽略。
 - **仅个股**：美股指数（SPX/DJI 等）无 operation_advice、非回测候选，不支持。

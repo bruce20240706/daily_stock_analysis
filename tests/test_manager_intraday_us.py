@@ -24,10 +24,19 @@ def _df():
 
 
 def test_us_intraday_fetchers_only_yfinance():
-    # 真实 _intraday_fetchers_for:us 仅含覆写 get_intraday_data 的 yfinance
+    # 真实 _intraday_fetchers_for:默认(无 key)环境下 us 分钟源收敛为 yfinance 单源
+    # (Longbridge/Finnhub/AlphaVantage 未配置/未覆写 get_intraday_data,均不入列)
     mgr = DataFetcherManager()
     names = [f.name for f in mgr._intraday_fetchers_for("AAPL")]
     assert names == ["YfinanceFetcher"]
+
+
+def test_us_1m_fail_closed_at_facade():
+    # 美股 1m fail-closed 应在门面层也成立:yfinance 1m 抛 NotImplementedError → 无可用结果
+    # → DataFetchError(service 据此落 insufficient_data);且不发生网络请求(映射阶段即 fail)
+    mgr = DataFetcherManager()
+    with pytest.raises(DataFetchError):
+        mgr.get_intraday_data("AAPL", interval="1m", days=3)
 
 
 def test_us_facade_routes_to_yfinance(monkeypatch):
