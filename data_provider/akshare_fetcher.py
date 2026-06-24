@@ -373,6 +373,10 @@ def _terminate_akshare_process(process) -> None:
         process.join(_AKSHARE_TIMEOUT_PROCESS_JOIN_GRACE)
 
 
+# 统一 interval 词表 → stock_zh_a_hist_min_em 的 period 取值
+_AK_PERIOD = {"1m": "1", "5m": "5", "15m": "15", "1h": "60"}
+
+
 class AkshareFetcher(BaseFetcher):
     """
     Akshare 数据源实现
@@ -404,7 +408,44 @@ class AkshareFetcher(BaseFetcher):
         # 东财补丁开启才执行打补丁操作
         if get_config().enable_eastmoney_patch:
             eastmoney_patch()
-    
+
+    def get_intraday_data(
+        self,
+        stock_code: str,
+        interval: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        days: int = 30,
+    ) -> pd.DataFrame:
+        """A股分钟级 K 线（免费兜底，stock_zh_a_hist_min_em）。纯 OHLCV+datetime（不算指标）。
+
+        - interval 经 _AK_PERIOD 映射为 period（1h→'60'）；不支持的抛 NotImplementedError。
+        - 日期补齐为带时分秒；未提供时给宽边界，让东财返回其可用窗口。
+        - 复用共享 normalize_intraday_df 做数值化/去空/升序/pct_chg/选列。
+        """
+        period = _AK_PERIOD.get(interval)
+        if period is None:
+            raise NotImplementedError(f"[{self.name}] 不支持 interval={interval}")
+
+        import akshare as ak
+
+        symbol = normalize_stock_code(stock_code)
+        sd = f"{start_date} 09:00:00" if start_date else "1970-01-01 09:00:00"
+        ed = f"{end_date} 16:00:00" if end_date else "2099-01-01 16:00:00"
+        raw = ak.stock_zh_a_hist_min_em(
+            symbol=symbol, period=period, start_date=sd, end_date=ed, adjust="qfq"
+        )
+        if raw is None or raw.empty:
+            raise DataFetchError(f"[{self.name}] {stock_code} 无分钟数据（period={period}）")
+
+        from .intraday_normalize import normalize_intraday_df
+
+        raw = raw.rename(columns={
+            "时间": "datetime", "开盘": "open", "收盘": "close",
+            "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount",
+        })
+        return normalize_intraday_df(raw, stock_code)
+
     def _set_random_user_agent(self) -> None:
         """
         设置随机 User-Agent
