@@ -13,8 +13,9 @@ INTRADAY_INTERVAL_MINUTES: dict[str, int] = {"1m": 1, "5m": 5, "15m": 15, "1h": 
 # 允许集:'1d' 为日线(走既有路径),其余为分钟
 SUPPORTED_INTERVALS: tuple[str, ...] = ("1d", "1m", "5m", "15m", "1h")
 
-# 各市场每日交易分钟数(crypto 7×24;A股沪深两段 09:30-11:30 + 13:00-15:00 = 240)
-MARKET_TRADING_MINUTES: dict[str, int] = {"crypto": 1440, "cn": 240}
+# 各市场每日交易分钟数(crypto 7×24;A股沪深两段 09:30-11:30 + 13:00-15:00 = 240;
+# 美股常规时段 09:30-16:00 ET = 390,排除盘前盘后)
+MARKET_TRADING_MINUTES: dict[str, int] = {"crypto": 1440, "cn": 240, "us": 390}
 
 
 def validate_interval(interval) -> str:
@@ -30,11 +31,15 @@ def is_intraday_interval(interval: str) -> bool:
 
 
 def bars_per_day(interval: str, market: str = "crypto") -> int:
-    """每交易日的 bar 根数。未知 interval 抛 ValueError,未知 market 抛 KeyError。"""
+    """每交易日的 bar 根数(ceil,计入会话末尾不足整段的半根,匹配数据源实际发出的 bar 数)。
+
+    未知 interval 抛 ValueError,未知 market 抛 KeyError。ceil 仅影响有余数的 (市场,粒度)——
+    当前唯一是 us 1h(ceil(390/60)=7);crypto/cn 各粒度均整除,ceil==floor 值不变。
+    """
     minutes = INTRADAY_INTERVAL_MINUTES.get(interval)
     if minutes is None:
         raise ValueError(f"不支持的分钟 interval: {interval!r}")
-    return MARKET_TRADING_MINUTES[market] // minutes
+    return -(-MARKET_TRADING_MINUTES[market] // minutes)
 
 
 def derive_window_bar_count(eval_window_days: int, interval: str, market: str = "crypto") -> int:

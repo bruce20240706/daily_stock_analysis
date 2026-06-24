@@ -83,3 +83,25 @@ def test_bars_per_day_unknown_market_raises():
 def test_derive_window_bar_count_market_aware():
     assert derive_window_bar_count(10, "5m") == 2880        # crypto 默认
     assert derive_window_bar_count(10, "5m", "cn") == 480   # 10*48
+
+
+def test_market_trading_minutes_us():
+    assert MARKET_TRADING_MINUTES["us"] == 390
+
+
+def test_bars_per_day_us_market():
+    assert bars_per_day("5m", "us") == 78     # 390/5
+    assert bars_per_day("15m", "us") == 26    # 390/15
+    assert bars_per_day("1h", "us") == 7      # ceil(390/60)=7(末根半根)
+    assert bars_per_day("1m", "us") == 390
+
+
+def test_bars_per_day_ceil_keeps_crypto_cn_unchanged():
+    # 整除场景 ceil==floor,既有市场值不变
+    assert bars_per_day("5m") == 288 and bars_per_day("1m") == 1440 and bars_per_day("1h") == 24
+    assert bars_per_day("5m", "cn") == 48 and bars_per_day("1h", "cn") == 4
+
+
+def test_derive_window_bar_count_us():
+    assert derive_window_bar_count(10, "5m", "us") == 780
+    assert derive_window_bar_count(10, "1h", "us") == 70

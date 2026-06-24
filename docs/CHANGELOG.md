@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 美股分钟级回测：扩展美股个股分钟前向回测，yfinance 免 key 单源；bars_per_day 市场化（us=390，1h 计末根半根=7，bars_per_day 改 ceil）；美股 1m 因 yfinance 历史/请求上限 fail-closed；类股 BRK.B→BRK-B 符号映射；interval/默认/成本/调度沿用，默认 1d 与现状一致
 - [新功能] A股分钟级回测：在 crypto 之后扩展沪深（北交 best-effort）分钟前向回测，Tushare `stk_mins` 主源 + akshare 免费兜底；bars_per_day 市场化（cn=240）；interval/默认/成本/调度沿用，默认 1d 与现状一致
 - [新功能] 报告新增「资金面」section：A股主力资金流（主力净流入/5日/10日 + 净流入状态）与龙虎榜（上榜/次数/最新）确定性呈现，notification 渲染
 - [改进] 激活龙虎榜：上榜时以 presence-only 进 LLM 分析 prompt 供引用，并在资金面 section 呈现（不写内部 decision_stability、不改既有主力资金流降级逻辑）
