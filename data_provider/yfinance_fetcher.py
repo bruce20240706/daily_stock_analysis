@@ -53,6 +53,12 @@ import os
 logger = logging.getLogger(__name__)
 
 
+# 统一 interval 词表 → yfinance interval 取值。
+# 1m 不纳入:yfinance 1m 历史仅 7 天且单请求 ≤8 天,与回测 min_age+窗口缓冲恒冲突(spec §4.3.1)
+# → 美股 1m fail-closed(抛 NotImplementedError),仅 crypto/A股 支持 1m。
+_YF_INTERVAL = {"5m": "5m", "15m": "15m", "1h": "60m"}
+
+
 class YfinanceFetcher(BaseFetcher):
     """
     Yahoo Finance 数据源实现
@@ -149,6 +155,45 @@ class YfinanceFetcher(BaseFetcher):
         else:
             logger.warning(f"无法确定股票 {code} 的市场，默认使用深市")
             return f"{code}.SZ"
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+    )
+    def get_intraday_data(self, stock_code, interval, start_date=None, end_date=None, days=30):
+        """美股分钟级 K 线(免 key)。返回纯 OHLCV+datetime(tz-naive 美东墙钟,不算指标)。
+
+        1m fail-closed(spec §4.3.1);interval→yfinance 映射(1h→60m);类股 '.'→'-';
+        MultiIndex 拍平;去时区(与 crypto/A股 naive 对齐);复用共享 normalize_intraday_df。
+        """
+        yf_interval = _YF_INTERVAL.get(interval)
+        if yf_interval is None:
+            raise NotImplementedError(f"[{self.name}] 不支持 interval={interval}(美股 1m 不支持)")
+        import yfinance as yf
+
+        yf_code = self._convert_stock_code(stock_code)
+        if is_us_stock_code(stock_code):
+            yf_code = yf_code.replace(".", "-")   # BRK.B → BRK-B(Yahoo 用连字符)
+        df = yf.download(tickers=yf_code, start=start_date, end=end_date,
+                         interval=yf_interval, auto_adjust=True, progress=False)
+        if df is None or df.empty:
+            raise DataFetchError(f"[{self.name}] {stock_code} 无分钟数据(interval={interval})")
+        # 显式标准化(不走日线 _normalize_data——后者产 'date' 列且注入 amount 估算)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)   # ('Close','AAPL') → 'Close'
+        df = df.reset_index()
+        df = df.rename(columns={"Datetime": "datetime", "Date": "datetime",
+                                "Open": "open", "High": "high", "Low": "low",
+                                "Close": "close", "Volume": "volume"})
+        # 去时区:yfinance 分钟为 tz-aware(美东)→ 保留墙钟去 tz,与 crypto/A股 naive 对齐
+        df["datetime"] = pd.to_datetime(df["datetime"])
+        if getattr(df["datetime"].dt, "tz", None) is not None:
+            df["datetime"] = df["datetime"].dt.tz_localize(None)
+        from .intraday_normalize import normalize_intraday_df
+
+        return normalize_intraday_df(df, stock_code)   # amount 缺省 → 填 None
 
     @retry(
         stop=stop_after_attempt(3),
