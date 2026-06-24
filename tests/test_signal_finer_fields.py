@@ -90,7 +90,8 @@ def test_resolver_returns_horizon_key(monkeypatch):
     monkeypatch.setattr(shr, "get_market_for_stock", lambda code: "A")
     stat = _types.SimpleNamespace(win_rate=0.6, sample=99, ci_low=0.55,
                                   ci_high=0.7, baseline_win_rate=0.5, excess=0.05)
-    monkeypatch.setattr(shr.SignalStatsRepository, "get", lambda self, st, mkt, horizon=None: stat)
+    monkeypatch.setattr(shr.SignalStatsRepository, "get",
+                        lambda self, st, mkt, *, interval="1d", horizon=None: stat)
     out = shr.resolve_marker_hit_fields("volume_breakout", "600519")
     assert out["horizon"] == int(shr.get_config().signal_backtest_horizon_bars)
     assert out["hit_rate"] == 0.6
@@ -99,7 +100,8 @@ def test_resolver_returns_horizon_key(monkeypatch):
 def test_resolver_none_path_horizon_none(monkeypatch):
     from src.services import signal_hit_rate as shr
     monkeypatch.setattr(shr, "get_market_for_stock", lambda code: "A")
-    monkeypatch.setattr(shr.SignalStatsRepository, "get", lambda self, st, mkt, horizon=None: None)
+    monkeypatch.setattr(shr.SignalStatsRepository, "get",
+                        lambda self, st, mkt, *, interval="1d", horizon=None: None)
     out = shr.resolve_marker_hit_fields("x", "600519")
     assert out["horizon"] is None and out["hit_rate"] is None
 

@@ -67,8 +67,12 @@ def _infer_market(code: str) -> Optional[str]:
     return "US"
 
 
-def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
-    """单股编排：取数（与 /history 同源）→ 引擎 → BuySignal → consistency → 命中率回填 → price_lines。"""
+def build_signals_for_code(code: str, *, days: int = 120, interval: str = "1d") -> BoardSignals:
+    """单股编排：取数（与 /history 同源）→ 引擎 → BuySignal → consistency → 命中率回填 → price_lines。
+
+    interval：命中率回填读取的信号桶粒度；默认 '1d'（行为不变）。看板 K 线/标记仍按日线计算，
+    仅把可信度（hit_rate/verified 等）从对应 interval 桶解析，供"分钟级可信度"查看。
+    """
     # 延迟导入打破本特性自身引入的 endpoint↔service 循环：
     # 抽出 build_signals_for_code 后，单股端点(stocks.py)反过来调用本模块，
     # 而本编排又复用 stocks.py 的 build_price_lines/_elapsed_trading_days。
@@ -126,7 +130,7 @@ def build_signals_for_code(code: str, *, days: int = 120) -> BoardSignals:
         latest_bar_date=latest_bar_date, latest_close=latest_close,
         llm_record=llm_record, trading_days_elapsed=trading_days_elapsed,
         stale_threshold=stale_threshold, code=code,
-        hit_fields_resolver=resolve_marker_hit_fields,
+        hit_fields_resolver=lambda st, c: resolve_marker_hit_fields(st, c, interval=interval),
     )
 
     atr_mult = parse_env_float(os.getenv("KLINE_PRICE_LEVEL_ATR_MULT"), _DEFAULT_ATR_MULT,
@@ -233,15 +237,17 @@ def _degraded_entry(code: str, reason: str) -> dict:
     }
 
 
-def _compute_entry(code: str, *, days: int, refresh: bool, now_s: float, ttl_s: int) -> dict:
-    cache_key = (code, days)
+def _compute_entry(code: str, *, days: int, refresh: bool, now_s: float, ttl_s: int,
+                   interval: str = "1d") -> dict:
+    cache_key = (code, days, interval)   # interval 入键,避免 1d/5m 串桶
     if not refresh and ttl_s > 0:
         with _BOARD_CACHE_LOCK:
             hit = _BOARD_CACHE.get(cache_key)
             if hit and (now_s - hit[0]) < ttl_s:
                 return hit[1]
     try:
-        entry = _entry_from_board_signals(code, build_signals_for_code(code, days=days))
+        entry = _entry_from_board_signals(
+            code, build_signals_for_code(code, days=days, interval=interval))
     except Exception as exc:
         logger.warning("看板单股计算失败 code=%s err=%s", code, exc)
         entry = _degraded_entry(code, "信号计算失败")
@@ -255,7 +261,8 @@ def _compute_entry(code: str, *, days: int, refresh: bool, now_s: float, ttl_s: 
     return entry
 
 
-def build_board(codes: list, *, days: int = 120, refresh: bool = False) -> dict:
+def build_board(codes: list, *, days: int = 120, refresh: bool = False,
+                interval: str = "1d") -> dict:
     ttl_s = parse_env_int(os.getenv("SIGNALS_BOARD_CACHE_TTL_S"), 300,
                           field_name="SIGNALS_BOARD_CACHE_TTL_S", minimum=0)
     max_workers = parse_env_int(os.getenv("SIGNALS_BOARD_MAX_WORKERS"), 8,
@@ -266,7 +273,8 @@ def build_board(codes: list, *, days: int = 120, refresh: bool = False) -> dict:
         workers = min(max_workers, len(codes))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="signal_board_") as ex:
             entries = list(ex.map(
-                lambda c: _compute_entry(c, days=days, refresh=refresh, now_s=now_s, ttl_s=ttl_s),
+                lambda c: _compute_entry(c, days=days, refresh=refresh, now_s=now_s,
+                                         ttl_s=ttl_s, interval=interval),
                 codes,
             ))
     counts = {"buy": 0, "hold": 0, "sell": 0, "unavailable": 0}

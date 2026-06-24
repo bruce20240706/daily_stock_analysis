@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.deps import get_system_config_service
 from api.v1.schemas.stocks import SignalsBoardResponse
 from api.v1.schemas.common import ErrorResponse
+from src.core.intraday_backtest import validate_interval
 from src.services.system_config_service import SystemConfigService
 from src.services.signal_board_service import build_board
 from api.v1.endpoints.stocks import _read_watchlist_codes  # 复用自选池读取，避免平行实现
@@ -35,11 +36,21 @@ router = APIRouter()
 def get_signals_board(
     days: int = Query(120, ge=1, le=365, description="日历回看天数（与 /history 同源）"),
     refresh: bool = Query(False, description="跳过缓存强制重算"),
+    interval: str = Query(
+        "1d",
+        description="信号可信度桶粒度（1d/1m/5m/15m/1h）；分钟需先跑 --signal-backtest-interval 落库",
+    ),
     service: SystemConfigService = Depends(get_system_config_service),
 ) -> SignalsBoardResponse:
     try:
+        validate_interval(interval)  # 非法 interval → 422
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
         codes = _read_watchlist_codes(service)
-        return SignalsBoardResponse(**build_board(codes, days=days, refresh=refresh))
+        return SignalsBoardResponse(
+            **build_board(codes, days=days, refresh=refresh, interval=interval)
+        )
     except HTTPException:
         raise
     except Exception as exc:

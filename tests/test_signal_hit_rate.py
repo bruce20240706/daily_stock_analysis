@@ -387,7 +387,7 @@ def test_resolve_reads_signal_stats_by_market_and_sets_verified_on_excess():
         assert f["hit_rate"] == 0.68 and f["hit_sample"] == 20
         assert f["ci_low"] == 0.55 and f["baseline_excess"] == 0.05
         assert f["verified"] is True   # 样本足 且 ci_low(0.55) > baseline(0.50)
-        Repo.return_value.get.assert_called_with("volume_breakout", "cn", horizon=10)
+        Repo.return_value.get.assert_called_with("volume_breakout", "cn", interval="1d", horizon=10)
 
 
 def test_resolve_not_verified_when_ci_low_below_baseline():
@@ -495,3 +495,27 @@ def test_resolve_marker_hit_fields_real_repo_roundtrip(tmp_path):
         DatabaseManager.reset_instance()
         Config._instance = None
         os.environ.pop("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", None)
+
+
+# === 链路B 分钟化:resolve_marker_hit_fields interval 透传(B-T3)===
+from types import SimpleNamespace
+from src.services import signal_hit_rate as shr
+
+
+def test_resolve_marker_hit_fields_passes_interval(monkeypatch):
+    """resolve_marker_hit_fields 把 interval 透传到 SignalStatsRepository.get;默认 1d。"""
+    seen = {}
+
+    class _Repo:
+        def get(self, signal_type, market, *, interval="1d", horizon=None):
+            seen.update(interval=interval, horizon=horizon)
+            return SimpleNamespace(sample=999, win_rate=0.6, ci_low=0.55,
+                                   ci_high=0.7, baseline_win_rate=0.5, excess=0.05)
+
+    monkeypatch.setattr(shr, "SignalStatsRepository", lambda *a, **k: _Repo())
+    monkeypatch.setattr(shr, "get_market_for_stock", lambda code: "crypto")
+
+    shr.resolve_marker_hit_fields("vps_x", "BTC/USDT", interval="5m")
+    assert seen["interval"] == "5m"
+    shr.resolve_marker_hit_fields("vps_x", "BTC/USDT")     # 默认
+    assert seen["interval"] == "1d"
