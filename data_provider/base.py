@@ -1505,6 +1505,36 @@ class DataFetcherManager:
         logger.error(f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}")
         raise DataFetchError(error_summary)
     
+    def _intraday_fetchers_for(self, code: str) -> List[BaseFetcher]:
+        """返回某代码可用的分钟数据源（已按市场/能力过滤并排序）。
+
+        - market 由代码判定：crypto_perp / crypto / cn；其余返回空列表（由调用方拒绝）。
+        - 剔除未覆写 get_intraday_data 的源（BaseFetcher 默认抛 NotImplementedError），
+          避免对 Efinance/Pytdx/Baostock 等纯日线源做无谓调用。
+        - cn 显式把 Tushare 主源排到 akshare 兜底之前；无 token 的 Tushare 已被
+          capability="intraday_data" 的可用性探测剔除（is_available()→False）。
+        """
+        if is_perp_code(code):
+            market = "crypto_perp"
+        elif is_crypto_code(code):
+            market = "crypto"
+        elif is_a_share_code(code):
+            market = "cn"
+        else:
+            return []
+
+        fetchers = self._get_fetchers_snapshot()
+        fetchers = self._filter_daily_fetchers_for_market(fetchers, market)
+        fetchers = self._filter_fetchers_by_capability(fetchers, capability="intraday_data")
+        fetchers = [
+            f for f in fetchers
+            if type(f).get_intraday_data is not BaseFetcher.get_intraday_data
+        ]
+        if market == "cn":
+            _cn_order = {"TushareFetcher": 0, "AkshareFetcher": 1}
+            fetchers.sort(key=lambda f: _cn_order.get(f.name, 2))
+        return fetchers
+
     def get_intraday_data(
         self,
         stock_code: str,
@@ -1513,11 +1543,12 @@ class DataFetcherManager:
         end_date: Optional[str] = None,
         days: int = 30,
     ) -> Tuple[pd.DataFrame, str]:
-        """获取分钟级 K 线数据（仅 crypto/crypto_perp）。
+        """获取分钟级 K 线数据（crypto/crypto_perp 与 A股沪深/北交）。
 
         路由策略：
-        - 非 crypto 代码直接抛 DataFetchError。
-        - 按市场过滤 fetcher，再按 capability="intraday_data" 过滤。
+        - 非 crypto / 非 A股 代码直接抛 DataFetchError。
+        - 经 _intraday_fetchers_for 按市场 + capability="intraday_data" 过滤并排序
+          （cn 时 Tushare 主源优先、akshare 兜底）。
         - 依次尝试各 fetcher，返回首个非空结果 (df, fetcher_name)。
         - 带进程内 TTL 缓存，key=(code, interval, days)；TTL=0 时不缓存。
 
@@ -1525,12 +1556,12 @@ class DataFetcherManager:
             Tuple[DataFrame, str]: (纯 OHLCV+datetime 的 DataFrame，成功的 fetcher 名称)
 
         Raises:
-            DataFetchError: 非 crypto 代码或所有 fetcher 均失败时抛出。
+            DataFetchError: 非 crypto / 非 A股 代码或所有 fetcher 均失败时抛出。
         """
         stock_code = normalize_stock_code(stock_code)
 
-        if not (is_crypto_code(stock_code) or is_perp_code(stock_code)):
-            raise DataFetchError(f"{stock_code} 暂不支持分钟级数据（仅 crypto）")
+        if not (is_crypto_code(stock_code) or is_perp_code(stock_code) or is_a_share_code(stock_code)):
+            raise DataFetchError(f"{stock_code} 暂不支持分钟级数据（仅 crypto / A股）")
 
         # 缓存命中
         cache_key: Tuple[str, str, int] = (stock_code, interval, days)
@@ -1539,10 +1570,7 @@ class DataFetcherManager:
             logger.debug("[intraday_cache] 命中: %s interval=%s days=%s", stock_code, interval, days)
             return cached, "cache"
 
-        fetchers = self._get_fetchers_snapshot()
-        market = "crypto_perp" if is_perp_code(stock_code) else "crypto"
-        fetchers = self._filter_daily_fetchers_for_market(fetchers, market)
-        fetchers = self._filter_fetchers_by_capability(fetchers, capability="intraday_data")
+        fetchers = self._intraday_fetchers_for(stock_code)
 
         if not fetchers:
             raise DataFetchError(f"{stock_code} 无可用分钟数据源（interval={interval}）")

@@ -25,9 +25,10 @@ def _clear_cache():
 
 
 def test_non_crypto_intraday_raises():
+    # A股已支持，故用仍不支持的美股码验证"非支持市场在任何 fetcher 调用前被拒"
     mgr = DataFetcherManager()
-    with pytest.raises(DataFetchError):  # non-crypto rejected before any fetcher attempt
-        mgr.get_intraday_data("600519", interval="5m", days=1)
+    with pytest.raises(DataFetchError):
+        mgr.get_intraday_data("AAPL", interval="5m", days=1)
 
 
 def test_crypto_intraday_returns_ohlc_without_indicators(monkeypatch):
