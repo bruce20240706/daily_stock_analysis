@@ -118,17 +118,37 @@ class VPSResult:
 
 
 def _to_epoch_ms_shanghai(date_value) -> int:
-    """将日期值转换为 Asia/Shanghai 午夜的毫秒时间戳。"""
+    """日期/时间 → Asia/Shanghai 毫秒时间戳。
+
+    纯日期(无时间分量)→ 当日午夜(日线语义不变);带时分秒(分钟 bar)→ 保留时分秒。
+    用作信号触发对齐的 join 键:marker.timestamp 与 _last_ts(window) 两侧同函数同列值,
+    绝对时区不影响相等性(分钟 bar 不再坍缩到午夜)。
+    """
+    has_time = False
     if isinstance(date_value, str):
-        dt = datetime.strptime(date_value[:10], "%Y-%m-%d")
+        s = date_value.strip()
+        if len(s) > 10 and ":" in s:
+            try:
+                dt = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
+                has_time = True
+            except ValueError:
+                dt = datetime.strptime(s[:10], "%Y-%m-%d")
+        else:
+            dt = datetime.strptime(s[:10], "%Y-%m-%d")
     elif isinstance(date_value, pd.Timestamp):
         dt = date_value.to_pydatetime()
+        has_time = not (dt.hour == dt.minute == dt.second == dt.microsecond == 0)
     elif isinstance(date_value, datetime):
         dt = date_value
+        has_time = not (dt.hour == dt.minute == dt.second == dt.microsecond == 0)
     else:
         dt = pd.Timestamp(date_value).to_pydatetime()
+        has_time = not (dt.hour == dt.minute == dt.second == dt.microsecond == 0)
     if dt.tzinfo is None:
-        dt = dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=_SHANGHAI)
+        if has_time:
+            dt = dt.replace(tzinfo=_SHANGHAI)
+        else:
+            dt = dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=_SHANGHAI)
     return int(dt.timestamp() * 1000)
 
 
