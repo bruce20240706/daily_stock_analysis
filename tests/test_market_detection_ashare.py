@@ -52,7 +52,8 @@ def test_market_of_bse_is_cn(code):
     assert market_of(code) == "cn"
 
 
-@pytest.mark.parametrize("code", ["AAPL", "00700", "HK00700"])
+# AAPL 已归类为 us(美股阶段),故此处只保留仍不支持的港股码
+@pytest.mark.parametrize("code", ["00700", "HK00700"])
 def test_market_of_unsupported_raises(code):
     with pytest.raises(ValueError):
         market_of(code)

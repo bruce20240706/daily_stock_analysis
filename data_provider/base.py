@@ -30,6 +30,7 @@ from src.data.stock_mapping import STOCK_NAME_MAP, is_meaningful_stock_name
 from src.services.run_diagnostics import record_provider_run
 from .fundamental_adapter import AkshareFundamentalAdapter
 from .yfinance_fundamental_adapter import YfinanceFundamentalAdapter
+from .us_index_mapping import is_us_stock_code  # 美股个股判定(us_index_mapping 仅依赖 re,无循环导入)
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -315,6 +316,8 @@ def market_of(code: str) -> str:
         return "crypto"
     if is_a_share_code(code):
         return "cn"
+    if is_us_stock_code(code):
+        return "us"
     raise ValueError(f"无分钟市场归类: {code!r}")
 
 
