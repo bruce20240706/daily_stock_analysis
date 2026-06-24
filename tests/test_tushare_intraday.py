@@ -70,3 +70,12 @@ def test_tushare_intraday_empty_raises(monkeypatch):
     f = _fetcher_with_stub(monkeypatch, captured, rows=[])
     with pytest.raises(DataFetchError):
         f.get_intraday_data("600519", interval="5m", days=1)
+
+
+def test_tushare_intraday_no_token_unavailable_and_raises():
+    """无 token(_api=None):is_available()=False(门面据此跳过),直接调用抛 DataFetchError。"""
+    f = TushareFetcher()
+    f._api = None
+    assert f.is_available() is False
+    with pytest.raises(DataFetchError):
+        f.get_intraday_data("600519", interval="5m", days=1)

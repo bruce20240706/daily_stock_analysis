@@ -183,9 +183,12 @@ class BacktestService:
                     # 分钟窗口起点 = analysis_date + 1 day（日线 bar 收盘后第一根分钟 bar 所在自然日）
                     _minute_window_start = start_daily.date + timedelta(days=1)
                     # crypto 24h：N 日历日 = N 交易日；A股每日仅 240 分钟交易，N 交易日需更宽
-                    # 日历窗口覆盖周末/节假日（缓冲 max(N*2, N+10)），由分钟流自身切片对齐交易日。
+                    # 日历窗口覆盖周末/节假日，由分钟流自身切片对齐交易日。
+                    # cn 缓冲需覆盖最长连续休市（春节/国庆约 11 天）+ 周末：N 交易日 ≈ N*7/5
+                    # 自然日，再叠加 ~14 天长假/周末冗余 → max(N*2, N*3//2 + 14)；超长停牌仍可能
+                    # 不足而落 insufficient_data（best-effort，见 docs §10.3/§10.5）。
                     if market == "cn":
-                        _end_offset = max(int(eval_window_days) * 2, int(eval_window_days) + 10)
+                        _end_offset = max(int(eval_window_days) * 2, int(eval_window_days) * 3 // 2 + 14)
                     else:
                         _end_offset = int(eval_window_days)
                     _window_end_date = _minute_window_start + timedelta(days=_end_offset)

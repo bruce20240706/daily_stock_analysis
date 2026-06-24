@@ -46,6 +46,12 @@ def test_market_of():
     assert market_of("ETH/USDT:PERP") == "crypto"
 
 
+@pytest.mark.parametrize("code", ["830799", "920819"])
+def test_market_of_bse_is_cn(code):
+    # 北交所标的归类为 cn(分钟回测市场化窗口据此取 bars_per_day=240)
+    assert market_of(code) == "cn"
+
+
 @pytest.mark.parametrize("code", ["AAPL", "00700", "HK00700"])
 def test_market_of_unsupported_raises(code):
     with pytest.raises(ValueError):

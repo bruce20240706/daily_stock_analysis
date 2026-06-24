@@ -136,5 +136,5 @@ def test_ashare_intraday_cn_end_date_has_holiday_buffer(monkeypatch, tmp_path):
     if isinstance(end, str):
         end = date.fromisoformat(end)
     assert start == analysis_date + timedelta(days=1)   # 窗口起点 = 日线收盘次日
-    # 10 交易日需 ~14 自然日;缓冲取 max(N*2, N+10)=20 → end 至少宽出 N*2
-    assert (end - start).days >= 20
+    # 10 交易日需 ~14 自然日;缓冲 max(N*2, N*3//2+14)=max(20,29)=29,覆盖长假(春节/国庆)
+    assert (end - start).days >= 24

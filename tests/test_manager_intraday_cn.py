@@ -78,3 +78,24 @@ def test_intraday_fetchers_for_cn_orders_tushare_before_akshare():
     if "TushareFetcher" in names and "AkshareFetcher" in names:
         assert names.index("TushareFetcher") < names.index("AkshareFetcher")
     assert "AkshareFetcher" in names  # akshare 免 key 恒在
+
+
+def test_intraday_fetchers_for_cn_orders_tushare_first_when_both_present():
+    """两源同时在场(有 token 的生产态):无论入参/优先级顺序,cn 排序都把 Tushare 排到 akshare 前。"""
+    class _Stub:
+        def __init__(self, name, prio):
+            self.name = name
+            self.priority = prio
+
+        def is_available(self):
+            return True
+
+        def get_intraday_data(self, stock_code, interval, **k):  # 覆写以通过 override 过滤
+            return None
+
+    # 故意让 akshare 优先级数字更小(若无 cn 排序会排在前),以证明排序生效
+    ak = _Stub("AkshareFetcher", 0)
+    ts = _Stub("TushareFetcher", 5)
+    mgr = DataFetcherManager(fetchers=[ak, ts])
+    names = [f.name for f in mgr._intraday_fetchers_for("600519")]
+    assert names == ["TushareFetcher", "AkshareFetcher"], names

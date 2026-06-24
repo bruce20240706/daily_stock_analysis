@@ -155,7 +155,7 @@ python main.py --backtest --backtest-interval 5m
 python main.py --backtest --backtest-interval 1h
 
 # 对指定标的跑 15m 回测
-python main.py --backtest --backtest-interval 15m --stocks BTCUSDT,ETHUSDT
+python main.py --backtest --backtest-interval 15m --backtest-code BTCUSDT
 ```
 
 ### 8.2 API
@@ -230,6 +230,7 @@ A 股复用上述全部引擎 / 服务 / API / Web / CLI 能力，仅做市场�
 
 - **不配置 token 也能用**：无 `TUSHARE_TOKEN` 时 Tushare 数据源按可用性探测自动跳过，直接走 akshare 免费兜底。
 - interval 词表与 crypto 统一（`1m/5m/15m/1h`），各源内部映射：Tushare `1h→60min`、akshare `1h→'60'`。
+- **akshare 不支持历史 `1m`**：东财 `1m`（`period='1'`）走 trends2 接口、仅返回最近约 5 个交易日且忽略 `start/end`，无法锚定回测的历史窗口；故 akshare 对 `1m` 直接抛 `NotImplementedError`（fail-closed，避免静默取回错窗口）。**`1m` A 股回测需配置 Tushare token**；无 token 时 `1m` 不可得（落 `insufficient_data`），`5m/15m/1h` 不受影响。
 
 ### 10.2 bars_per_day（市场化）
 
@@ -239,24 +240,26 @@ A 股每个交易日仅两段连续竞价：09:30–11:30 + 13:00–15:00 = **24
 
 - 入场价 = `analysis_date` 当日**日线收盘价**（15:00 收盘，与日线/crypto 路径一致）。
 - 分钟窗口起点 = 日线收盘次日（`analysis_date + 1`）；由于分钟流只含交易时段 bar，向前切 `window_bar_count` 根即等价 N 个交易日，**无需交易日历做日期运算**。
-- 取数 `end_date` 比 crypto 更宽（`max(N×2, N+10)` 自然日），用于覆盖周末/节假日，确保拿满 N 个交易日的分钟 bar。
+- 取数 `end_date` 比 crypto 更宽（`max(N×2, N×3//2 + 14)` 自然日），尽力覆盖周末与长假（春节/国庆约 11 天连续休市），让分钟流切满 N 个交易日。**极端超长停牌窗口仍可能取不满 N 个交易日 → 该条落 `insufficient_data`**（best-effort，非保证）。
 
 ### 10.4 用法
 
 与 crypto 完全一致，仅把标的换成 A 股代码：
 
 ```bash
-# 对贵州茅台跑 5m 分钟回测
-python main.py --backtest --backtest-interval 5m --stocks 600519
+# 对贵州茅台跑 5m 分钟回测（回测模式用 --backtest-code 指定单个标的；--stocks 仅用于分析模式）
+python main.py --backtest --backtest-interval 5m --backtest-code 600519
 ```
 
 API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` 词表不变。
 
 ### 10.5 限制
 
-- **Tushare 分钟接口需积分**：免费账户积分可能不足，此时自动走 akshare。
+- **Tushare 分钟接口需积分**：免费账户积分可能不足，此时（除 `1m` 外）自动走 akshare。
+- **`1m` 仅 Tushare**：akshare 兜底不支持历史 `1m`（见 [§10.1](#101-数据源tushare-主源--akshare-免费兜底)），无 token 时 `1m` 不可得。
 - **akshare 限频/稳定性**：东财免费接口有访问频率限制，长窗口/大批量可能偶发失败（按数据源降级与错误计数处理）。
 - **印花税未建模**：A 股卖出印花税（单边）等不对称成本暂未单独建模，成本开关沿用 crypto 的对称 `fee/slippage`（默认 0）。
+- **复权基准漂移**：入场价取库内日线收盘（其复权口径以落库时为准），分钟 bar 按 `qfq` 即时拉取，二者复权锚点可能不同步；若窗口内发生除权除息，模拟收益会有偏差。窗口短、无分红配股时影响可忽略。
 - **北交所 best-effort**：北交所分钟数据源覆盖不确定，作尽力支持，不保证可得。
 - **港股、美股仍不支持**分钟路径。
 
