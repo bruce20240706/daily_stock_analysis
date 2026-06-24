@@ -1068,3 +1068,29 @@ def test_for_market_unknown_falls_back(monkeypatch):
     cfg_env = VPSConfig.from_env()
     assert cfg_none == cfg_env
     assert cfg_unknown == cfg_env
+
+
+# === 链路B 分钟化:_to_epoch_ms_shanghai 分钟分辨率感知(B-T1)===
+def test_to_epoch_date_only_is_midnight_unchanged():
+    """纯日期(字符串/午夜 Timestamp/显式 00:00:00)→ 当日午夜,日线语义不变。"""
+    a = _to_epoch_ms_shanghai("2026-06-22")
+    assert _to_epoch_ms_shanghai(pd.Timestamp("2026-06-22")) == a   # 午夜 Timestamp 与日期串一致
+    assert _to_epoch_ms_shanghai("2026-06-22 00:00:00") == a        # 显式午夜 = 日期串
+
+
+def test_to_epoch_minute_preserves_time():
+    """分钟 bar 保留时分秒,不坍缩到午夜——信号触发对齐在分钟粒度上成立的前提。"""
+    t0935 = _to_epoch_ms_shanghai(pd.Timestamp("2026-06-22 09:35:00"))
+    t0940 = _to_epoch_ms_shanghai(pd.Timestamp("2026-06-22 09:40:00"))
+    midnight = _to_epoch_ms_shanghai("2026-06-22")
+    assert t0935 != t0940 and t0935 != midnight        # 分钟 bar 不坍缩到午夜
+    assert (t0940 - t0935) == 5 * 60 * 1000            # 5 分钟差
+    assert _to_epoch_ms_shanghai("2026-06-22 09:35:00") == t0935   # 带时间字符串同样保留
+
+
+def test_to_epoch_iso_t_separated_string_preserves_time():
+    """ISO 'T' 分隔的分钟字符串也保留时分(不坍缩到午夜)——硬化字符串解析路径。"""
+    t_space = _to_epoch_ms_shanghai("2026-06-22 09:35:00")
+    midnight = _to_epoch_ms_shanghai("2026-06-22")
+    assert _to_epoch_ms_shanghai("2026-06-22T09:35:00") == t_space   # 'T' 与空格等价
+    assert _to_epoch_ms_shanghai("2026-06-22T09:35:00") != midnight  # 不坍缩到午夜

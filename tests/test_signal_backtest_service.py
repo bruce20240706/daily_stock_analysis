@@ -153,3 +153,98 @@ def test_a5_config_passthrough_uses_for_market_per_code(monkeypatch):
     assert crypto_sig[2] is not None
     assert crypto_sig[2].breakout_window == VPSConfig.for_market("crypto").breakout_window
     assert crypto_sig[2].breakout_window == 7  # 明确断言 crypto 值不是 A-stock 默认
+
+
+# === 链路B 分钟化:run(interval=) + 分钟取数分叉(B-T2)===
+import pandas as pd
+import pytest
+from types import SimpleNamespace
+from src.services import signal_backtest_service as sbs
+from src.services.signal_backtest import SignalOutcome, BASELINE_SIGNAL_TYPE
+
+
+def _minute_df(n=120, base=100.0):
+    return pd.DataFrame([
+        {"datetime": pd.Timestamp("2026-06-22 09:30:00") + pd.Timedelta(minutes=5 * i),
+         "open": base, "high": base + 1, "low": base - 1, "close": base, "volume": 1.0}
+        for i in range(n)
+    ])
+
+
+def test_run_interval_5m_uses_intraday_and_tags(monkeypatch):
+    captured = {}
+    svc = sbs.SignalBacktestService.__new__(sbs.SignalBacktestService)
+    saved = []
+    svc.repo = SimpleNamespace(save_batch=lambda rows, **k: (saved.extend(rows), len(rows))[1])
+
+    monkeypatch.setattr(sbs, "_read_watchlist_codes", lambda s: ["BTC/USDT"])
+    monkeypatch.setattr(sbs, "get_market_for_stock", lambda code: "crypto")
+
+    from data_provider.base import DataFetcherManager
+    def fake_intraday(self, code, interval, **kw):
+        captured["interval"] = interval
+        return _minute_df(), "BinanceFetcher"
+    monkeypatch.setattr(DataFetcherManager, "get_intraday_data", fake_intraday)
+    # StockService 日线路径不得被调用
+    monkeypatch.setattr(sbs.StockService, "get_history_data",
+                        lambda *a, **k: pytest.fail("daily path must not run for 5m"))
+
+    # 捕获传入 evaluate_* 的 df(验证 datetime→date 适配)与 aggregate 的 interval
+    seen = {}
+    monkeypatch.setattr(sbs, "evaluate_signal_outcomes",
+                        lambda df, **k: (seen.update(cols=set(df.columns)),
+                                         [SignalOutcome("vps_x", "crypto", "win")])[1])
+    monkeypatch.setattr(sbs, "evaluate_baseline_outcomes",
+                        lambda df, **k: [SignalOutcome(BASELINE_SIGNAL_TYPE, "crypto", "win"),
+                                         SignalOutcome(BASELINE_SIGNAL_TYPE, "crypto", "loss")])
+
+    out = svc.run(interval="5m")
+    assert captured["interval"] == "5m"
+    assert "date" in seen["cols"] and "datetime" not in seen["cols"]   # datetime→date 适配
+    assert any(getattr(r, "interval", None) == "5m" for r in saved)    # 落库行 interval=5m
+    assert out["processed"] == 1
+
+
+def test_run_interval_1d_uses_daily_path(monkeypatch):
+    svc = sbs.SignalBacktestService.__new__(sbs.SignalBacktestService)
+    svc.repo = SimpleNamespace(save_batch=lambda rows, **k: len(rows))
+    monkeypatch.setattr(sbs, "_read_watchlist_codes", lambda s: ["600519"])
+    monkeypatch.setattr(sbs, "get_market_for_stock", lambda code: "cn")
+    daily = {"data": [{"date": f"2024-01-{d:02d}", "open": 10, "high": 11, "low": 9,
+                       "close": 10, "volume": 100} for d in range(1, 28)] * 3}
+    monkeypatch.setattr(sbs.StockService, "get_history_data", lambda self, **k: daily)
+    from data_provider.base import DataFetcherManager
+    monkeypatch.setattr(DataFetcherManager, "get_intraday_data",
+                        lambda *a, **k: pytest.fail("intraday path must not run for 1d"))
+    out = svc.run(interval="1d")        # 默认日线路径,不触发 get_intraday_data
+    assert out["processed"] == 1        # 真 eval 跑通日线路径,该 code 被处理(非恒真断言)
+    assert out["interval"] == "1d"
+
+
+def test_run_interval_5m_real_eval_offline(monkeypatch):
+    """离线端到端:不 mock evaluate_*,run(5m) 经真引擎(含 _to_epoch 分钟对齐)处理分钟 df。
+
+    守护 #6:分钟路径真实风险层(分钟 bar 经 compute_volume_price_signals/_eval 的
+    _to_epoch_ms_shanghai 对齐)在默认门禁里被离线验证,而非仅靠 -m network。
+    """
+    svc = sbs.SignalBacktestService.__new__(sbs.SignalBacktestService)
+    saved = []
+    svc.repo = SimpleNamespace(save_batch=lambda rows, **k: (saved.extend(rows), len(rows))[1])
+    monkeypatch.setattr(sbs, "_read_watchlist_codes", lambda s: ["BTC/USDT"])
+    monkeypatch.setattr(sbs, "get_market_for_stock", lambda code: "crypto")
+    from data_provider.base import DataFetcherManager
+    monkeypatch.setattr(DataFetcherManager, "get_intraday_data",
+                        lambda self, code, interval, **kw: (_minute_df(120), "BinanceFetcher"))
+    # 关键:evaluate_signal_outcomes / evaluate_baseline_outcomes 不被 mock,跑真引擎
+
+    out = svc.run(interval="5m")
+    assert out["processed"] == 1            # 真引擎在分钟 df 上跑通,code 被处理
+    assert out["interval"] == "5m"
+    assert all(getattr(r, "interval", None) == "5m" for r in saved)   # 落库行(若有)均 5m 桶
+
+
+def test_run_rejects_bad_interval():
+    svc = sbs.SignalBacktestService.__new__(sbs.SignalBacktestService)
+    svc.repo = SimpleNamespace(save_batch=lambda rows, **k: len(rows))
+    with pytest.raises(ValueError):
+        svc.run(interval="2h")

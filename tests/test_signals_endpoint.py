@@ -246,7 +246,7 @@ def test_signals_endpoint_backfills_verified_via_resolver(monkeypatch):
     # 端点内部用的 resolver 被替换为确定性桩，证明组装层确实调用了它
     monkeypatch.setattr(
         sbs, "resolve_marker_hit_fields",
-        lambda signal_type, code: {"hit_rate": 0.7, "hit_sample": 30, "verified": True},
+        lambda signal_type, code, *, interval="1d": {"hit_rate": 0.7, "hit_sample": 30, "verified": True},
     )
 
     resp = stocks_ep.get_stock_signals(stock_code="600519", days=120)
@@ -314,7 +314,7 @@ def test_signals_endpoint_ci_fields_in_rule_marker_json(monkeypatch):
     _patch_common(monkeypatch, engine_result=engine, rule_signal=BuySignal.BUY, llm_record=None)
     monkeypatch.setattr(
         sbs, "resolve_marker_hit_fields",
-        lambda signal_type, code: {
+        lambda signal_type, code, *, interval="1d": {
             "hit_rate": 0.68,
             "hit_sample": 20,
             "verified": True,

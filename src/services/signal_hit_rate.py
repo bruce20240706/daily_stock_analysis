@@ -70,12 +70,16 @@ def backfill_signal_hit_rate(signal_type: str, code: str) -> HitRate:
     return HitRate(hit_rate=round(correct / sample, 4), hit_sample=sample)
 
 
-def resolve_marker_hit_fields(signal_type: str, code: str) -> dict:
+def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1d") -> dict:
     """把命中率聚合结果映射为 SignalMarker 的 6 个 hit 字段（M3-A6 改源）。
 
-    M3-A6 改源：读 signal_stats 表 by (signal_type, market(code))，
+    M3-A6 改源：读 signal_stats 表 by (signal_type, market(code), interval)，
     verified = sample >= min_sample AND ci_low > baseline_win_rate（超额判定）。
     缺桶/无样本时返回全 None 的 all-None dict（与 M2c 旧"无样本"路径表现一致）。
+
+    Args:
+        interval: 信号桶粒度；默认 '1d'（日线，行为不变）；分钟（1m/5m/15m/1h）读对应
+                  分钟桶的可信度（需先跑 --signal-backtest-interval 落库）。
 
     返回 keys: hit_rate, hit_sample, verified, ci_low, ci_high, baseline_excess, horizon。
     （horizon = 命中桶时的 signal_backtest_horizon_bars；无桶/无样本时为 None，由 M3.1 透出。）
@@ -92,7 +96,7 @@ def resolve_marker_hit_fields(signal_type: str, code: str) -> dict:
         or int(getattr(cfg, "backtest_eval_window_days", 10))
     horizon = int(getattr(cfg, "signal_backtest_horizon_bars", 10))
 
-    stat = SignalStatsRepository().get(signal_type, market, horizon=horizon)
+    stat = SignalStatsRepository().get(signal_type, market, interval=interval, horizon=horizon)
     if stat is None or (stat.sample or 0) < min_sample:
         return dict(_none)
 

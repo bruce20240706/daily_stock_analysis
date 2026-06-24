@@ -81,7 +81,7 @@ def _bs(direction, *, status="ok", markers=None):
 
 def test_build_board_groups_and_counts(monkeypatch):
     mapping = {"AAA": _bs("bullish"), "BBB": _bs("neutral"), "CCC": _bs("bearish")}
-    monkeypatch.setattr(sbs, "build_signals_for_code", lambda code, *, days=120: mapping[code])
+    monkeypatch.setattr(sbs, "build_signals_for_code", lambda code, *, days=120, interval="1d": mapping[code])
     out = sbs.build_board(["AAA", "BBB", "CCC"], days=120, refresh=True)
     groups = {e["code"]: e["action_group"] for e in out["entries"]}
     assert groups == {"AAA": "buy", "BBB": "hold", "CCC": "sell"}
@@ -91,7 +91,7 @@ def test_build_board_groups_and_counts(monkeypatch):
 
 
 def test_build_board_single_failure_degrades_only_that_row(monkeypatch):
-    def fake(code, *, days=120):
+    def fake(code, *, days=120, interval="1d"):
         if code == "BAD":
             raise RuntimeError("boom")
         return _bs("bullish")
@@ -106,7 +106,7 @@ def test_build_board_single_failure_degrades_only_that_row(monkeypatch):
 
 def test_build_board_unavailable_when_rule_direction_none(monkeypatch):
     monkeypatch.setattr(sbs, "build_signals_for_code",
-                        lambda code, *, days=120: _bs(None, status="degraded"))
+                        lambda code, *, days=120, interval="1d": _bs(None, status="degraded"))
     out = sbs.build_board(["X"], days=120, refresh=True)
     assert out["entries"][0]["action_group"] == "unavailable"
     assert out["counts"]["unavailable"] == 1
@@ -121,7 +121,7 @@ def test_build_board_maps_markers_to_entry_fields(monkeypatch):
         {"source": "llm", "signal_type": "llm_advice", "direction": "bearish"},
     ]
     monkeypatch.setattr(sbs, "build_signals_for_code",
-                        lambda code, *, days=120: _bs("bullish", markers=markers))
+                        lambda code, *, days=120, interval="1d": _bs("bullish", markers=markers))
     e = sbs.build_board(["AAA"], days=120, refresh=True)["entries"][0]
     assert e["key_signals"] == ["volume_breakout", "shrink_pullback"]   # rule 去重保序
     assert e["llm_direction"] == "bearish"
@@ -142,7 +142,7 @@ def test_build_board_maps_ci_fields_to_entry(monkeypatch):
         },
     ]
     monkeypatch.setattr(sbs, "build_signals_for_code",
-                        lambda code, *, days=120: _bs("bullish", markers=markers))
+                        lambda code, *, days=120, interval="1d": _bs("bullish", markers=markers))
     e = sbs.build_board(["AAA"], days=120, refresh=True)["entries"][0]
     assert e["ci_low"] == 0.55
     assert e["ci_high"] == 0.80
@@ -158,7 +158,7 @@ def test_build_board_empty(monkeypatch):
 
 def test_build_board_cache_hit(monkeypatch):
     calls = {"n": 0}
-    def fake(code, *, days=120):
+    def fake(code, *, days=120, interval="1d"):
         calls["n"] += 1
         return _bs("bullish")
     monkeypatch.setattr(sbs, "build_signals_for_code", fake)
@@ -168,15 +168,36 @@ def test_build_board_cache_hit(monkeypatch):
     assert calls["n"] == 1
 
 
+def test_build_board_cache_isolated_by_interval(monkeypatch):
+    """看板缓存键含 interval:同 (code,days) 下 1d 与 5m 不串桶(回归护栏)。
+
+    若缓存键退回 (code,days)(去掉 interval),5m 请求会命中 1d 缓存,把日线可信度
+    当分钟桶返回——本用例对此变异 fail-closed。
+    """
+    seen = []
+    def fake(code, *, days=120, interval="1d"):
+        seen.append(interval)
+        return _bs("bullish")
+    monkeypatch.setattr(sbs, "build_signals_for_code", fake)
+    sbs._BOARD_CACHE.clear()
+    sbs.build_board(["AAA"], days=120, refresh=False, interval="1d")   # 计算并写 1d 桶
+    sbs.build_board(["AAA"], days=120, refresh=False, interval="5m")   # 不得命中 1d 桶
+    assert seen == ["1d", "5m"]                                        # 各算一次,interval 各异
+    # 二次请求各自 interval 仍命中各自缓存(不再重算)
+    sbs.build_board(["AAA"], days=120, refresh=False, interval="1d")
+    sbs.build_board(["AAA"], days=120, refresh=False, interval="5m")
+    assert seen == ["1d", "5m"]                                        # 命中缓存,无新增调用
+
+
 def test_build_board_refresh_bypasses_populated_cache(monkeypatch):
     calls = {"n": 0}
-    def fake_a(code, *, days=120):
+    def fake_a(code, *, days=120, interval="1d"):
         calls["n"] += 1
         return _bs("bullish")            # ok-status, action buy
     monkeypatch.setattr(sbs, "build_signals_for_code", fake_a)
     sbs.build_board(["AAA"], days=120, refresh=False)   # compute + cache
     assert calls["n"] == 1
-    def fake_b(code, *, days=120):
+    def fake_b(code, *, days=120, interval="1d"):
         calls["n"] += 1
         return _bs("bearish")            # ok-status, action sell
     monkeypatch.setattr(sbs, "build_signals_for_code", fake_b)
@@ -187,14 +208,14 @@ def test_build_board_refresh_bypasses_populated_cache(monkeypatch):
 
 def test_build_board_ttl_zero_disables_cache_writes(monkeypatch):
     monkeypatch.setenv("SIGNALS_BOARD_CACHE_TTL_S", "0")
-    monkeypatch.setattr(sbs, "build_signals_for_code", lambda code, *, days=120: _bs("bullish"))
+    monkeypatch.setattr(sbs, "build_signals_for_code", lambda code, *, days=120, interval="1d": _bs("bullish"))
     sbs.build_board(["AAA"], days=120, refresh=False)
     assert sbs._BOARD_CACHE == {}        # caching off → nothing stored
 
 
 def test_build_board_does_not_cache_degraded(monkeypatch):
     calls = {"n": 0}
-    def fake(code, *, days=120):
+    def fake(code, *, days=120, interval="1d"):
         calls["n"] += 1
         raise RuntimeError("transient")
     monkeypatch.setattr(sbs, "build_signals_for_code", fake)

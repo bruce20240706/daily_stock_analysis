@@ -154,9 +154,10 @@ watchlist 来源与看板完全一致：读取 `SystemConfigService` 的 `STOCK_
 
 ### 7.2 批作业参数
 
-`SignalBacktestService.run(codes=None, horizon=None)` 可选参数：
+`SignalBacktestService.run(codes=None, horizon=None, interval='1d')` 可选参数：
 - `codes`：指定股票代码列表；`None` 时读自选池。
 - `horizon`：前瞻 bar 数；`None` 时取 `SIGNAL_BACKTEST_HORIZON_BARS` 配置（默认 10）。
+- `interval`：bar 粒度；`'1d'`（默认）走日线，行为不变；分钟（`1m/5m/15m/1h`）在分钟 bar 上重算信号 + 三重门评估，详见 §11。
 
 单股最小 bar 数（`_MIN_BARS = 50`）；不足则跳过，避免统计无意义。
 
@@ -188,7 +189,7 @@ watchlist 来源与看板完全一致：读取 `SystemConfigService` 的 `STOCK_
 
 M3-A6 之前，`/signals` 端点命中率来源为 per-code `BacktestResult` 记录（`backfill_signal_hit_rate`）。
 
-M3-A6 改源后，`resolve_marker_hit_fields(signal_type, code)` 改读 `signal_stats` 表，按 `(signal_type, market(code))` 聚合：
+M3-A6 改源后，`resolve_marker_hit_fields(signal_type, code, *, interval='1d')` 改读 `signal_stats` 表，按 `(signal_type, market(code), interval)` 聚合（`interval` 默认 `1d`，分钟读出见 §11）：
 
 - **改变**：命中率不再按个股历史分析记录聚合，而是按信号类型跨自选池横截面统计。
 - **不变**：`/signals` 端点 marker 的 6 个字段键名（`hit_rate / hit_sample / verified / ci_low / ci_high / baseline_excess`）兼容保留，缺桶时回落 all-None（与旧"无样本"路径行为一致）。
@@ -213,12 +214,63 @@ M3-A6 改源后，`resolve_marker_hit_fields(signal_type, code)` 改读 `signal_
 
 ---
 
-## 11. 已知局限
+## 11. 信号可信度分钟化（链路B）
+
+把日线三重门可信度回测扩展到**分钟粒度**：在分钟 bar 上重算 VPS 信号、用分钟前向窗口做三重门评估，产出按 `(signal_type × market × interval × horizon)` 隔离的 `signal_stats` 桶。日线链路（`interval='1d'`）行为字节级不变——不传 `interval` 即现状。
+
+### 11.1 语义：分钟信号 + 分钟评估
+
+- **分钟信号**：`compute_volume_price_signals` / `evaluate_signal_outcomes` 在分钟 bar 上重新计算（同一套 VPS 规则，bar 粒度无关）。
+- **分钟评估**：三重门前瞻 `horizon` 根 **分钟 bar**（非日线）。`horizon` 为相对 bar 数，分钟下口径随之缩短，例如 `5m × horizon=10 = 50 分钟` 评估窗。
+- **触发对齐前提**：`_to_epoch_ms_shanghai` 已升级为分钟分辨率感知——纯日期 → 当日午夜（日线不变），带时分秒 → 保留时分秒，使分钟 bar 的 `marker.timestamp == _last_ts(window)` 触发判定成立（否则同日分钟 bar 会全部坍缩到午夜，破坏对齐）。
+
+### 11.2 用法
+
+```bash
+# 日线（默认，行为不变）
+python main.py --signal-backtest
+
+# 分钟（在分钟 bar 上重算信号 + 三重门，落 interval=5m 桶）
+python main.py --signal-backtest --signal-backtest-interval 5m
+```
+
+`--signal-backtest-interval` 取值 `{1d, 1m, 5m, 15m, 1h}`，词表与盘中回测统一（`src/core/intraday_backtest.validate_interval`）。
+
+### 11.3 取数与市场/历史
+
+分钟取数复用链路A 的 `DataFetcherManager.get_intraday_data`（market 路由按 code 在其内部判定），并把 `datetime` 列重命名为 `date`，复用下游 VPS/`_eval` 既有 `date` 列契约（保留分钟时间戳）：
+
+| 市场 | 分钟来源 | 历史可得（近窗，源自身封顶） |
+|------|---------|------------------------------|
+| crypto | 交易所（Binance 等） | 较深；按 `days` 估算回看根数 |
+| A股沪深 | Tushare（1m 需 token）/ akshare | 较深；窗口由源默认/上限决定 |
+| 美股个股 | yfinance（免 key 单源） | 5m/15m≈60d、1h≈730d；**1m 不支持**（fail-closed） |
+
+`_minute_fetch_days` 给 `get_intraday_data` 传"天数提示"（`1h → 730`，其余 `→ 365`）。**注意**：`days` 的实际生效程度因源而异——crypto 按 `days` 估算回看根数；A股（Tushare/akshare）与美股（yfinance）分钟历史窗口主要由各源自身默认/上限决定，`days` 偏大不会取错数据（各源自身封顶），故"取值给足"。如需为非 crypto 源真正加深历史，应改为下传 `start_date`（留待后续）。单股不足 `_MIN_BARS=50` 根则跳过。
+
+> **市场支持范围**：分钟路径目前覆盖 crypto / A股沪深 / 美股个股（见上表）。港股（HK）及指数代码无分钟取数支持，走分钟回测时单股取数失败被计入 `errors`（单股失败不拖垮整批，符合稳定性护栏），不产出分钟桶。
+
+### 11.4 读出（最小可查）
+
+- **批落库**：`signal_stats` 行带 `interval=<interval>`，与日线桶按唯一键 `(signal_type, market, interval, horizon)` 天然隔离，**零 schema 迁移**（`interval` 列与唯一键此前已建好）。
+- **看板 API**：`GET /api/v1/signals/board?interval=5m` 把可信度（`hit_rate`/`verified`/CI/超额）从对应分钟桶解析；非法 `interval` → `422`。看板 K 线与标记仍按日线计算，仅可信度字段切换到分钟桶，供"分钟级可信度"查看。
+- **resolver**：`resolve_marker_hit_fields(signal_type, code, *, interval='1d')` 按 interval 取桶；缓存键已含 interval，避免 1d/5m 串桶。
+
+### 11.5 限制
+
+- VPS 阈值为**日线调参**，分钟下直接复用属 best-effort，未单独为分钟标定（crypto 旁路阈值除外）。
+- 分钟批量取数受各源**限频**约束；自选池较大时分钟批作业耗时显著高于日线。
+- 美股 `1m`、A股 `1m`（无 Tushare token 时）按各自数据源限制 **fail-closed**，不静默回退日线。
+- 分钟桶需**先跑** `--signal-backtest-interval <粒度>` 才有数据；未跑时 `?interval=` 读出回落 all-None（与"无样本"路径一致）。
+
+---
+
+## 12. 已知局限
 
 - **逐 bar 全量重跑成本**：当前回测按每根 bar 因果重跑信号规则，时间复杂度 O(n²)，受自选池股票数和历史 bar 数影响；默认拉取 365 日日线（`_FETCH_DAYS`），限自选池离线运行可接受，不适用于全市场在线实时触发。
 - **仅覆盖自选池**：`signal_stats` 仅对 `STOCK_LIST` 自选池有数据，非自选池股票命中率回退 all-None。
 - **换手率与 A 股资金面**：当前三重门仅用 OHLCV 推导价位，未接入换手率、主力资金、北向资金等 A 股流动性指标，留待 M4 补充。
-- **盘中/分钟级未支持**：当前仅支持日线（`interval='1d'`），盘中/分钟级回测留待后续迭代。
+- **盘中/分钟级**：已支持分钟粒度信号可信度回测（见 §11）；VPS 阈值仍为日线调参，分钟下为 best-effort。
 - **`expired` 不计入胜率**：到期未触门的样本被排除在 `sample` 分母外，胜率是条件性胜率（非全样本命中率），需理解定义差异。
 - **horizon 读取语义与旧桶残留**：`resolve_marker_hit_fields` 按当前 `SIGNAL_BACKTEST_HORIZON_BARS` 配置的 `horizon` 精确读取 `signal_stats` 桶；变更 horizon 配置后，旧 horizon 的桶行不会被自动删除而是被忽略（按精确 horizon 读取，不会误用），属无害累积，如需清理可重跑批作业或手动清桶。
 - **小样本展示口径**：`sample < SIGNAL_HIT_VERIFIED_MIN_SAMPLE`（缺省回落 `BACKTEST_EVAL_WINDOW_DAYS`）时回填全 null（前端显示「样本不足」），不展示不可信的胜率/CI/超额（对齐本文 §5 与 spec §4.1）。
@@ -226,7 +278,7 @@ M3-A6 改源后，`resolve_marker_hit_fields(signal_type, code)` 改读 `signal_
 
 ---
 
-## 12. 回滚方式
+## 13. 回滚方式
 
 M3-A 为增量实现，无主流程强依赖：
 
