@@ -5,6 +5,7 @@ akshare(东财)免 key,默认真拉;Tushare 仅当 TUSHARE_TOKEN 存在时真拉
 分钟 schema/datetime 升序无重复、5m 间距为主、历史 start_date 锚定。
 """
 import os
+import time
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -16,13 +17,22 @@ _CONN_HINTS = ("Connection", "Max retries", "timed out", "Temporary failure",
                "name resolution", "ConnectionError", "RemoteDisconnected", "限频", "频繁")
 
 
-def _fetch_or_skip(fn):
-    try:
-        return fn()
-    except Exception as e:  # 东财限频 / DNS 抖动 / 取数失败 → 观测项跳过
-        if any(k in str(e) for k in _CONN_HINTS) or "无分钟数据" in str(e):
-            pytest.skip(f"A股分钟端点不可达/限频,跳过观测: {e}")
-        raise
+def _fetch_or_skip(fn, retries=6, delay=2.0):
+    """东财免费端点抖动频繁(常需多次重连),连接类异常重试数次后再 skip;
+    业务类'无分钟数据'直接 skip;其余真实异常照常抛出(不掩盖契约问题)。"""
+    last = None
+    for _ in range(retries):
+        try:
+            return fn()
+        except Exception as e:  # 主要是 requests.ConnectionError / 东财抖动
+            last = e
+            if "无分钟数据" in str(e):
+                pytest.skip(f"A股分钟无数据,跳过观测: {e}")
+            if any(k in str(e) for k in _CONN_HINTS):
+                time.sleep(delay)
+                continue
+            raise
+    pytest.skip(f"A股分钟端点不可达/限频,重试 {retries} 次仍失败,跳过观测: {last}")
 
 
 def _assert_intraday_shape(df: pd.DataFrame):
