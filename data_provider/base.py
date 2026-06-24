@@ -641,7 +641,9 @@ class BaseFetcher(ABC):
 
 
 # ---- 分钟 K 线进程内 TTL 缓存（key=(code, interval, days) -> (timestamp, df)）----
-_INTRADAY_CACHE: Dict[Tuple[str, str, int], Tuple[float, "pd.DataFrame"]] = {}
+# 缓存键含 start_date/end_date：回测对同一 code+interval+days 但不同 analysis_date
+# (→不同历史窗口)会复用同一进程缓存键，缺 start/end 将取回错窗口数据，故纳入键。
+_INTRADAY_CACHE: Dict[Tuple, Tuple[float, "pd.DataFrame"]] = {}
 _INTRADAY_CACHE_LOCK = RLock()
 
 
@@ -654,7 +656,7 @@ def _get_intraday_config():
         return None
 
 
-def _intraday_cache_get(key: Tuple[str, str, int]) -> Optional["pd.DataFrame"]:
+def _intraday_cache_get(key: Tuple) -> Optional["pd.DataFrame"]:
     """若缓存命中且未过期，返回 DataFrame；否则返回 None。"""
     cfg = _get_intraday_config()
     ttl = getattr(cfg, "crypto_intraday_minute_cache_ttl_s", 0) if cfg else 0
@@ -670,7 +672,7 @@ def _intraday_cache_get(key: Tuple[str, str, int]) -> Optional["pd.DataFrame"]:
     return df.copy()
 
 
-def _intraday_cache_set(key: Tuple[str, str, int], df: "pd.DataFrame") -> None:
+def _intraday_cache_set(key: Tuple, df: "pd.DataFrame") -> None:
     """写入缓存（TTL=0 时不写入）。"""
     cfg = _get_intraday_config()
     ttl = getattr(cfg, "crypto_intraday_minute_cache_ttl_s", 0) if cfg else 0
@@ -1563,8 +1565,8 @@ class DataFetcherManager:
         if not (is_crypto_code(stock_code) or is_perp_code(stock_code) or is_a_share_code(stock_code)):
             raise DataFetchError(f"{stock_code} 暂不支持分钟级数据（仅 crypto / A股）")
 
-        # 缓存命中
-        cache_key: Tuple[str, str, int] = (stock_code, interval, days)
+        # 缓存命中（键含 start/end，避免回测跨 analysis_date 同窗口键碰撞取回错数据）
+        cache_key: Tuple = (stock_code, interval, days, str(start_date), str(end_date))
         cached = _intraday_cache_get(cache_key)
         if cached is not None:
             logger.debug("[intraday_cache] 命中: %s interval=%s days=%s", stock_code, interval, days)

@@ -61,6 +61,17 @@ def test_akshare_intraday_unsupported_interval_raises(monkeypatch):
         f.get_intraday_data("600519", interval="3m", days=1)
 
 
+def test_akshare_intraday_1m_fail_closed(monkeypatch):
+    """1m 故意不兜底:东财 period='1' 走 trends2(ndays=5、忽略 start/end),
+    历史窗口会取回最近 5 日错数据,故 akshare 对 1m 直接抛 NotImplementedError(仅 Tushare 支持 1m)。"""
+    captured = {}
+    _install_fake_ak(monkeypatch, captured)
+    f = AkshareFetcher()
+    with pytest.raises(NotImplementedError):
+        f.get_intraday_data("600519", interval="1m", start_date="2024-01-15", days=1)
+    assert captured == {}  # 未触达东财调用,fail-closed 于映射阶段
+
+
 def test_akshare_intraday_empty_raises(monkeypatch):
     captured = {}
     _install_fake_ak(monkeypatch, captured, rows=[])

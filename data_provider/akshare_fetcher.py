@@ -373,8 +373,11 @@ def _terminate_akshare_process(process) -> None:
         process.join(_AKSHARE_TIMEOUT_PROCESS_JOIN_GRACE)
 
 
-# 统一 interval 词表 → stock_zh_a_hist_min_em 的 period 取值
-_AK_PERIOD = {"1m": "1", "5m": "5", "15m": "15", "1h": "60"}
+# 统一 interval 词表 → stock_zh_a_hist_min_em 的 period 取值。
+# 注意：东财 1m(period='1')走 trends2 接口、ndays=5 硬编码且忽略 start/end/adjust，
+# 无法锚定历史窗口（回测均为历史日期）→ 故意不纳入兜底，1m 抛 NotImplementedError，
+# 仅由 Tushare(stk_mins) 支持 1m，避免静默取回最近 5 日的错窗口数据。
+_AK_PERIOD = {"5m": "5", "15m": "15", "1h": "60"}
 
 
 class AkshareFetcher(BaseFetcher):
