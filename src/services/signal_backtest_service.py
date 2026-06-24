@@ -12,6 +12,7 @@ from typing import List, Optional
 import pandas as pd
 
 from src.config import get_config
+from src.core.intraday_backtest import is_intraday_interval, validate_interval
 from src.core.trading_calendar import get_market_for_stock
 from src.repositories.signal_stats_repo import SignalStatsRepository
 from src.services.signal_backtest import (
@@ -31,6 +32,14 @@ _MIN_BARS = 50
 
 # 默认拉取天数（覆盖 horizon 预热 + 有效评估窗口）
 _FETCH_DAYS = 365
+
+
+def _minute_fetch_days(*, market_interval: str) -> int:
+    """分钟回测近窗上界(天)。各数据源会按自身可得范围封顶,取值偏大无害。
+
+    1h 历史一般更深(美股 yfinance 1h≈730d),取 730;其余分钟粒度取 365。
+    """
+    return 730 if market_interval == "1h" else 365
 
 
 def _read_watchlist_codes(service: SystemConfigService) -> list:
@@ -63,16 +72,20 @@ class SignalBacktestService:
         *,
         codes: Optional[List[str]] = None,
         horizon: Optional[int] = None,
+        interval: str = "1d",
     ) -> dict:
         """对自选池（或指定列表）跑信号三重门回测，聚合后写入 signal_stats。
 
         Args:
-            codes:   指定股票代码列表；None 时读取 STOCK_LIST 自选池。
-            horizon: 前瞻 bar 数；None 时取 config.signal_backtest_horizon_bars（默认 10）。
+            codes:    指定股票代码列表；None 时读取 STOCK_LIST 自选池。
+            horizon:  前瞻 bar 数；None 时取 config.signal_backtest_horizon_bars（默认 10）。
+            interval: bar 粒度；'1d' 走日线（行为不变），分钟（1m/5m/15m/1h）在分钟 bar
+                      上重算 VPS 信号 + 前向三重门，落库行标记 interval=<interval>。
 
         Returns:
-            dict，字段：processed, codes, stats_written, skipped, errors。
+            dict，字段：processed, codes, stats_written, skipped, errors, interval。
         """
+        validate_interval(interval)
         cfg = get_config()
         hz = int(horizon or getattr(cfg, "signal_backtest_horizon_bars", 10))
 
@@ -94,14 +107,13 @@ class SignalBacktestService:
                     skipped += 1
                     continue
 
-                hist = svc.get_history_data(stock_code=code, period="daily", days=_FETCH_DAYS)
-                rows = (hist or {}).get("data") or []
-                if len(rows) < _MIN_BARS:
-                    logger.debug("跳过数据不足股票: %s (bars=%d)", code, len(rows))
+                df = self._load_bars(svc, code, interval)
+                if df is None or len(df) < _MIN_BARS:
+                    bars = 0 if df is None else len(df)
+                    logger.debug("跳过数据不足股票: %s (bars=%d)", code, bars)
                     skipped += 1
                     continue
 
-                df = pd.DataFrame(rows)
                 cfg_m = VPSConfig.for_market(market)
                 all_sig.extend(evaluate_signal_outcomes(df, market=market, horizon=hz, config=cfg_m))
                 all_base.extend(evaluate_baseline_outcomes(df, market=market, horizon=hz, config=cfg_m))
@@ -112,7 +124,7 @@ class SignalBacktestService:
                 logger.warning("信号回测跳过 %s: %s", code, exc)
 
         # 聚合所有股票的结果（一次调用）
-        stats = aggregate_signal_stats(all_sig, all_base, horizon=hz)
+        stats = aggregate_signal_stats(all_sig, all_base, horizon=hz, interval=interval)
 
         # 构造 ORM 行并落库
         orm_rows = [
@@ -140,4 +152,24 @@ class SignalBacktestService:
             "stats_written": written,
             "skipped": skipped,
             "errors": errors,
+            "interval": interval,
         }
+
+    def _load_bars(self, svc, code, interval):
+        """按 interval 取 bar：日线走 StockService（不变），分钟走链路A get_intraday_data。
+
+        分钟路径复用链路A 的 DataFetcherManager.get_intraday_data（market 路由在其内部按 code
+        判定，本函数不需要 market），并把 'datetime' 列重命名为 'date'，供下游 VPS/_eval 复用
+        既有 'date' 列契约（保留分钟时间戳，配合 _to_epoch_ms_shanghai 分钟分辨率感知）。
+        取不到数据返回 None（交由 run 计入 skipped）。
+        """
+        if not is_intraday_interval(interval):       # '1d'
+            hist = svc.get_history_data(stock_code=code, period="daily", days=_FETCH_DAYS)
+            rows = (hist or {}).get("data") or []
+            return pd.DataFrame(rows) if rows else None
+        from data_provider.base import DataFetcherManager
+        df, _src = DataFetcherManager().get_intraday_data(
+            code, interval, days=_minute_fetch_days(market_interval=interval))
+        if df is None or df.empty:
+            return None
+        return df.rename(columns={"datetime": "date"})

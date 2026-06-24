@@ -415,6 +415,13 @@ def parse_arguments() -> argparse.Namespace:
         action='store_true',
         help='对自选池跑信号三重门回测并落 signal_stats'
     )
+    parser.add_argument(
+        '--signal-backtest-interval',
+        type=str,
+        default='1d',
+        choices=["1d", "1m", "5m", "15m", "1h"],
+        help="信号回测 bar 粒度(默认 1d=日线;分钟在分钟 bar 上重算信号+三重门评估)",
+    )
 
     return parser.parse_args()
 
@@ -928,7 +935,8 @@ def main() -> int:
         if getattr(args, 'signal_backtest', False):
             logger.info("模式: 信号三重门批回测")
             from src.services.signal_backtest_service import SignalBacktestService
-            stats = SignalBacktestService().run()
+            stats = SignalBacktestService().run(
+                interval=getattr(args, 'signal_backtest_interval', '1d'))
             logger.info("信号回测完成: %s", stats)
             print(stats)
             return 0
