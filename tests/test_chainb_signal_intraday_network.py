@@ -26,7 +26,8 @@ def test_chainb_run_5m_crypto_real(tmp_path):
         for _ in range(4):
             try:
                 out = SignalBacktestService(db_manager=db).run(codes=["BTC/USDT"], interval="5m")
-                assert out["interval"] == "5m" and out["processed"] >= 0
+                # 数据可达时 BTC/USDT 5m 近窗远超 _MIN_BARS=50 → 应真正处理该 code(非恒真)
+                assert out["interval"] == "5m" and out["processed"] >= 1
                 return
             except Exception as e:  # noqa: BLE001 — 观测测试,网络抖动重试后 skip
                 last = e

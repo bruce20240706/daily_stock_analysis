@@ -132,7 +132,13 @@ def _to_epoch_ms_shanghai(date_value) -> int:
                 dt = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
                 has_time = True
             except ValueError:
-                dt = datetime.strptime(s[:10], "%Y-%m-%d")
+                # 非空格分隔(如 ISO 'T'、带时区偏移)→ pandas 宽松解析保留时分;失败再退纯日期午夜
+                ts = pd.to_datetime(s, errors="coerce")
+                if ts is not None and not pd.isna(ts):
+                    dt = ts.to_pydatetime()
+                    has_time = not (dt.hour == dt.minute == dt.second == dt.microsecond == 0)
+                else:
+                    dt = datetime.strptime(s[:10], "%Y-%m-%d")
         else:
             dt = datetime.strptime(s[:10], "%Y-%m-%d")
     elif isinstance(date_value, pd.Timestamp):

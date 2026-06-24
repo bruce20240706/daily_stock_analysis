@@ -1086,3 +1086,11 @@ def test_to_epoch_minute_preserves_time():
     assert t0935 != t0940 and t0935 != midnight        # 分钟 bar 不坍缩到午夜
     assert (t0940 - t0935) == 5 * 60 * 1000            # 5 分钟差
     assert _to_epoch_ms_shanghai("2026-06-22 09:35:00") == t0935   # 带时间字符串同样保留
+
+
+def test_to_epoch_iso_t_separated_string_preserves_time():
+    """ISO 'T' 分隔的分钟字符串也保留时分(不坍缩到午夜)——硬化字符串解析路径。"""
+    t_space = _to_epoch_ms_shanghai("2026-06-22 09:35:00")
+    midnight = _to_epoch_ms_shanghai("2026-06-22")
+    assert _to_epoch_ms_shanghai("2026-06-22T09:35:00") == t_space   # 'T' 与空格等价
+    assert _to_epoch_ms_shanghai("2026-06-22T09:35:00") != midnight  # 不坍缩到午夜

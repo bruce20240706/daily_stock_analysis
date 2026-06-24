@@ -168,6 +168,27 @@ def test_build_board_cache_hit(monkeypatch):
     assert calls["n"] == 1
 
 
+def test_build_board_cache_isolated_by_interval(monkeypatch):
+    """看板缓存键含 interval:同 (code,days) 下 1d 与 5m 不串桶(回归护栏)。
+
+    若缓存键退回 (code,days)(去掉 interval),5m 请求会命中 1d 缓存,把日线可信度
+    当分钟桶返回——本用例对此变异 fail-closed。
+    """
+    seen = []
+    def fake(code, *, days=120, interval="1d"):
+        seen.append(interval)
+        return _bs("bullish")
+    monkeypatch.setattr(sbs, "build_signals_for_code", fake)
+    sbs._BOARD_CACHE.clear()
+    sbs.build_board(["AAA"], days=120, refresh=False, interval="1d")   # 计算并写 1d 桶
+    sbs.build_board(["AAA"], days=120, refresh=False, interval="5m")   # 不得命中 1d 桶
+    assert seen == ["1d", "5m"]                                        # 各算一次,interval 各异
+    # 二次请求各自 interval 仍命中各自缓存(不再重算)
+    sbs.build_board(["AAA"], days=120, refresh=False, interval="1d")
+    sbs.build_board(["AAA"], days=120, refresh=False, interval="5m")
+    assert seen == ["1d", "5m"]                                        # 命中缓存,无新增调用
+
+
 def test_build_board_refresh_bypasses_populated_cache(monkeypatch):
     calls = {"n": 0}
     def fake_a(code, *, days=120, interval="1d"):
