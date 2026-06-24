@@ -286,6 +286,38 @@ def is_bse_code(code: str) -> bool:
 
     return c.startswith(("92", "43", "81", "82", "83", "87", "88"))
 
+
+_SH_A_PREFIXES = ("600", "601", "603", "605", "688")
+_SZ_A_PREFIXES = ("000", "001", "002", "003", "300", "301")
+
+
+def is_a_share_code(code: str) -> bool:
+    """判定是否为 A 股(沪深主板/科创/创业 + 北交所)。
+
+    先排除 crypto/perp 与港股(5 位或 HK 前缀),再要求 normalize 后为 6 位纯数字
+    且落在沪/深 A 股前缀或北交所规则内。沪 B(900xxx)经 is_bse_code 排除。
+    """
+    if is_crypto_code(code) or is_perp_code(code):
+        return False
+    if _is_hk_market(code):
+        return False
+    c = normalize_stock_code(code)
+    if not (len(c) == 6 and c.isdigit()):
+        return False
+    if c.startswith(_SH_A_PREFIXES) or c.startswith(_SZ_A_PREFIXES):
+        return True
+    return is_bse_code(c)
+
+
+def market_of(code: str) -> str:
+    """分钟回测市场归类:crypto(含 perp)/ cn。其他(港股/美股等)抛 ValueError。"""
+    if is_crypto_code(code) or is_perp_code(code):
+        return "crypto"
+    if is_a_share_code(code):
+        return "cn"
+    raise ValueError(f"无分钟市场归类: {code!r}")
+
+
 def is_st_stock(name: str) -> bool:
     """
     Check if the stock is an ST or *ST stock based on its name.
@@ -609,7 +641,9 @@ class BaseFetcher(ABC):
 
 
 # ---- 分钟 K 线进程内 TTL 缓存（key=(code, interval, days) -> (timestamp, df)）----
-_INTRADAY_CACHE: Dict[Tuple[str, str, int], Tuple[float, "pd.DataFrame"]] = {}
+# 缓存键含 start_date/end_date：回测对同一 code+interval+days 但不同 analysis_date
+# (→不同历史窗口)会复用同一进程缓存键，缺 start/end 将取回错窗口数据，故纳入键。
+_INTRADAY_CACHE: Dict[Tuple, Tuple[float, "pd.DataFrame"]] = {}
 _INTRADAY_CACHE_LOCK = RLock()
 
 
@@ -622,7 +656,7 @@ def _get_intraday_config():
         return None
 
 
-def _intraday_cache_get(key: Tuple[str, str, int]) -> Optional["pd.DataFrame"]:
+def _intraday_cache_get(key: Tuple) -> Optional["pd.DataFrame"]:
     """若缓存命中且未过期，返回 DataFrame；否则返回 None。"""
     cfg = _get_intraday_config()
     ttl = getattr(cfg, "crypto_intraday_minute_cache_ttl_s", 0) if cfg else 0
@@ -638,7 +672,7 @@ def _intraday_cache_get(key: Tuple[str, str, int]) -> Optional["pd.DataFrame"]:
     return df.copy()
 
 
-def _intraday_cache_set(key: Tuple[str, str, int], df: "pd.DataFrame") -> None:
+def _intraday_cache_set(key: Tuple, df: "pd.DataFrame") -> None:
     """写入缓存（TTL=0 时不写入）。"""
     cfg = _get_intraday_config()
     ttl = getattr(cfg, "crypto_intraday_minute_cache_ttl_s", 0) if cfg else 0
@@ -1473,6 +1507,36 @@ class DataFetcherManager:
         logger.error(f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}")
         raise DataFetchError(error_summary)
     
+    def _intraday_fetchers_for(self, code: str) -> List[BaseFetcher]:
+        """返回某代码可用的分钟数据源（已按市场/能力过滤并排序）。
+
+        - market 由代码判定：crypto_perp / crypto / cn；其余返回空列表（由调用方拒绝）。
+        - 剔除未覆写 get_intraday_data 的源（BaseFetcher 默认抛 NotImplementedError），
+          避免对 Efinance/Pytdx/Baostock 等纯日线源做无谓调用。
+        - cn 显式把 Tushare 主源排到 akshare 兜底之前；无 token 的 Tushare 已被
+          capability="intraday_data" 的可用性探测剔除（is_available()→False）。
+        """
+        if is_perp_code(code):
+            market = "crypto_perp"
+        elif is_crypto_code(code):
+            market = "crypto"
+        elif is_a_share_code(code):
+            market = "cn"
+        else:
+            return []
+
+        fetchers = self._get_fetchers_snapshot()
+        fetchers = self._filter_daily_fetchers_for_market(fetchers, market)
+        fetchers = self._filter_fetchers_by_capability(fetchers, capability="intraday_data")
+        fetchers = [
+            f for f in fetchers
+            if type(f).get_intraday_data is not BaseFetcher.get_intraday_data
+        ]
+        if market == "cn":
+            _cn_order = {"TushareFetcher": 0, "AkshareFetcher": 1}
+            fetchers.sort(key=lambda f: _cn_order.get(f.name, 2))
+        return fetchers
+
     def get_intraday_data(
         self,
         stock_code: str,
@@ -1481,11 +1545,12 @@ class DataFetcherManager:
         end_date: Optional[str] = None,
         days: int = 30,
     ) -> Tuple[pd.DataFrame, str]:
-        """获取分钟级 K 线数据（仅 crypto/crypto_perp）。
+        """获取分钟级 K 线数据（crypto/crypto_perp 与 A股沪深/北交）。
 
         路由策略：
-        - 非 crypto 代码直接抛 DataFetchError。
-        - 按市场过滤 fetcher，再按 capability="intraday_data" 过滤。
+        - 非 crypto / 非 A股 代码直接抛 DataFetchError。
+        - 经 _intraday_fetchers_for 按市场 + capability="intraday_data" 过滤并排序
+          （cn 时 Tushare 主源优先、akshare 兜底）。
         - 依次尝试各 fetcher，返回首个非空结果 (df, fetcher_name)。
         - 带进程内 TTL 缓存，key=(code, interval, days)；TTL=0 时不缓存。
 
@@ -1493,24 +1558,21 @@ class DataFetcherManager:
             Tuple[DataFrame, str]: (纯 OHLCV+datetime 的 DataFrame，成功的 fetcher 名称)
 
         Raises:
-            DataFetchError: 非 crypto 代码或所有 fetcher 均失败时抛出。
+            DataFetchError: 非 crypto / 非 A股 代码或所有 fetcher 均失败时抛出。
         """
         stock_code = normalize_stock_code(stock_code)
 
-        if not (is_crypto_code(stock_code) or is_perp_code(stock_code)):
-            raise DataFetchError(f"{stock_code} 暂不支持分钟级数据（仅 crypto）")
+        if not (is_crypto_code(stock_code) or is_perp_code(stock_code) or is_a_share_code(stock_code)):
+            raise DataFetchError(f"{stock_code} 暂不支持分钟级数据（仅 crypto / A股）")
 
-        # 缓存命中
-        cache_key: Tuple[str, str, int] = (stock_code, interval, days)
+        # 缓存命中（键含 start/end，避免回测跨 analysis_date 同窗口键碰撞取回错数据）
+        cache_key: Tuple = (stock_code, interval, days, str(start_date), str(end_date))
         cached = _intraday_cache_get(cache_key)
         if cached is not None:
             logger.debug("[intraday_cache] 命中: %s interval=%s days=%s", stock_code, interval, days)
             return cached, "cache"
 
-        fetchers = self._get_fetchers_snapshot()
-        market = "crypto_perp" if is_perp_code(stock_code) else "crypto"
-        fetchers = self._filter_daily_fetchers_for_market(fetchers, market)
-        fetchers = self._filter_fetchers_by_capability(fetchers, capability="intraday_data")
+        fetchers = self._intraday_fetchers_for(stock_code)
 
         if not fetchers:
             raise DataFetchError(f"{stock_code} 无可用分钟数据源（interval={interval}）")

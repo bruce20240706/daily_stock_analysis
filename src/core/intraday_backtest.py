@@ -13,7 +13,8 @@ INTRADAY_INTERVAL_MINUTES: dict[str, int] = {"1m": 1, "5m": 5, "15m": 15, "1h": 
 # 允许集:'1d' 为日线(走既有路径),其余为分钟
 SUPPORTED_INTERVALS: tuple[str, ...] = ("1d", "1m", "5m", "15m", "1h")
 
-_MINUTES_PER_DAY = 1440  # crypto 24h
+# 各市场每日交易分钟数(crypto 7×24;A股沪深两段 09:30-11:30 + 13:00-15:00 = 240)
+MARKET_TRADING_MINUTES: dict[str, int] = {"crypto": 1440, "cn": 240}
 
 
 def validate_interval(interval) -> str:
@@ -28,17 +29,17 @@ def is_intraday_interval(interval: str) -> bool:
     return interval in INTRADAY_INTERVAL_MINUTES
 
 
-def bars_per_day(interval: str) -> int:
-    """每自然日的 bar 根数(crypto 7×24)。非分钟 interval 抛 ValueError。"""
+def bars_per_day(interval: str, market: str = "crypto") -> int:
+    """每交易日的 bar 根数。未知 interval 抛 ValueError,未知 market 抛 KeyError。"""
     minutes = INTRADAY_INTERVAL_MINUTES.get(interval)
     if minutes is None:
         raise ValueError(f"不支持的分钟 interval: {interval!r}")
-    return _MINUTES_PER_DAY // minutes
+    return MARKET_TRADING_MINUTES[market] // minutes
 
 
-def derive_window_bar_count(eval_window_days: int, interval: str) -> int:
-    """日历窗口(天)→ 分钟 bar 切片长度。"""
-    return int(eval_window_days) * bars_per_day(interval)
+def derive_window_bar_count(eval_window_days: int, interval: str, market: str = "crypto") -> int:
+    """日历/交易日窗口(天)→ 分钟 bar 切片长度。"""
+    return int(eval_window_days) * bars_per_day(interval, market)
 
 
 def build_engine_version_tag(base: str, interval: str, leverage: int) -> str:

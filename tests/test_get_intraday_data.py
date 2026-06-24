@@ -25,9 +25,10 @@ def _clear_cache():
 
 
 def test_non_crypto_intraday_raises():
+    # A股已支持，故用仍不支持的美股码验证"非支持市场在任何 fetcher 调用前被拒"
     mgr = DataFetcherManager()
-    with pytest.raises(DataFetchError):  # non-crypto rejected before any fetcher attempt
-        mgr.get_intraday_data("600519", interval="5m", days=1)
+    with pytest.raises(DataFetchError):
+        mgr.get_intraday_data("AAPL", interval="5m", days=1)
 
 
 def test_crypto_intraday_returns_ohlc_without_indicators(monkeypatch):
@@ -140,6 +141,31 @@ def test_manager_intraday_cache_ttl_positive_hits_cache(monkeypatch):
     assert call_count["n"] == 1, "second call must hit cache, not the fetcher"
     assert not df2.empty
     assert source2 == "cache"
+
+
+def test_manager_intraday_cache_key_includes_start_date(monkeypatch):
+    """缓存键含 start_date:不同历史窗口(回测跨 analysis_date)各自取数,绝不碰撞取回错窗口。"""
+    call_count = {"n": 0}
+
+    def fake_request_klines(self, symbol, days, interval="1d", start_ms=None):
+        call_count["n"] += 1
+        return [_BAR_0, _BAR_1]
+
+    _patch_all_crypto_request_klines(monkeypatch, fake_request_klines)
+
+    class FakeCfg:
+        crypto_intraday_minute_cache_ttl_s = 900
+
+    monkeypatch.setattr("data_provider.base._get_intraday_config", lambda: FakeCfg())
+
+    mgr = DataFetcherManager()
+    _clear_cache()
+    mgr.get_intraday_data("BTC/USDT", interval="5m", days=1, start_date="2024-01-01")
+    mgr.get_intraday_data("BTC/USDT", interval="5m", days=1, start_date="2024-02-01")
+    assert call_count["n"] == 2, "不同 start_date 必须各自取数(键含 start),不得复用缓存"
+    # 相同 start_date 命中缓存
+    _, src = mgr.get_intraday_data("BTC/USDT", interval="5m", days=1, start_date="2024-02-01")
+    assert call_count["n"] == 2 and src == "cache", "相同 start_date 应命中缓存"
 
 
 def test_binance_paging_multi_page_forward(monkeypatch):

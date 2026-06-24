@@ -184,27 +184,18 @@ class CryptoExchangeBase(BaseFetcher):
         return self._normalize_intraday(df, stock_code)
 
     def _normalize_intraday(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
-        """分钟级标准化：保留全精度 datetime（由 ms 时间戳构建），数值化 OHLCV，不算指标。
+        """分钟级标准化：由 ms 时间戳构建全精度 datetime 后委托共享 normalize_intraday_df。
 
         输出列：code, datetime, open, high, low, close, volume, amount, pct_chg。
         """
+        from .intraday_normalize import normalize_intraday_df
+
         df = df.copy()
         if "date" not in df.columns:
             raise DataFetchError(f"{self.name} 分钟数据缺少 date 列")
         # 全精度 datetime（毫秒），用于排序/清洗/输出，避免日级截断与排序错位。
         df["datetime"] = pd.to_datetime(df["date"], unit="ms")
-        for col in ("open", "high", "low", "close", "volume", "amount"):
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-        if "amount" not in df.columns:
-            df["amount"] = None
-        # 去除关键列为空的行，再按全精度时间升序排序（与日线 _clean_data 语义一致）。
-        df = df.dropna(subset=["close", "volume"])
-        df = df.sort_values("datetime").reset_index(drop=True)
-        df["pct_chg"] = (df["close"].pct_change() * 100).fillna(0.0)
-        df["code"] = stock_code
-        keep = ["code", "datetime", "open", "high", "low", "close", "volume", "amount", "pct_chg"]
-        return df[[c for c in keep if c in df.columns]]
+        return normalize_intraday_df(df, stock_code)
 
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         if not (is_crypto_code(stock_code) or is_perp_code(stock_code)):

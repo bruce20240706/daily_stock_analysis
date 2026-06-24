@@ -110,6 +110,10 @@ class _TushareHttpClient:
         return caller
 
 
+# 统一 interval 词表 → Tushare stk_mins 的 freq 取值
+_TS_FREQ = {"1m": "1min", "5m": "5min", "15m": "15min", "1h": "60min"}
+
+
 class TushareFetcher(BaseFetcher):
     """
     Tushare Pro 数据源实现
@@ -262,6 +266,46 @@ class TushareFetcher(BaseFetcher):
         self._check_rate_limit()
         method = getattr(self._api, method_name)
         return method(**kwargs)
+
+    def get_intraday_data(
+        self,
+        stock_code: str,
+        interval: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        days: int = 30,
+    ) -> pd.DataFrame:
+        """A股分钟级 K 线（HTTP stk_mins）。返回纯 OHLCV+datetime（不算技术指标）。
+
+        - interval 经 _TS_FREQ 映射为 stk_mins 的 freq（1h→60min）；不支持的抛 NotImplementedError。
+        - 仅传日期时补齐为带时分秒的 datetime，满足 stk_mins 入参契约。
+        - 复用共享 normalize_intraday_df 做数值化/去空/升序/pct_chg/选列。
+        """
+        if self._api is None:
+            raise DataFetchError(f"[{self.name}] Tushare 未配置 token，无法取分钟数据")
+        freq = _TS_FREQ.get(interval)
+        if freq is None:
+            raise NotImplementedError(f"[{self.name}] 不支持 interval={interval}")
+
+        ts_code = self._convert_stock_code(stock_code)
+        params: Dict[str, Any] = {"ts_code": ts_code, "freq": freq}
+        if start_date:
+            params["start_date"] = (
+                f"{start_date} 09:00:00" if len(str(start_date)) == 10 else str(start_date)
+            )
+        if end_date:
+            params["end_date"] = (
+                f"{end_date} 16:00:00" if len(str(end_date)) == 10 else str(end_date)
+            )
+
+        raw = self._call_api_with_rate_limit("stk_mins", **params)
+        if raw is None or raw.empty:
+            raise DataFetchError(f"[{self.name}] {stock_code} 无分钟数据（freq={freq}）")
+
+        from .intraday_normalize import normalize_intraday_df
+
+        raw = raw.rename(columns={"trade_time": "datetime", "vol": "volume"})
+        return normalize_intraday_df(raw, stock_code)
 
     def _get_china_now(self) -> datetime:
         """返回上海时区当前时间，方便测试覆盖跨日刷新逻辑。"""

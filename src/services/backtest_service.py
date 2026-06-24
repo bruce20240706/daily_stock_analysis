@@ -75,16 +75,15 @@ class BacktestService:
 
         intraday = is_intraday_interval(interval)
         if intraday:
-            window_bar_cnt = derive_window_bar_count(int(eval_window_days), interval)
-            eval_slice = window_bar_cnt
+            # 分钟窗口的 bar 切片数随市场而变(crypto 1440/日、A股 240/日),
+            # 故 eval_config 移入候选循环按 market_of(code) 逐个构建。
+            eval_config = None
         else:
-            eval_slice = int(eval_window_days)
-
-        eval_config = EvaluationConfig(
-            eval_window_days=eval_slice,
-            neutral_band_pct=neutral_band_pct,
-            engine_version=str(engine_version),
-        )
+            eval_config = EvaluationConfig(
+                eval_window_days=int(eval_window_days),
+                neutral_band_pct=neutral_band_pct,
+                engine_version=str(engine_version),
+            )
 
         candidates = self.repo.get_candidates(
             code=code,
@@ -106,15 +105,19 @@ class BacktestService:
         skipped_non_perp = 0
         skipped_unsupported = 0  # 分钟路径不支持的非 crypto 标的
 
-        from data_provider.base import is_perp_code, is_crypto_code
+        from data_provider.base import is_perp_code, is_crypto_code, is_a_share_code, market_of
 
         for analysis in candidates:
             if perp_only and not is_perp_code(analysis.code):
                 # SQL 粗滤漏网兜底（如 quote 非 USDT/USDC 的构造码）：杠杆情景只评估 perp
                 skipped_non_perp += 1
                 continue
-            if intraday and not (is_crypto_code(analysis.code) or is_perp_code(analysis.code)):
-                # 分钟路径仅支持 crypto/perp；非 crypto 跳过（单独计入 skipped_unsupported）
+            if intraday and not (
+                is_crypto_code(analysis.code)
+                or is_perp_code(analysis.code)
+                or is_a_share_code(analysis.code)
+            ):
+                # 分钟路径支持 crypto/perp 与 A股沪深/北交；其余市场跳过（计入 skipped_unsupported）
                 skipped_unsupported += 1
                 continue
             processed += 1
@@ -143,6 +146,14 @@ class BacktestService:
                     # §4.1: 入场价取 analysis_date 日线收盘（AI 建议成立时点），与日线路径一致。
                     # 前向窗口起点 = analysis_date 日线 bar 收盘时刻之后第一根分钟 bar，
                     # 对应 crypto 24h bar 收盘 = analysis_date + 1 day 00:00 UTC。
+                    # 市场化窗口：crypto 1440/日、A股 240/日 → window_bar_cnt 随 market 而变。
+                    market = market_of(analysis.code)
+                    window_bar_cnt = derive_window_bar_count(int(eval_window_days), interval, market)
+                    eval_config_used = EvaluationConfig(
+                        eval_window_days=window_bar_cnt,
+                        neutral_band_pct=neutral_band_pct,
+                        engine_version=str(engine_version),
+                    )
                     start_daily = self.stock_repo.get_start_daily(code=analysis.code, analysis_date=analysis_date)
 
                     if start_daily is None or start_daily.close is None:
@@ -171,7 +182,16 @@ class BacktestService:
                     start_date_for_eval = start_daily.date
                     # 分钟窗口起点 = analysis_date + 1 day（日线 bar 收盘后第一根分钟 bar 所在自然日）
                     _minute_window_start = start_daily.date + timedelta(days=1)
-                    _window_end_date = _minute_window_start + timedelta(days=int(eval_window_days))
+                    # crypto 24h：N 日历日 = N 交易日；A股每日仅 240 分钟交易，N 交易日需更宽
+                    # 日历窗口覆盖周末/节假日，由分钟流自身切片对齐交易日。
+                    # cn 缓冲需覆盖最长连续休市（春节/国庆约 11 天）+ 周末：N 交易日 ≈ N*7/5
+                    # 自然日，再叠加 ~14 天长假/周末冗余 → max(N*2, N*3//2 + 14)；超长停牌仍可能
+                    # 不足而落 insufficient_data（best-effort，见 docs §10.3/§10.5）。
+                    if market == "cn":
+                        _end_offset = max(int(eval_window_days) * 2, int(eval_window_days) * 3 // 2 + 14)
+                    else:
+                        _end_offset = int(eval_window_days)
+                    _window_end_date = _minute_window_start + timedelta(days=_end_offset)
                     from data_provider.base import DataFetcherManager
                     try:
                         fwd_df, _src = DataFetcherManager().get_intraday_data(
@@ -218,6 +238,7 @@ class BacktestService:
                     funding_cost_pct = 0.0
                 else:
                     # ----- 日线路径：原有逻辑，字节级不变 -----
+                    eval_config_used = eval_config
                     start_daily = self.stock_repo.get_start_daily(code=analysis.code, analysis_date=analysis_date)
 
                     if start_daily is None or start_daily.close is None:
@@ -273,7 +294,7 @@ class BacktestService:
                     forward_bars=forward_bars,
                     stop_loss=analysis.stop_loss,
                     take_profit=analysis.take_profit,
-                    config=eval_config,
+                    config=eval_config_used,
                     is_perp=is_perp,
                     funding_cost_pct=funding_cost_pct,
                     leverage=leverage,

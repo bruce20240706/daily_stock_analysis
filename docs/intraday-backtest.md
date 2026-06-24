@@ -1,7 +1,7 @@
-# 盘中/分钟级回测（crypto MVP）
+# 盘中/分钟级回测（crypto + A股）
 
-> **适用版本**：feat/intraday-backtest 分支（合入 main 后生效）  
-> **范围**：仅 crypto 现货与永续合约标的；A 股、美股暂不支持；港股不在计划内。
+> **范围**：crypto 现货与永续合约标的，以及 A 股沪深（北交 best-effort）；美股暂不支持；港股不在计划内。  
+> **A 股专章见 [§10](#10-a-股盘中分钟级回测沪深为主北交-best-effort)**，复用本文全部引擎/服务/API/Web/CLI，仅做市场化适配。
 
 ---
 
@@ -44,14 +44,16 @@ CRYPTO_INTRADAY_BACKTEST_INTERVAL=5m
 window_bar_count = eval_window_days × bars_per_day(interval)
 ```
 
-其中 `bars_per_day` 按 crypto 7×24 计算（1 天 = 1440 分钟）：
+其中 `bars_per_day` **按市场查表**（`MARKET_TRADING_MINUTES`）；crypto 7×24（1 天 = 1440 分钟），A 股每日 240 分钟交易（见 [§10.2](#102-bars_per_day市场化)）：
 
-| interval | bars_per_day |
-|----------|-------------|
-| `1m`     | 1440        |
-| `5m`     | 288         |
-| `15m`    | 96          |
-| `1h`     | 24          |
+| interval | crypto（1440/日） | A股（240/日） |
+|----------|------------------|---------------|
+| `1m`     | 1440             | 240           |
+| `5m`     | 288              | 48            |
+| `15m`    | 96               | 16            |
+| `1h`     | 24               | 4             |
+
+市场由标的代码自动判定（crypto/perp → crypto；沪深/北交 → cn）。
 
 入场价取 `analysis_date` 当日的**日线收盘价**（与日线路径一致，代表 AI 建议成立时点）。分钟窗口起点为 `analysis_date + 1 day` 00:00 UTC（crypto 日线 bar 收盘后第一根分钟 bar），向前延伸 `eval_window_days` 天。
 
@@ -153,7 +155,7 @@ python main.py --backtest --backtest-interval 5m
 python main.py --backtest --backtest-interval 1h
 
 # 对指定标的跑 15m 回测
-python main.py --backtest --backtest-interval 15m --stocks BTCUSDT,ETHUSDT
+python main.py --backtest --backtest-interval 15m --backtest-code BTCUSDT
 ```
 
 ### 8.2 API
@@ -203,11 +205,11 @@ GET /api/v1/backtest/performance?interval=5m
 - 数据深度：Binance 保留近几个月至数年的 1m/5m/15m 数据，但**极远历史（1m 粒度数年前）可能不可用**。
 - 建议 `eval_window_days ≤ 30`（5m 约 8640 根 bar），避免历史数据缺失。
 
-### 9.2 Crypto-only 限制
+### 9.2 支持市场
 
-- **当前仅支持 crypto 标的**（Binance/OKX/Coinbase 现货 + 永续合约）。
-- A 股、美股后续考虑接入，港股不在计划内。
-- 非 crypto 标的在分钟路径下会被跳过（`skipped_unsupported` 计数），日线路径不受影响。
+- **crypto**（Binance/OKX/Coinbase 现货 + 永续合约）：本节及上文均以 crypto 为例。
+- **A 股**（沪深为主，北交 best-effort）：见 [§10](#10-a-股盘中分钟级回测沪深为主北交-best-effort)。
+- **美股暂不支持，港股不在计划内**；这些市场的标的在分钟路径下会被跳过（`skipped_unsupported` 计数），日线路径不受影响。
 
 ### 9.3 历史窗口锚点
 
@@ -215,7 +217,55 @@ GET /api/v1/backtest/performance?interval=5m
 
 ---
 
-## 10. 配置项汇总
+## 10. A 股盘中/分钟级回测（沪深为主，北交 best-effort）
+
+A 股复用上述全部引擎 / 服务 / API / Web / CLI 能力，仅做市场化适配；**crypto 与日线路径行为不变**。
+
+### 10.1 数据源（Tushare 主源 + akshare 免费兜底）
+
+| 数据源 | 接口 | Token | 说明 |
+|--------|------|-------|------|
+| Tushare（主源） | `stk_mins`（HTTP Pro） | 需 `TUSHARE_TOKEN` + 积分 | 配置 token 且数据源可用时优先；分钟接口对积分有门槛 |
+| akshare（兜底） | `stock_zh_a_hist_min_em`（东财） | 免费、无需 token | Tushare 不可用 / 无 token / 取数失败时自动降级 |
+
+- **不配置 token 也能用**：无 `TUSHARE_TOKEN` 时 Tushare 数据源按可用性探测自动跳过，直接走 akshare 免费兜底。
+- interval 词表与 crypto 统一（`1m/5m/15m/1h`），各源内部映射：Tushare `1h→60min`、akshare `1h→'60'`。
+- **akshare 不支持历史 `1m`**：东财 `1m`（`period='1'`）走 trends2 接口、仅返回最近约 5 个交易日且忽略 `start/end`，无法锚定回测的历史窗口；故 akshare 对 `1m` 直接抛 `NotImplementedError`（fail-closed，避免静默取回错窗口）。**`1m` A 股回测需配置 Tushare token**；无 token 时 `1m` 不可得（落 `insufficient_data`），`5m/15m/1h` 不受影响。
+
+### 10.2 bars_per_day（市场化）
+
+A 股每个交易日仅两段连续竞价：09:30–11:30 + 13:00–15:00 = **240 分钟**，故 `bars_per_day` 按市场查表（对照表见 [§3](#3-同日历窗口分钟路径)）：`window_bar_count = eval_window_days × bars_per_day(interval, "cn")`，market 由代码自动判定（沪深/北交 → `cn`）。
+
+### 10.3 窗口语义（交易日，分钟流即日历）
+
+- 入场价 = `analysis_date` 当日**日线收盘价**（15:00 收盘，与日线/crypto 路径一致）。
+- 分钟窗口起点 = 日线收盘次日（`analysis_date + 1`）；由于分钟流只含交易时段 bar，向前切 `window_bar_count` 根即等价 N 个交易日，**无需交易日历做日期运算**。
+- 取数 `end_date` 比 crypto 更宽（`max(N×2, N×3//2 + 14)` 自然日），尽力覆盖周末与长假（春节/国庆约 11 天连续休市），让分钟流切满 N 个交易日。**极端超长停牌窗口仍可能取不满 N 个交易日 → 该条落 `insufficient_data`**（best-effort，非保证）。
+
+### 10.4 用法
+
+与 crypto 完全一致，仅把标的换成 A 股代码：
+
+```bash
+# 对贵州茅台跑 5m 分钟回测（回测模式用 --backtest-code 指定单个标的；--stocks 仅用于分析模式）
+python main.py --backtest --backtest-interval 5m --backtest-code 600519
+```
+
+API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` 词表不变。
+
+### 10.5 限制
+
+- **Tushare 分钟接口需积分**：免费账户积分可能不足，此时（除 `1m` 外）自动走 akshare。
+- **`1m` 仅 Tushare**：akshare 兜底不支持历史 `1m`（见 [§10.1](#101-数据源tushare-主源--akshare-免费兜底)），无 token 时 `1m` 不可得。
+- **akshare 限频/稳定性**：东财免费接口有访问频率限制，长窗口/大批量可能偶发失败（按数据源降级与错误计数处理）。
+- **印花税未建模**：A 股卖出印花税（单边）等不对称成本暂未单独建模，成本开关沿用 crypto 的对称 `fee/slippage`（默认 0）。
+- **复权基准漂移**：入场价取库内日线收盘（其复权口径以落库时为准），分钟 bar 按 `qfq` 即时拉取，二者复权锚点可能不同步；若窗口内发生除权除息，模拟收益会有偏差。窗口短、无分红配股时影响可忽略。
+- **北交所 best-effort**：北交所分钟数据源覆盖不确定，作尽力支持，不保证可得。
+- **港股、美股仍不支持**分钟路径。
+
+---
+
+## 11. 配置项汇总
 
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
@@ -226,11 +276,11 @@ GET /api/v1/backtest/performance?interval=5m
 | `INTRADAY_BACKTEST_ENABLED` | `false` | 是否启用后台定时任务 |
 | `INTRADAY_BACKTEST_SCHEDULE_MINUTES` | `60` | 后台调度间隔（分钟） |
 
-所有配置项均有合理默认值，**不配置即可运行**，现有行为不变。
+所有配置项均有合理默认值，**不配置即可运行**，现有行为不变。A 股分钟回测复用 `TUSHARE_TOKEN` 与上述 intraday 配置，**本阶段不新增配置项**。
 
 ---
 
-## 11. 回滚说明
+## 12. 回滚说明
 
 如需回退到分钟回测前的状态，无需任何代码变更，只需确保：
 
