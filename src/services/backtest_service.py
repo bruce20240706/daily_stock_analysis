@@ -105,7 +105,7 @@ class BacktestService:
         skipped_non_perp = 0
         skipped_unsupported = 0  # 分钟路径不支持的非 crypto 标的
 
-        from data_provider.base import is_perp_code, is_crypto_code, is_a_share_code, market_of
+        from data_provider.base import is_perp_code, is_crypto_code, is_a_share_code, is_us_stock_code, market_of
 
         for analysis in candidates:
             if perp_only and not is_perp_code(analysis.code):
@@ -116,8 +116,9 @@ class BacktestService:
                 is_crypto_code(analysis.code)
                 or is_perp_code(analysis.code)
                 or is_a_share_code(analysis.code)
+                or is_us_stock_code(analysis.code)
             ):
-                # 分钟路径支持 crypto/perp 与 A股沪深/北交；其余市场跳过（计入 skipped_unsupported）
+                # 分钟路径支持 crypto/perp、A股沪深/北交、美股个股；其余市场跳过（计入 skipped_unsupported）
                 skipped_unsupported += 1
                 continue
             processed += 1
@@ -182,15 +183,15 @@ class BacktestService:
                     start_date_for_eval = start_daily.date
                     # 分钟窗口起点 = analysis_date + 1 day（日线 bar 收盘后第一根分钟 bar 所在自然日）
                     _minute_window_start = start_daily.date + timedelta(days=1)
-                    # crypto 24h：N 日历日 = N 交易日；A股每日仅 240 分钟交易，N 交易日需更宽
-                    # 日历窗口覆盖周末/节假日，由分钟流自身切片对齐交易日。
-                    # cn 缓冲需覆盖最长连续休市（春节/国庆约 11 天）+ 周末：N 交易日 ≈ N*7/5
-                    # 自然日，再叠加 ~14 天长假/周末冗余 → max(N*2, N*3//2 + 14)；超长停牌仍可能
-                    # 不足而落 insufficient_data（best-effort，见 docs §10.3/§10.5）。
-                    if market == "cn":
-                        _end_offset = max(int(eval_window_days) * 2, int(eval_window_days) * 3 // 2 + 14)
-                    else:
+                    # crypto 24h：N 日历日 = N 交易日;股市(cn/us)每日仅数百分钟交易,N 交易日需更宽
+                    # 日历窗口覆盖周末/节假日,由分钟流自身切片对齐交易日。
+                    # 缓冲需覆盖最长连续休市(A股春节/国庆约 11 天)+ 周末:N 交易日 ≈ N*7/5
+                    # 自然日,再叠加 ~14 天长假/周末冗余 → max(N*2, N*3//2 + 14);超长停牌仍可能
+                    # 不足而落 insufficient_data(best-effort,见 docs)。美股无超长假,该上界足够。
+                    if market == "crypto":
                         _end_offset = int(eval_window_days)
+                    else:
+                        _end_offset = max(int(eval_window_days) * 2, int(eval_window_days) * 3 // 2 + 14)
                     _window_end_date = _minute_window_start + timedelta(days=_end_offset)
                     from data_provider.base import DataFetcherManager
                     try:
