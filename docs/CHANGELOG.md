@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] A股分钟级回测：在 crypto 之后扩展沪深（北交 best-effort）分钟前向回测，Tushare `stk_mins` 主源 + akshare 免费兜底；bars_per_day 市场化（cn=240）；interval/默认/成本/调度沿用，默认 1d 与现状一致
 - [新功能] 报告新增「资金面」section：A股主力资金流（主力净流入/5日/10日 + 净流入状态）与龙虎榜（上榜/次数/最新）确定性呈现，notification 渲染
 - [改进] 激活龙虎榜：上榜时以 presence-only 进 LLM 分析 prompt 供引用，并在资金面 section 呈现（不写内部 decision_stability、不改既有主力资金流降级逻辑）
 - [新功能] 信号引擎新增可信度层(M3)：对自选池信号做规则级三重门回测(目标/止损/到期)，按「信号类型×市场」给出 Wilson 置信区间胜率与"相对全体bar入场基准"的超额，verified 升级为"样本足且置信下界超基准"；命中率回填改读预计算 signal_stats；新增 SIGNAL_BACKTEST_* 配置与 --signal-backtest 批作业
