@@ -126,3 +126,20 @@ def test_shrink_pullback_causal_equiv_per_window_lastbar():
             if m.timestamp == last_ts:
                 ref.append((i, round(m.observed_value, 6)))
     assert [(i, round(s.observed_value, 6)) for i, s in causal] == ref
+
+
+def test_a_class_rows_equiv_original():
+    from src.services.volume_price_signals import (
+        VPSConfig, _compute_primitives, _normalize,
+        _detect_breakouts, _detect_breakouts_rows,
+        _anchored_vwap_signals, _anchored_vwap_signals_rows,
+        _detect_obv_divergence, _detect_obv_divergence_rows)
+    df = _synthetic_df(200, seed=5)
+    cfg = VPSConfig()
+    norm, _ = _normalize(df, cfg)
+    prim = _compute_primitives(norm, cfg)
+    # 无重复时间戳 → 行号变体与原逐条等价(signal_type/timestamp/observed_value)
+    def _key(ms): return [(m.timestamp, m.signal_type, round(m.observed_value, 6)) for m in ms]
+    assert _key([s for _, s in _detect_breakouts_rows(prim, cfg)]) == _key(_detect_breakouts(prim, cfg))
+    assert _key([s for _, s in _anchored_vwap_signals_rows(prim, cfg)]) == _key(_anchored_vwap_signals(prim, cfg))
+    assert _key([s for _, s in _detect_obv_divergence_rows(prim, cfg)]) == _key(_detect_obv_divergence(prim, cfg))

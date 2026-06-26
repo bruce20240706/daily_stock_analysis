@@ -1382,3 +1382,121 @@ def _detect_vfx_all_bars_rows(
             confidence="low", is_daily_approx=True, is_anomalous=False,
             reason=classified.reason, threshold=None, observed_value=classified.observed_value)))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Task 7: A 类行号变体
+# ---------------------------------------------------------------------------
+
+
+def _detect_breakouts_rows(prim: pd.DataFrame, config: VPSConfig) -> list[tuple[int, VPSignal]]:
+    """_detect_breakouts 行号变体:atr_series.iloc[i] 取代 _last_finite(atr_series.iloc[:i+1])(O(1))。
+    对 signal_type/threshold/observed_value 等价(reason 仅在 ATR seed 前极端 config 下可能不同,回测不用 reason)。"""
+    high = prim["high"].astype(float).reset_index(drop=True)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    prior_max = high.rolling(config.breakout_window).max().shift(1)
+    rel_vol = prim["rel_vol"].reset_index(drop=True)
+    pct_s = prim["pct_chg"].reset_index(drop=True)
+    date_s = prim["date"].reset_index(drop=True)
+    atr_series = atr(prim, config.atr_period).reset_index(drop=True)
+    out: list[tuple[int, VPSignal]] = []
+    for i in range(len(prim)):
+        pm = prior_max.iloc[i]
+        rv = rel_vol.iloc[i]
+        if pd.isna(pm) or pd.isna(rv):
+            continue
+        if close.iloc[i] >= pm and rv >= config.breakout_rel_vol:
+            pct = float(pct_s.iloc[i]) if not pd.isna(pct_s.iloc[i]) else 0.0
+            av = atr_series.iloc[i]
+            atr_val = None if pd.isna(av) else float(av)
+            atr_norm = (atr_val / float(close.iloc[i])) if (atr_val is not None and float(close.iloc[i]) > 0) else 0.0
+            vp = classify_volume_pattern(float(rv), pct, atr_norm, config)
+            out.append((i, VPSignal(
+                timestamp=_to_epoch_ms_shanghai(date_s.iloc[i]), price=float(close.iloc[i]),
+                anchor="close", direction="bullish", signal_type="volume_breakout", confidence="high",
+                is_daily_approx=True, is_anomalous=False,
+                reason=f"放量突破近{config.breakout_window}日高点（不含当日）[量能形态:{vp}]",
+                threshold=float(pm), observed_value=float(rv))))
+    return out
+
+
+def _anchored_vwap_signals_rows(prim: pd.DataFrame, config: VPSConfig) -> list[tuple[int, VPSignal]]:
+    """_anchored_vwap_signals 行号变体:突破锚点用 bar 行号(消除 ts.index 线扫与重复时间戳误锚)。"""
+    breakout_rows = _detect_breakouts_rows(prim, config)
+    if not breakout_rows:
+        return []
+    high = prim["high"].astype(float).reset_index(drop=True)
+    low = prim["low"].astype(float).reset_index(drop=True)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    volume = prim["volume"].astype(float).reset_index(drop=True)
+    typical = (high + low + close) / 3.0
+    out: list[tuple[int, VPSignal]] = []
+    for start, _bsig in breakout_rows:
+        cum_pv = 0.0
+        cum_v = 0.0
+        vwap: list[float] = []
+        for j in range(start, len(prim)):
+            cum_pv += float(typical.iloc[j]) * float(volume.iloc[j])
+            cum_v += float(volume.iloc[j])
+            vwap.append(cum_pv / cum_v if cum_v > 0 else float("nan"))
+        for off in range(1, len(vwap)):
+            j = start + off
+            prev_delta = float(close.iloc[j - 1]) - vwap[off - 1]
+            curr_delta = float(close.iloc[j]) - vwap[off]
+            if prev_delta < 0 <= curr_delta:
+                out.append((j, _avwap_signal(prim, j, "anchored_vwap_reclaim", "bullish", vwap[off])))
+            elif prev_delta >= 0 > curr_delta:
+                out.append((j, _avwap_signal(prim, j, "anchored_vwap_loss", "bearish", vwap[off])))
+    return out
+
+
+def _detect_obv_divergence_rows(prim: pd.DataFrame, config: VPSConfig) -> list[tuple[int, VPSignal]]:
+    """_detect_obv_divergence 行号变体:行号 = conf_idx(curr.index+swing_k);逻辑逐字复刻。"""
+    close = prim["close"].astype(float).reset_index(drop=True)
+    vol = prim["volume"].astype(float).reset_index(drop=True)
+    high = prim["high"].astype(float).reset_index(drop=True)
+    low = prim["low"].astype(float).reset_index(drop=True)
+    obv_series = _obv(close, vol)
+    cmf_series = _cmf(high, low, close, vol, _DIV_CMF_WINDOW)
+    mfi_series = _mfi(high, low, close, vol, _DIV_MFI_WINDOW)
+    pivots = _attach_pivot_timestamps(find_swing_pivots(close, config.swing_k), prim)
+    out: list[tuple[int, VPSignal]] = []
+    for kind, sig_type, cmp_price, cmp_ind, direction in (
+        ("high", "obv_top_divergence", lambda a, b: a > b, lambda a, b: a <= b, "bearish"),
+        ("low", "obv_bottom_divergence", lambda a, b: a < b, lambda a, b: a >= b, "bullish"),
+    ):
+        same = [p for p in pivots if p.kind == kind]
+        for prev, curr in zip(same, same[1:]):
+            if not cmp_price(curr.price, prev.price):
+                continue
+            obv_prev = float(obv_series.iloc[prev.index])
+            obv_curr = float(obv_series.iloc[curr.index])
+            cmf_prev = float(cmf_series.iloc[prev.index])
+            cmf_curr = float(cmf_series.iloc[curr.index])
+            mfi_prev = float(mfi_series.iloc[prev.index])
+            mfi_curr = float(mfi_series.iloc[curr.index])
+            obv_div = cmp_ind(obv_curr, obv_prev) and not math.isnan(obv_curr) and not math.isnan(obv_prev)
+            cmf_div = cmp_ind(cmf_curr, cmf_prev) and not math.isnan(cmf_curr) and not math.isnan(cmf_prev)
+            mfi_div = cmp_ind(mfi_curr, mfi_prev) and not math.isnan(mfi_curr) and not math.isnan(mfi_prev)
+            k = sum([obv_div, cmf_div, mfi_div])
+            if k == 0:
+                continue
+            confidence = "high" if k >= 3 else ("medium" if k >= 2 else "low")
+            rel_divs: list[float] = []
+            if obv_div:
+                denom_obv = max(abs(obv_curr), abs(obv_prev), 1.0)
+                rel_divs.append(min(abs(obv_curr - obv_prev) / denom_obv, 1.0))
+            if cmf_div:
+                rel_divs.append(min(abs(cmf_curr - cmf_prev) / 2.0, 1.0))
+            if mfi_div:
+                rel_divs.append(min(abs(mfi_curr - mfi_prev) / 100.0, 1.0))
+            grade = _divergence_strength_grade(k, rel_divs)
+            sources_desc = "+".join(s for s, d in [("OBV", obv_div), ("CMF", cmf_div), ("MFI", mfi_div)] if d)
+            conf_idx = curr.index + config.swing_k
+            out.append((conf_idx, VPSignal(
+                timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[conf_idx]), price=curr.price,
+                anchor=kind, direction=direction, signal_type=sig_type, confidence=confidence,
+                is_daily_approx=True, is_anomalous=False,
+                reason=f"价格创新极值但量能指标未同步（{sources_desc} 背离，强度:{grade}）",
+                threshold=float(obv_prev), observed_value=float(obv_curr))))
+    return out
