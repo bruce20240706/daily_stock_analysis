@@ -112,6 +112,44 @@ verified = (
 
 ---
 
+## 5.2 行为变更与兼容说明（向量化重构后）
+
+信号引擎 `evaluate_signal_outcomes` 在 Task 4–11 中完成 O(n²)→O(n log k) 向量化重构，并同步修正了因果语义。以下几点在重跑 `--signal-backtest` 后会产生可见变化：
+
+### 因果修正语义（回测路径）
+
+`evaluate_signal_outcomes`（回测路径）现在使用 `_detect_upthrust_spring_causal_rows` 变体：对每根 bar `i`，只引用确认索引满足 `center + swing_k ≤ i` 的已确认 pivot，严格消除回测前视偏差。图表渲染路径（`compute_volume_price_signals` 全 df 调用）继续使用原 `_detect_upthrust_spring`，不受影响，图表 marker 几何不变。
+
+### 命中率 7 字段重跑后会更新
+
+重跑 `--signal-backtest` 后，`signal_stats` 表中以下 7 个字段会因因果修正而更新：
+
+| 字段 | 说明 |
+|------|------|
+| `hit_rate` | 胜率（win/sample），因部分非因果信号样本消失而变化 |
+| `hit_sample` (`sample`) | 有效样本数（win+loss），排除到期未触门的 expired |
+| `verified` | 是否通过"样本足 AND ci_low > baseline_win_rate"验证 |
+| `ci_low` | Wilson 95% CI 下界 |
+| `ci_high` | Wilson 95% CI 上界 |
+| `baseline_excess` (`excess`) | 超额 = ci_low - baseline_win_rate |
+| `horizon` | 前瞻 bar 数（精确匹配桶键，配置变更后旧桶被忽略，无害累积） |
+
+**操作**：重跑 `python main.py --signal-backtest`（或加 `--signal-backtest-interval <粒度>`）后数据更新，旧 horizon 桶被精确 horizon 查询忽略，不会误用。
+
+### verified 注解跨 min_sample 阈值出现/消失
+
+`SIGNAL_HIT_VERIFIED_MIN_SAMPLE` 配置（或 `backtest_eval_window_days` 兜底）决定 `verified` 所需最小样本数。自选池变化、重新回测或调整 `min_sample` 配置后，`verified` 标注可能跨阈值出现或消失：
+
+- 样本增加（如自选池扩大）：`sample` 升过阈值，`verified` 可能从 null 变为 true/false。
+- 样本减少（如因果修正排除非因果样本）：`sample` 可能降至阈值以下，`verified` 回落 null，前端展示"样本不足"。
+- 调高 `SIGNAL_HIT_VERIFIED_MIN_SAMPLE`：已展示的 `verified=true` 标注可能消失，属预期行为。
+
+### 今日已收盘 bar 现正常产信号
+
+因果路径修正后，今日已完成收盘的 bar（`i == len(df)-1`）可以正常产出信号并进入评估，不再因前视检查而被意外过滤。图表 viz 路径行为不变。
+
+---
+
 ## 6. `signal_stats` 表
 
 ```
