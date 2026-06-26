@@ -143,3 +143,53 @@ def test_a_class_rows_equiv_original():
     assert _key([s for _, s in _detect_breakouts_rows(prim, cfg)]) == _key(_detect_breakouts(prim, cfg))
     assert _key([s for _, s in _anchored_vwap_signals_rows(prim, cfg)]) == _key(_anchored_vwap_signals(prim, cfg))
     assert _key([s for _, s in _detect_obv_divergence_rows(prim, cfg)]) == _key(_detect_obv_divergence(prim, cfg))
+
+
+# ─── Task 8: _streaming_topk_kept ─────────────────────────────────────────────
+
+def _mk(ov, direction="bullish", stype="spring"):
+    from src.services.volume_price_signals import VPSignal
+    return VPSignal(timestamp=0, price=0.0, anchor="low", direction=direction,
+                    signal_type=stype, confidence="low", is_daily_approx=True,
+                    is_anomalous=False, reason="", threshold=None, observed_value=ov)
+
+
+def test_streaming_topk_cross_block_tie_prefers_vsa_then_bar():
+    # F2: abs 相等(=85),k=1。block0(VSA)优先于 block1(spring),即使 VSA 的 bar 更大
+    from src.services.volume_price_signals import _streaming_topk_kept
+    spring = _mk(85.0, "bullish", "spring")        # bar30, block1
+    vsa = _mk(85.0, "bullish", "vsa_no_supply")    # bar50, block0
+    items = [(30, 1, spring), (50, 0, vsa)]
+    kept = _streaming_topk_kept(items, k=1)
+    # 在 bar50 的池[0:50]={spring@30, vsa@50},键 (-85,0,50)<(-85,1,30) → vsa 胜
+    assert id(vsa) in kept
+    # spring@30 在它自己的 bar30 池[0:30]={spring@30} 是 top-1 → 也保留(冻结)
+    assert id(spring) in kept
+
+
+def test_streaming_topk_same_bar_multi():
+    # F3: 同 bar 两 marker,k=1,只保留 abs 大的那个
+    from src.services.volume_price_signals import _streaming_topk_kept
+    big = _mk(10.0, "bullish", "spring")           # bar5
+    small = _mk(3.0, "bearish", "upthrust")        # bar5
+    items = [(5, 1, big), (5, 1, small)]
+    kept = _streaming_topk_kept(items, k=1)
+    assert id(big) in kept and id(small) not in kept
+
+
+def test_streaming_topk_pool_smaller_than_k():
+    from src.services.volume_price_signals import _streaming_topk_kept
+    a = _mk(1.0)
+    b = _mk(2.0)
+    kept = _streaming_topk_kept([(1, 0, a), (2, 0, b)], k=5)
+    assert id(a) in kept and id(b) in kept
+
+
+def test_streaming_topk_freeze_earlier_bar_evicted_later_still_kept():
+    from src.services.volume_price_signals import _streaming_topk_kept
+    early = _mk(5.0)    # bar1
+    big1 = _mk(100.0)   # bar3
+    big2 = _mk(101.0)   # bar4
+    # k=1: bar1 池={early} → early 是 top1 → 保留;后续被 big 挤出,仍算保留
+    kept = _streaming_topk_kept([(1, 0, early), (3, 0, big1), (4, 0, big2)], k=1)
+    assert id(early) in kept

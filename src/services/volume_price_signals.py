@@ -1500,3 +1500,33 @@ def _detect_obv_divergence_rows(prim: pd.DataFrame, config: VPSConfig) -> list[t
                 reason=f"价格创新极值但量能指标未同步（{sources_desc} 背离，强度:{grade}）",
                 threshold=float(obv_prev), observed_value=float(obv_curr))))
     return out
+
+
+def _streaming_topk_kept(b_items: list[tuple[int, int, VPSignal]], k: int) -> set[int]:
+    """因果流式 top-k:bar t 的 marker 保留 ⇔ 在冻结池 [0:t] 的 top-k。
+    键 (-abs(observed_value), block, bar) 为严格全序(同 bar+block 至多一 marker)。
+    全方向竞争;调用方负责 top-k 之后再过滤 bullish。"""
+    def keyf(bar: int, block: int, sig: VPSignal):
+        ov = abs(sig.observed_value) if sig.observed_value is not None else 0.0
+        return (-ov, block, bar)
+
+    by_bar: dict[int, list[tuple[int, int, VPSignal]]] = {}
+    for bar, block, sig in b_items:
+        by_bar.setdefault(bar, []).append((bar, block, sig))
+
+    kept_ids: set[int] = set()
+    best: list[tuple[tuple, VPSignal]] = []   # 升序键、容量 k 的当前 top-k
+    for bar in sorted(by_bar):
+        for (b, blk, sig) in by_bar[bar]:
+            kx = keyf(b, blk, sig)
+            if len(best) < k:
+                best.append((kx, sig))
+                best.sort(key=lambda e: e[0])
+            elif kx < best[-1][0]:
+                best[-1] = (kx, sig)
+                best.sort(key=lambda e: e[0])
+        bar_ids = {id(s) for (_, _, s) in by_bar[bar]}
+        for (_, s) in best:
+            if id(s) in bar_ids:
+                kept_ids.add(id(s))
+    return kept_ids
