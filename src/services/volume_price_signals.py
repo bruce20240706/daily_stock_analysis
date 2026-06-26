@@ -992,6 +992,34 @@ def _detect_vsa_bars(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
     return out
 
 
+def _detect_vsa_bars_rows(prim: pd.DataFrame, config: VPSConfig) -> list[tuple[int, VPSignal]]:
+    """_detect_vsa_bars 的快速变体:hoist close.astype 出循环(消除 O(n²)),返回 (行号, marker)。
+    与 _detect_vsa_bars 逐条等价。"""
+    close = prim["close"].astype(float).reset_index(drop=True)
+    rv_s = prim["rel_vol"].reset_index(drop=True)
+    rp_s = prim["range_pos"].reset_index(drop=True)
+    body_s = prim["body"].reset_index(drop=True)
+    spread_s = prim["spread"].reset_index(drop=True)
+    limit_s = prim["is_limit_bar"].reset_index(drop=True)
+    date_s = prim["date"].reset_index(drop=True)
+    out: list[tuple[int, VPSignal]] = []
+    for i in range(len(prim)):
+        rv = rv_s.iloc[i]; rp = rp_s.iloc[i]; body = body_s.iloc[i]
+        if pd.isna(rv) or bool(limit_s.iloc[i]):
+            continue
+        ts = _to_epoch_ms_shanghai(date_s.iloc[i])
+        price = float(close.iloc[i])
+        if rv < config.vol_shrink and body > 0 and not pd.isna(rp) and rp < 0.5:
+            out.append((i, _vsa_signal(ts, price, "vsa_no_demand", "bearish", rv)))
+        elif rv < config.vol_shrink and body < 0 and not pd.isna(rp) and rp > 0.5:
+            out.append((i, _vsa_signal(ts, price, "vsa_no_supply", "bullish", rv)))
+        elif rv >= config.vol_high and not pd.isna(rp) and 0.3 <= rp <= 0.7:
+            out.append((i, _vsa_signal(ts, price, "vsa_stopping", "neutral", rv)))
+        elif rv >= config.vol_high and abs(body) < (spread_s.iloc[i] * 0.2):
+            out.append((i, _vsa_signal(ts, price, "vsa_effort_vs_result", "neutral", rv)))
+    return out
+
+
 def _vsa_signal(ts: int, price: float, sig_type: str, direction: str, rv: float) -> VPSignal:
     """构造 VSA B 类信号（降权标记）。"""
     return VPSignal(

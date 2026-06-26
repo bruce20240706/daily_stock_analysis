@@ -17,6 +17,22 @@ def _synthetic_df(n, seed):
                          "close": close, "volume": vol})
 
 
+def test_vsa_rows_equiv_original():
+    from src.services.volume_price_signals import (
+        VPSConfig, _compute_primitives, _normalize, _detect_vsa_bars, _detect_vsa_bars_rows)
+    df = _synthetic_df(120, seed=7)
+    cfg = VPSConfig()
+    norm, _ = _normalize(df, cfg)
+    prim = _compute_primitives(norm, cfg)
+    ref = _detect_vsa_bars(prim, cfg)
+    got = _detect_vsa_bars_rows(prim, cfg)
+    assert [s for _, s in got] == ref
+    # 行号正确:marker.timestamp 来自该行 date
+    for i, s in got:
+        from src.services.volume_price_signals import _to_epoch_ms_shanghai
+        assert s.timestamp == _to_epoch_ms_shanghai(prim["date"].iloc[i])
+
+
 def test_price_levels_series_matches_per_window():
     df = _synthetic_df(80, seed=1)
     series = derive_price_levels_series(df)
