@@ -1530,3 +1530,63 @@ def _streaming_topk_kept(b_items: list[tuple[int, int, VPSignal]], k: int) -> se
             if id(s) in bar_ids:
                 kept_ids.add(id(s))
     return kept_ids
+
+
+# Task 9: compute_signals_for_all_bars(整合 + 退化三态 + norm 空间 warmup gate + norm2raw)
+
+def compute_signals_for_all_bars(
+    df, *, config: "VPSConfig | None" = None, now=None
+) -> "dict[int, list[str]]":
+    """对全 df 单遍算出每根 bar 因果触发的 bullish signal_type(回测专用,因果修正语义)。
+    返回 {原始 bar 行号: [bullish signal_type, ...]}(装配序去重)。图表路径不调用本函数。"""
+    cfg = config or VPSConfig()
+    try:
+        norm = normalize_ohlcv(df, required_columns=_REQUIRED_COLUMNS,
+                               now=now, keep_original_index=True)
+    except ValueError:
+        return {}
+    if norm.empty:
+        return {}
+    prim = _compute_primitives(norm, cfg)
+    orig_idx = norm["_orig_idx"].astype(int).tolist()   # norm 行 → raw 行
+    min_bars = max(cfg.vol_ma_window, cfg.atr_period, cfg.breakout_window) + 1
+
+    # norm 行 → 装配序 bullish signal_type 列表
+    by_norm: dict[int, list[str]] = {}
+
+    def _add(norm_row: int, sig: VPSignal):
+        if sig.direction != "bullish":
+            return
+        if (norm_row + 1) < min_bars:        # per-bar warmup gate(norm 行号空间)
+            return
+        lst = by_norm.setdefault(norm_row, [])
+        if sig.signal_type not in lst:
+            lst.append(sig.signal_type)
+
+    # 1) A 类(装配序:obv → breakout → shrink → vwap)
+    for r, s in _detect_obv_divergence_rows(prim, cfg):
+        _add(r, s)
+    for r, s in _detect_breakouts_rows(prim, cfg):
+        _add(r, s)
+    for r, s in _detect_shrink_pullback_causal_rows(prim, cfg):
+        _add(r, s)
+    for r, s in _anchored_vwap_signals_rows(prim, cfg):
+        _add(r, s)
+
+    # 2) B 类:RAW 因果 marker(VSA block0 + upthrust/spring block1)→ 流式 top-k
+    b_items: list[tuple[int, int, VPSignal]] = []
+    for r, s in _detect_vsa_bars_rows(prim, cfg):
+        b_items.append((r, 0, s))
+    for r, s in _detect_upthrust_spring_causal_rows(prim, cfg):
+        b_items.append((r, 1, s))
+    kept = _streaming_topk_kept(b_items, cfg.b_class_top_k)
+    for r, blk, s in b_items:
+        if id(s) in kept:
+            _add(r, s)
+
+    # 3) vfx(旁路 top-k)
+    for r, s in _detect_vfx_all_bars_rows(prim, cfg):
+        _add(r, s)
+
+    # 4) norm 行 → raw 行
+    return {orig_idx[nr]: lst for nr, lst in by_norm.items()}

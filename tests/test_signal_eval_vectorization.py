@@ -193,3 +193,43 @@ def test_streaming_topk_freeze_earlier_bar_evicted_later_still_kept():
     # k=1: bar1 池={early} → early 是 top1 → 保留;后续被 big 挤出,仍算保留
     kept = _streaming_topk_kept([(1, 0, early), (3, 0, big1), (4, 0, big2)], k=1)
     assert id(early) in kept
+
+
+def test_csfab_zero_volume_still_emits_obv_bottom():
+    # F5: volume 全 0(rel_vol 全 NaN),仍应有 obv_bottom_divergence(不依赖 rel_vol)
+    # W 形下降双底:第一底 bar16≈35.3,第二底 bar38≈33.0(价格更低,OBV 全 0 不随动 → bullish 背离)
+    from src.services.volume_price_signals import VPSConfig, compute_signals_for_all_bars
+    n = 60
+    close = (
+        [41.0 - i * 0.375 for i in range(16)]          # bars 0-15:下行第一段
+        + [35.0 + i * 0.333 for i in range(1, 10)]     # bars 16-24:反弹
+        + [38.0 - i * 0.357 for i in range(1, 15)]     # bars 25-38:下行至更低底
+        + [33.0 + i * 0.143 for i in range(1, 22)]     # bars 39-59:最终回升
+    )
+    low = [c - 0.5 for c in close]
+    df = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n, freq="D").strftime("%Y-%m-%d"),
+                       "open": close, "high": [c + 0.5 for c in close], "low": low,
+                       "close": close, "volume": [0.0] * n})
+    sig = compute_signals_for_all_bars(df, config=VPSConfig())
+    flat = {st for v in sig.values() for st in v}
+    assert "obv_bottom_divergence" in flat
+
+
+def test_csfab_warmup_gate_norm_space():
+    # F4: VPS_VOL_MA_WINDOW=50(min_bars=51) + bar5 NaN volume;raw t=50(norm 行49)应被 gate
+    from src.services.volume_price_signals import VPSConfig, compute_signals_for_all_bars
+    n = 60
+    close = list(40 - np.linspace(0, 10, 46)) + list(30 + np.linspace(0.1, 1.4, n - 46))
+    low = [c - 1 for c in close]
+    vol = [1000.0] * n
+    vol[5] = float("nan")
+    df = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n, freq="D").strftime("%Y-%m-%d"),
+                       "open": close, "high": [c + 0.5 for c in close], "low": low,
+                       "close": close, "volume": vol})
+    cfg = VPSConfig(vol_ma_window=50)
+    sig = compute_signals_for_all_bars(df, config=cfg)
+    # 与逐窗真值对齐:对原始 raw df 跑 compute_volume_price_signals(df.iloc[:51]) 取末根
+    from src.services.volume_price_signals import compute_volume_price_signals
+    res = compute_volume_price_signals(df.iloc[:51], config=cfg)  # norm 50 行 < 51 → degraded 空
+    assert res.markers == []
+    assert sig.get(50, []) == []   # 行号 50 被 norm 空间 warmup gate 拦下
