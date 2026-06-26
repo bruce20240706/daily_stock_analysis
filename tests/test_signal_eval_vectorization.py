@@ -83,3 +83,29 @@ def test_upthrust_spring_causal_excludes_unconfirmed_pivot():
     causal = _detect_upthrust_spring_causal_rows(prim, cfg)
     # bar21: pivot20 的确认索引 = 20+2 = 22 > 21 → 不可用 → bar21 无 spring
     assert not any(i == 21 and s.signal_type == "spring" for i, s in causal)
+
+
+def test_shrink_pullback_causal_equiv_per_window_lastbar():
+    from src.services.volume_price_signals import (
+        VPSConfig, _compute_primitives, _normalize, _detect_shrink_pullback,
+        _detect_shrink_pullback_causal_rows, _to_epoch_ms_shanghai)
+    # 上升趋势 + 缩量回调,确保有 shrink_pullback 触发
+    n = 120
+    close = list(50 + np.linspace(0, 20, n))
+    for j in range(60, 70):  # 一段缩量回调
+        close[j] = close[59] - (j - 59) * 0.2
+    df = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n, freq="D").strftime("%Y-%m-%d"),
+                       "open": close, "high": [c + 0.3 for c in close], "low": [c - 0.3 for c in close],
+                       "close": close, "volume": [3000.0] * 60 + [500.0] * 10 + [3000.0] * (n - 70)})
+    cfg = VPSConfig()
+    norm, _ = _normalize(df, cfg)
+    prim = _compute_primitives(norm, cfg)
+    causal = _detect_shrink_pullback_causal_rows(prim, cfg)
+    ref: list[tuple[int, float]] = []
+    for i in range(len(prim)):
+        sub = prim.iloc[: i + 1]
+        last_ts = _to_epoch_ms_shanghai(sub["date"].iloc[-1])
+        for m in _detect_shrink_pullback(sub, cfg):
+            if m.timestamp == last_ts:
+                ref.append((i, round(m.observed_value, 6)))
+    assert [(i, round(s.observed_value, 6)) for i, s in causal] == ref

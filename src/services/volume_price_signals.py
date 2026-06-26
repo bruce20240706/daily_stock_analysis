@@ -1266,3 +1266,86 @@ def derive_price_levels_series(
         out.append(_price_levels_scalar_core(
             ma20, swing_low, current_price, last_atr, atr_mult=atr_mult, rr_target=rr_target))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Task 5: _detect_shrink_pullback_causal_rows(last-bar → per-bar + O(1) 段增量)
+# ---------------------------------------------------------------------------
+
+
+def _detect_shrink_pullback_causal_rows(
+    prim: pd.DataFrame, config: VPSConfig
+) -> list[tuple[int, VPSignal]]:
+    """逐 bar 因果变体:bar i 的输出 == _detect_shrink_pullback(prim[:i+1]) 的末根判定。
+
+    段内全低于阈值检查使用前缀增量 O(1):
+      - nonnan_prefix[j]:prim[0:j] 中非 NaN rel_vol 的累计个数
+      - last_violation_prefix[j]:prim[0:j+1] 中最近一个 rel_vol>=pullback_rel_vol 的行号(-1=无)
+    段 [anchor, i] 非空且无违例 ⟺ seg_nonnan>0 且 last_violation_prefix[i] < anchor
+    其中 anchor = last_high.index + 1。
+    """
+    close = prim["close"].astype(float).reset_index(drop=True)
+    ma5 = prim["ma5"].reset_index(drop=True)
+    ma20 = prim["ma20"].reset_index(drop=True)
+    rel_vol = prim["rel_vol"].reset_index(drop=True)
+    pct = prim["pct_chg"].reset_index(drop=True)
+    date_s = prim["date"].reset_index(drop=True)
+    atr_series = atr(prim, config.atr_period).reset_index(drop=True)
+    k = config.swing_k
+    pivots = _attach_pivot_timestamps(find_swing_pivots(close, k), prim)
+    highs = [p for p in pivots if p.kind == "high"]
+    out: list[tuple[int, VPSignal]] = []
+    hi_ptr = 0
+    last_high = None
+    # 前缀:nonnan 累计计数 + 最近违例行号
+    nonnan_prefix = [0] * (len(prim) + 1)
+    last_violation_idx = -1
+    last_violation_prefix = [-1] * len(prim)
+    for j in range(len(prim)):
+        rv = rel_vol.iloc[j]
+        nonnan_prefix[j + 1] = nonnan_prefix[j] + (0 if pd.isna(rv) else 1)
+        if (not pd.isna(rv)) and rv >= config.pullback_rel_vol:
+            last_violation_idx = j
+        last_violation_prefix[j] = last_violation_idx
+    for i in range(len(prim)):
+        while hi_ptr < len(highs) and highs[hi_ptr].index + k <= i:
+            last_high = highs[hi_ptr]
+            hi_ptr += 1
+        if last_high is None:
+            continue
+        if pd.isna(ma5.iloc[i]) or pd.isna(ma20.iloc[i]) or ma5.iloc[i] <= ma20.iloc[i]:
+            continue
+        drawdown = last_high.price - float(close.iloc[i])
+        anchor = last_high.index + 1          # 段 [anchor, i]
+        if anchor > i:
+            continue
+        seg_nonnan = nonnan_prefix[i + 1] - nonnan_prefix[anchor]
+        seg_ok = (seg_nonnan > 0) and (last_violation_prefix[i] < anchor)
+        atr_now = float(atr_series.iloc[i])
+        if (drawdown > 0 and seg_ok and not np.isnan(atr_now)
+                and drawdown < config.pullback_atr_mult * atr_now):
+            curr_rv = float(rel_vol.iloc[i]) if not pd.isna(rel_vol.iloc[i]) else float("nan")
+            curr_pct = float(pct.iloc[i]) if not pd.isna(pct.iloc[i]) else 0.0
+            close_now = float(close.iloc[i])
+            atr_norm_now = (atr_now / close_now) if close_now > 0 else 0.0
+            if not math.isnan(curr_rv):
+                vp = classify_volume_pattern(curr_rv, curr_pct, atr_norm_now, config)
+                reason_str = (
+                    f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）[量能形态:{vp}]"
+                )
+            else:
+                reason_str = f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）"
+            out.append((i, VPSignal(
+                timestamp=_to_epoch_ms_shanghai(date_s.iloc[i]),
+                price=float(close.iloc[i]),
+                anchor="close",
+                direction="bullish",
+                signal_type="shrink_pullback",
+                confidence="medium",
+                is_daily_approx=True,
+                is_anomalous=False,
+                reason=reason_str,
+                threshold=config.pullback_atr_mult * atr_now,
+                observed_value=drawdown,
+            )))
+    return out
