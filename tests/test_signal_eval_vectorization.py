@@ -1,10 +1,17 @@
 # tests/test_signal_eval_vectorization.py
 import time
+from collections import Counter
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 import pytest
-from src.services.volume_price_signals import derive_price_levels, derive_price_levels_series
+from src.services.signal_backtest import (
+    _bars_as_dicts, classify_triple_barrier, evaluate_baseline_outcomes, evaluate_signal_outcomes)
+from src.services.volume_price_signals import (
+    VPSConfig, _check_sufficient_window, _compute_primitives, _detect_upthrust_spring,
+    _detect_vsa_bars, _normalize, _to_epoch_ms_shanghai, compute_volume_price_signals,
+    derive_price_levels, derive_price_levels_series)
 
 
 def _synthetic_df(n, seed):
@@ -31,7 +38,6 @@ def test_vsa_rows_equiv_original():
     assert [s for _, s in got] == ref
     # 行号正确:marker.timestamp 来自该行 date
     for i, s in got:
-        from src.services.volume_price_signals import _to_epoch_ms_shanghai
         assert s.timestamp == _to_epoch_ms_shanghai(prim["date"].iloc[i])
 
 
@@ -247,3 +253,124 @@ def test_eval_minute_scale_is_subquadratic():
     elapsed = time.time() - t0
     assert elapsed < 20.0, f"2000 bars took {elapsed:.1f}s (expected subquadratic)"
     assert isinstance(out, list)
+
+
+# ─── Task 11: 独立因果 oracle + 多市场 golden + F12 Q3 ─────────────────────────
+
+_B_TYPES = {"vsa_no_demand", "vsa_no_supply", "vsa_stopping", "vsa_effort_vs_result", "upthrust", "spring"}
+
+
+def _oracle_bullish_by_bar(df, cfg):
+    """独立因果参照:B 类绕过 _limit_b_class(直接调原始检测器取逐窗末根 RAW),A/vfx/shrink 经
+    compute_volume_price_signals 末根。仅用于无重复时间戳 + 历史日期 fixture(等价适用域)。"""
+    df = df.reset_index(drop=True)
+    n = len(df)
+    raw_b_pool = []        # (bar, block, sig) RAW 因果 B marker
+    a_vfx_by_bar = {}      # bar -> set(bullish 非 B 类 signal_type)
+    for i in range(n):
+        sub = df.iloc[: i + 1]
+        norm, reason = _normalize(sub, cfg)
+        if reason is not None:
+            continue
+        if _check_sufficient_window(norm, cfg) is not None:
+            continue
+        prim = _compute_primitives(norm, cfg)
+        last_ts = _to_epoch_ms_shanghai(sub["date"].iloc[-1])
+        # A/vfx/shrink:从编排器末根取(非 B 类),bullish
+        res = compute_volume_price_signals(sub, config=cfg)
+        a_vfx_by_bar[i] = {
+            m.signal_type for m in res.markers
+            if m.timestamp == last_ts and m.direction == "bullish" and m.signal_type not in _B_TYPES}
+        # B 类:绕过 _limit_b_class,取末根 RAW(VSA block0 + upthrust/spring block1)
+        for m in _detect_vsa_bars(prim, cfg):
+            if m.timestamp == last_ts:
+                raw_b_pool.append((i, 0, m))
+        for m in _detect_upthrust_spring(prim, cfg):
+            if m.timestamp == last_ts:
+                raw_b_pool.append((i, 1, m))
+    # 每个 bar t:对 pool[0:t] 朴素 top-k(键 -abs,block,bar),取末根==t 的 bullish B
+    result = {}
+    for t in range(n):
+        pool = [(b, blk, s) for (b, blk, s) in raw_b_pool if b <= t]
+        pool_sorted = sorted(
+            pool,
+            key=lambda e: (-(abs(e[2].observed_value) if e[2].observed_value is not None else 0.0), e[1], e[0]))
+        kept = pool_sorted[: cfg.b_class_top_k]
+        b_at_t = {s.signal_type for (b, blk, s) in kept if b == t and s.direction == "bullish"}
+        bull = set(a_vfx_by_bar.get(t, set())) | b_at_t
+        if bull:
+            result[t] = bull
+    return result
+
+
+def _oracle_signal_outcomes(df, *, market, horizon, cfg, min_history=40):
+    df = df.reset_index(drop=True)
+    n = len(df)
+    bull = _oracle_bullish_by_bar(df, cfg)
+    out = []
+    for t in range(min_history, n - 1):
+        ref = derive_price_levels(df.iloc[: t + 1])
+        if ref.stop is None or ref.target is None:
+            continue
+        fwd = _bars_as_dicts(df.iloc[t + 1 : t + 1 + horizon])
+        if not fwd:
+            continue
+        for st in bull.get(t, set()):
+            out.append((st, market, classify_triple_barrier(fwd, stop=ref.stop, target=ref.target)))
+    return out
+
+
+def _counter(outcomes):
+    return Counter((o.signal_type, o.market, o.outcome) for o in outcomes)
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
+def test_golden_signal_equiv_oracle_multimarket(seed):
+    df = _synthetic_df(160, seed=seed)
+    cfg = VPSConfig.from_env()
+    got = evaluate_signal_outcomes(df, market="cn", horizon=10, config=cfg)
+    ref = _oracle_signal_outcomes(df, market="cn", horizon=10, cfg=cfg)
+    got_c = _counter(got)
+    ref_c = Counter((st, mk, oc) for (st, mk, oc) in ref)
+    assert got_c == ref_c
+
+
+def test_golden_baseline_unchanged():
+    df = _synthetic_df(160, seed=2)
+    base = evaluate_baseline_outcomes(df, market="cn", horizon=10)
+    # baseline 不跑信号规则,只依赖 derive_price_levels_series == 逐窗(Task 2 已证)
+    # 逐窗参照
+    df2 = df.reset_index(drop=True)
+    n = len(df2)
+    ref = []
+    for t in range(40, n - 1):
+        lv = derive_price_levels(df2.iloc[: t + 1])
+        if lv.stop is None or lv.target is None:
+            continue
+        fwd = _bars_as_dicts(df2.iloc[t + 1 : t + 1 + 10])
+        if not fwd:
+            continue
+        ref.append(("__baseline__", "cn", classify_triple_barrier(fwd, stop=lv.stop, target=lv.target)))
+    assert _counter(base) == Counter(ref)
+
+
+def test_q3_today_closed_minute_bars_emit():
+    # 注入 now<16:00 + 今日多根分钟 bar;t<n-1 的今日已收盘 bar 应正常产信号(单侧)。
+    # 注:用随机游走分钟序列(同 _synthetic_df 口径)以确保确有信号触发;brief 原平直斜坡
+    # (恒定量 + pct_chg<eps)不产任何信号,无法体现“今日已收盘 bar 仍出点”的被测语义。
+    from src.services.volume_price_signals import compute_signals_for_all_bars, VPSConfig
+    n = 160
+    rng = np.random.default_rng(7)
+    close = 50 + np.cumsum(rng.normal(0, 0.5, n))
+    high = close + rng.uniform(0.1, 1.0, n)
+    low = close - rng.uniform(0.1, 1.0, n)
+    open_ = close + rng.normal(0, 0.3, n)
+    vol = rng.uniform(1e3, 5e3, n)
+    base = pd.Timestamp("2020-06-25 09:30:00")
+    dates = [(base + pd.Timedelta(minutes=5 * j)).strftime("%Y-%m-%d %H:%M:%S") for j in range(n)]
+    df = pd.DataFrame({"date": dates, "open": open_, "high": high, "low": low,
+                       "close": close, "volume": vol})
+    now = datetime(2020, 6, 25, 11, 0, 0)   # <16:00,今日(全部 bar 均为今日)
+    sig = compute_signals_for_all_bars(df, config=VPSConfig(), now=now)
+    # 仅全局末根(今日 partial)受影响被丢弃;中间今日已收盘 bar 可正常归位(至少某个 bar 有信号)
+    assert any(k < n - 1 for k in sig.keys())
