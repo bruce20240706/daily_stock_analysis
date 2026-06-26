@@ -23,9 +23,8 @@ import pandas as pd
 
 from src.services.volume_price_signals import (
     VPSConfig,
-    _to_epoch_ms_shanghai,
-    compute_volume_price_signals,
-    derive_price_levels,
+    compute_signals_for_all_bars,
+    derive_price_levels_series,
 )
 
 BASELINE_SIGNAL_TYPE = "__baseline__"
@@ -84,16 +83,6 @@ def _bars_as_dicts(df: pd.DataFrame) -> List[dict]:
     return df[["high", "low", "close"]].to_dict("records")
 
 
-def _last_ts(window: pd.DataFrame) -> int:
-    """返回 window 最末 bar 的上海午夜毫秒时间戳（与引擎出点口径一致）。
-
-    引擎中所有 detector 均通过 _to_epoch_ms_shanghai(prim['date'].iloc[i]) 生成
-    VPSignal.timestamp，此处以相同函数处理 window.iloc[-1]['date']，保证对齐。
-    无论 date 列是字符串还是 pd.Timestamp，_to_epoch_ms_shanghai 均可处理。
-    """
-    return _to_epoch_ms_shanghai(window.iloc[-1]["date"])
-
-
 def _eval(
     df: pd.DataFrame,
     *,
@@ -122,52 +111,25 @@ def _eval(
     out: List[SignalOutcome] = []
     n = len(df)
 
-    # 注意：末尾若干 bar 的前瞻窗口会被截断至剩余可用 bar 数（不补零）。
-    for t in range(min_history, n - 1):  # 至少留 1 根前瞻 bar
-        # 因果窗口：仅使用 ≤t 数据
-        window = df.iloc[: t + 1]
+    levels = derive_price_levels_series(df)                                 # O(n)，全量预计算价位
+    sig_by_bar = {} if all_bars else compute_signals_for_all_bars(df, config=cfg)  # O(n log k)
 
-        # 推导价位：需 stop/target 均可用
-        levels = derive_price_levels(window)
-        if levels.stop is None or levels.target is None:
+    for t in range(min_history, n - 1):                                    # 至少留 1 根前瞻
+        lv = levels[t]
+        if lv.stop is None or lv.target is None:
             continue
-
-        # 前瞻序列：[t+1, t+horizon]（取不到则截断，不补 0）
         fwd = _bars_as_dicts(df.iloc[t + 1 : t + 1 + horizon])
         if not fwd:
             continue
-
         if all_bars:
-            # baseline：每个有效 bar 均产生一条记录
-            out.append(
-                SignalOutcome(
-                    signal_type=BASELINE_SIGNAL_TYPE,
-                    market=market,
-                    outcome=classify_triple_barrier(
-                        fwd, stop=levels.stop, target=levels.target
-                    ),
-                )
-            )
+            out.append(SignalOutcome(
+                signal_type=BASELINE_SIGNAL_TYPE, market=market,
+                outcome=classify_triple_barrier(fwd, stop=lv.stop, target=lv.target)))
         else:
-            # 信号模式：仅收集本 bar 新触发的 bullish 信号
-            res = compute_volume_price_signals(window, config=cfg)
-            last_bar_ts = _last_ts(window)
-            triggered = {
-                m.signal_type
-                for m in res.markers
-                if m.direction == "bullish" and m.timestamp == last_bar_ts
-            }
-            for sig_type in triggered:
-                out.append(
-                    SignalOutcome(
-                        signal_type=sig_type,
-                        market=market,
-                        outcome=classify_triple_barrier(
-                            fwd, stop=levels.stop, target=levels.target
-                        ),
-                    )
-                )
-
+            for sig_type in sig_by_bar.get(t, ()):                         # O(1) 查表
+                out.append(SignalOutcome(
+                    signal_type=sig_type, market=market,
+                    outcome=classify_triple_barrier(fwd, stop=lv.stop, target=lv.target)))
     return out
 
 

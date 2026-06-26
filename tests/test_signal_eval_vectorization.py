@@ -1,4 +1,6 @@
 # tests/test_signal_eval_vectorization.py
+import time
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -233,3 +235,15 @@ def test_csfab_warmup_gate_norm_space():
     res = compute_volume_price_signals(df.iloc[:51], config=cfg)  # norm 50 行 < 51 → degraded 空
     assert res.markers == []
     assert sig.get(50, []) == []   # 行号 50 被 norm 空间 warmup gate 拦下
+
+
+# ─── Task 10: 性能 smoke ───────────────────────────────────────────────────────
+
+def test_eval_minute_scale_is_subquadratic():
+    from src.services.signal_backtest import evaluate_signal_outcomes
+    df = _synthetic_df(2000, seed=9)
+    t0 = time.time()
+    out = evaluate_signal_outcomes(df, market="crypto", horizon=10)
+    elapsed = time.time() - t0
+    assert elapsed < 20.0, f"2000 bars took {elapsed:.1f}s (expected subquadratic)"
+    assert isinstance(out, list)
