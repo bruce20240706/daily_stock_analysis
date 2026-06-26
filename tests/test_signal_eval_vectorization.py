@@ -262,7 +262,15 @@ _B_TYPES = {"vsa_no_demand", "vsa_no_supply", "vsa_stopping", "vsa_effort_vs_res
 
 def _oracle_bullish_by_bar(df, cfg):
     """独立因果参照:B 类绕过 _limit_b_class(直接调原始检测器取逐窗末根 RAW),A/vfx/shrink 经
-    compute_volume_price_signals 末根。仅用于无重复时间戳 + 历史日期 fixture(等价适用域)。"""
+    compute_volume_price_signals 末根。仅用于无重复时间戳 + 历史日期 fixture(等价适用域)。
+
+    B 类池必须忠实于生产 compute_signals_for_all_bars 的 b_items:生产单遍对**所有** bar
+    (含 pre-warmup i<min_bars-1)收集因果 B marker 入共享 top-k 池,仅在 emission 处按 warmup
+    门挡输出。故 B 类收集**不**受 _check_sufficient_window 守卫;只要 _normalize 不失败即纳入。
+    检测器在短窗上本就自然 no-op(rel_vol NaN 等),只会纳入合法的 pre-warmup 价位类 marker
+    (spring/upthrust 的 observed_value 是价位,能真实进入 abs 主导的 top-k 竞争)。
+    A/vfx/shrink 不进共享池,且评估 bar t≥min_history 恒为 post-warmup,故仍经编排器末根取
+    (编排器在 pre-warmup 窗口返回 degraded 空,无影响)。"""
     df = df.reset_index(drop=True)
     n = len(df)
     raw_b_pool = []        # (bar, block, sig) RAW 因果 B marker
@@ -272,22 +280,23 @@ def _oracle_bullish_by_bar(df, cfg):
         norm, reason = _normalize(sub, cfg)
         if reason is not None:
             continue
-        if _check_sufficient_window(norm, cfg) is not None:
-            continue
         prim = _compute_primitives(norm, cfg)
         last_ts = _to_epoch_ms_shanghai(sub["date"].iloc[-1])
-        # A/vfx/shrink:从编排器末根取(非 B 类),bullish
-        res = compute_volume_price_signals(sub, config=cfg)
-        a_vfx_by_bar[i] = {
-            m.signal_type for m in res.markers
-            if m.timestamp == last_ts and m.direction == "bullish" and m.signal_type not in _B_TYPES}
-        # B 类:绕过 _limit_b_class,取末根 RAW(VSA block0 + upthrust/spring block1)
+        # B 类:绕过 _limit_b_class + 绕过 warmup 守卫,取末根 RAW(VSA block0 + upthrust/spring
+        # block1)。对所有 bar(含 pre-warmup)入池,忠实生产 b_items。
         for m in _detect_vsa_bars(prim, cfg):
             if m.timestamp == last_ts:
                 raw_b_pool.append((i, 0, m))
         for m in _detect_upthrust_spring(prim, cfg):
             if m.timestamp == last_ts:
                 raw_b_pool.append((i, 1, m))
+        # A/vfx/shrink:仅 post-warmup 经编排器末根取(非 B 类),bullish
+        if _check_sufficient_window(norm, cfg) is not None:
+            continue
+        res = compute_volume_price_signals(sub, config=cfg)
+        a_vfx_by_bar[i] = {
+            m.signal_type for m in res.markers
+            if m.timestamp == last_ts and m.direction == "bullish" and m.signal_type not in _B_TYPES}
     # 每个 bar t:对 pool[0:t] 朴素 top-k(键 -abs,block,bar),取末根==t 的 bullish B
     result = {}
     for t in range(n):
@@ -324,7 +333,7 @@ def _counter(outcomes):
     return Counter((o.signal_type, o.market, o.outcome) for o in outcomes)
 
 
-@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5, 20, 35, 41])
 def test_golden_signal_equiv_oracle_multimarket(seed):
     df = _synthetic_df(160, seed=seed)
     cfg = VPSConfig.from_env()
