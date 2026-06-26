@@ -6,9 +6,12 @@
 
 设计要点：
 - 因果约束：评估 bar t 仅使用 df.iloc[:t+1]，绝无未来函数。
-- 信号触发判定：marker.timestamp == _last_ts(window)，即"新触发于当前 bar"。
-  与引擎语义一致：A 类 detector 均在最末 bar 或确认 bar 出点（如 OBV 背离确认 bar），
-  timestamp 均通过 _to_epoch_ms_shanghai(date) 生成，_last_ts 取 window 末行相同转换。
+- 信号查询：先对全 df 调用 compute_signals_for_all_bars(df) 单遍预计算，
+  得到每根 bar 因果触发的 bullish signal_type 集合；_eval 逐 bar O(1) 查表命中，
+  无需在每根 bar 内重算窗口。价位走 derive_price_levels_series 统一预计算。
+- 因果修正语义（B 类）：_streaming_topk_kept 实现因果流式 top-k，
+  去除逐窗非因果信号池、未确认 pivot 及历史 partial 墙钟 quirk，
+  命中率统计更因果正确（见 docs §5.2）。
 - 基线对照：baseline 每个有效入场 bar 均入场一次（全体 bar 基准），signal_type 固定为 __baseline__。
 - sample = win + loss（expired 被排除在胜率分母外，因未触及止损）。
 """

@@ -203,6 +203,13 @@ def test_streaming_topk_freeze_earlier_bar_evicted_later_still_kept():
     assert id(early) in kept
 
 
+def test_streaming_topk_k_zero_returns_empty():
+    # k=0 守卫:避免 best[-1] IndexError,直接返回空集
+    from src.services.volume_price_signals import _streaming_topk_kept
+    sig = _mk(5.0)
+    assert _streaming_topk_kept([(0, 0, sig)], 0) == set()
+
+
 def test_csfab_zero_volume_still_emits_obv_bottom():
     # F5: volume 全 0(rel_vol 全 NaN),仍应有 obv_bottom_divergence(不依赖 rel_vol)
     # W 形下降双底:第一底 bar16≈35.3,第二底 bar38≈33.0(价格更低,OBV 全 0 不随动 → bullish 背离)

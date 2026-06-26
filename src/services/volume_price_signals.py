@@ -1506,6 +1506,9 @@ def _streaming_topk_kept(b_items: list[tuple[int, int, VPSignal]], k: int) -> se
     """因果流式 top-k:bar t 的 marker 保留 ⇔ 在冻结池 [0:t] 的 top-k。
     键 (-abs(observed_value), block, bar) 为严格全序(同 bar+block 至多一 marker)。
     全方向竞争;调用方负责 top-k 之后再过滤 bullish。"""
+    if k <= 0:
+        return set()
+
     def keyf(bar: int, block: int, sig: VPSignal):
         ov = abs(sig.observed_value) if sig.observed_value is not None else 0.0
         return (-ov, block, bar)
