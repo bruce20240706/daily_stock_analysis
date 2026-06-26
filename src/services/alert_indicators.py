@@ -180,6 +180,7 @@ def normalize_ohlcv(
     *,
     required_columns: tuple[str, ...],
     now: Optional[datetime] = None,
+    keep_original_index: bool = False,
 ) -> pd.DataFrame:
     if df is None or getattr(df, "empty", True):
         return pd.DataFrame()
@@ -188,6 +189,9 @@ def normalize_ohlcv(
 
     output = pd.DataFrame(index=df.index.copy())
     output["date"] = _date_series(df)
+    if keep_original_index:
+        # 归一化前的原始行号(_eval 中 df 已 reset_index → RangeIndex 0..n-1 = raw bar 位)
+        output["_orig_idx"] = pd.RangeIndex(len(df))
 
     missing = []
     for canonical in required_columns:
