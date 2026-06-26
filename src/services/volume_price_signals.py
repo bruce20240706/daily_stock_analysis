@@ -1349,3 +1349,36 @@ def _detect_shrink_pullback_causal_rows(
                 observed_value=drawdown,
             )))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Task 6: _detect_vfx_all_bars_rows(vfx 全 bar 变体,复刻 _detect_latest_vfx 字段覆写)
+# ---------------------------------------------------------------------------
+
+
+def _detect_vfx_all_bars_rows(
+    prim: pd.DataFrame, config: VPSConfig
+) -> list[tuple[int, VPSignal]]:
+    """vfx 全 bar 变体:每根用当根 causal primitive 跑 _classify_vfx,复刻 _detect_latest_vfx 字段覆写。
+    与逐窗 _detect_latest_vfx(prim[:i+1]) 逐根等价。neutral/anomalous 跳过。"""
+    if prim.empty:
+        return []
+    close = prim["close"].astype(float).reset_index(drop=True)
+    rv_s = prim["rel_vol"].reset_index(drop=True)
+    pct_s = prim["pct_chg"].reset_index(drop=True)
+    body_s = prim["body"].reset_index(drop=True)
+    rp_s = prim["range_pos"].reset_index(drop=True)
+    date_s = prim["date"].reset_index(drop=True)
+    out: list[tuple[int, VPSignal]] = []
+    for i in range(len(prim)):
+        classified = _classify_vfx(
+            rel_vol=rv_s.iloc[i], pct_chg=pct_s.iloc[i],
+            body=body_s.iloc[i], range_pos=rp_s.iloc[i], config=config)
+        if classified.direction == "neutral" or classified.is_anomalous:
+            continue
+        out.append((i, VPSignal(
+            timestamp=_to_epoch_ms_shanghai(date_s.iloc[i]), price=float(close.iloc[i]),
+            anchor="close", direction=classified.direction, signal_type=classified.signal_type,
+            confidence="low", is_daily_approx=True, is_anomalous=False,
+            reason=classified.reason, threshold=None, observed_value=classified.observed_value)))
+    return out

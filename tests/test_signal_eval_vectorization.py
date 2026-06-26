@@ -85,6 +85,23 @@ def test_upthrust_spring_causal_excludes_unconfirmed_pivot():
     assert not any(i == 21 and s.signal_type == "spring" for i, s in causal)
 
 
+def test_vfx_all_bars_equiv_per_window_lastbar():
+    from src.services.volume_price_signals import (
+        VPSConfig, _compute_primitives, _normalize, _detect_latest_vfx,
+        _detect_vfx_all_bars_rows)
+    df = _synthetic_df(100, seed=11)
+    cfg = VPSConfig()
+    norm, _ = _normalize(df, cfg)
+    prim = _compute_primitives(norm, cfg)
+    got = _detect_vfx_all_bars_rows(prim, cfg)
+    ref: list[tuple[int, str, str]] = []
+    for i in range(len(prim)):
+        for m in _detect_latest_vfx(prim.iloc[: i + 1], cfg):
+            ref.append((i, m.signal_type, m.confidence))
+    assert [(i, s.signal_type, s.confidence) for i, s in got] == ref
+    assert all(s.confidence == "low" for _, s in got)
+
+
 def test_shrink_pullback_causal_equiv_per_window_lastbar():
     from src.services.volume_price_signals import (
         VPSConfig, _compute_primitives, _normalize, _detect_shrink_pullback,
