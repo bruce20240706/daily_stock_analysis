@@ -373,38 +373,11 @@ def derive_price_levels(
     if "low" in df.columns and len(df) >= _PRICE_LEVEL_WINDOW:
         swing_low = _last_finite(df["low"].astype(float).rolling(_PRICE_LEVEL_WINDOW).min())
 
-    # entry = 支撑候选中 <= 现价的最高值（最贴近现价的支撑）
-    entry_candidates = [c for c in (ma20, swing_low) if c is not None]
-    if current_price is not None:
-        below = [c for c in entry_candidates if c <= current_price]
-        entry = max(below) if below else (min(entry_candidates) if entry_candidates else None)
-    else:
-        entry = max(entry_candidates) if entry_candidates else None
-
     # ATR：复用 M1 canonical atr()，窗口不足时末值为 NaN
     last_atr = _last_finite(atr(df))
-    if entry is None or last_atr is None or last_atr <= 0:
-        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
-
-    stop = entry - atr_mult * last_atr
-    risk = entry - stop  # == atr_mult * last_atr，恒 > 0
-    if risk <= 0:
-        # 防御：理论上不可达，但 float 精度问题时不产出无意义价位
-        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
-
-    target = entry + rr_target * risk
-    risk_reward = (target - entry) / risk
-    candidate = PriceLevels(entry=entry, stop=stop, target=target, risk_reward=risk_reward)
-    if is_invalid_price_level(
-        entry=candidate.entry,
-        stop=candidate.stop,
-        target=candidate.target,
-        current_price=current_price,
-    ):
-        return _fallback_atr_levels(
-            current_price, last_atr, atr_mult=atr_mult, rr_target=rr_target
-        )
-    return candidate
+    return _price_levels_scalar_core(
+        ma20, swing_low, current_price, last_atr, atr_mult=atr_mult, rr_target=rr_target
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1148,3 +1121,83 @@ def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSR
 
     status = "degraded" if degraded_reason else "ok"
     return VPSResult(markers=markers, status=status, degraded_reason=degraded_reason)
+
+
+# ---------------------------------------------------------------------------
+# Task 2: scalar core + 序列版价位(向量化基础)
+# ---------------------------------------------------------------------------
+
+
+def _scalar_or_none(value) -> "float | None":
+    """单值取 float;NaN/None/不可转 → None(镜像 _last_finite 的标量语义)。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if v != v else v
+
+
+def _price_levels_scalar_core(
+    ma20: "float | None",
+    swing_low: "float | None",
+    current_price: "float | None",
+    last_atr: "float | None",
+    *,
+    atr_mult: float,
+    rr_target: float,
+) -> PriceLevels:
+    """derive_price_levels 的标量内核(逐 bar 复用);entry/回退分支与原实现字节一致。"""
+    entry_candidates = [c for c in (ma20, swing_low) if c is not None]
+    if current_price is not None:
+        below = [c for c in entry_candidates if c <= current_price]
+        entry = max(below) if below else (min(entry_candidates) if entry_candidates else None)
+    else:
+        entry = max(entry_candidates) if entry_candidates else None
+
+    if entry is None or last_atr is None or last_atr <= 0:
+        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
+    stop = entry - atr_mult * last_atr
+    risk = entry - stop
+    if risk <= 0:
+        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
+    target = entry + rr_target * risk
+    risk_reward = (target - entry) / risk
+    candidate = PriceLevels(entry=entry, stop=stop, target=target, risk_reward=risk_reward)
+    if is_invalid_price_level(entry=candidate.entry, stop=candidate.stop,
+                              target=candidate.target, current_price=current_price):
+        return _fallback_atr_levels(current_price, last_atr, atr_mult=atr_mult, rr_target=rr_target)
+    return candidate
+
+
+def derive_price_levels_series(
+    df,
+    *,
+    atr_mult: float = _DEFAULT_ATR_MULT,
+    rr_target: float = _DEFAULT_RR_TARGET,
+) -> "list[PriceLevels]":
+    """derive_price_levels 的全 df 序列版(raw 空间,逐 bar O(1) 取值)。
+
+    与 derive_price_levels(df.iloc[:t+1]) 逐 bar 等价:rolling/atr 因果且位置稳定,
+    series.iloc[t] == _last_finite(window[:t+1] 对应序列)。硬编码 20/14,不接 config。
+    """
+    n = len(df) if df is not None else 0
+    if df is None or getattr(df, "empty", True) or "close" not in df.columns:
+        return [PriceLevels(entry=None, stop=None, target=None, risk_reward=None) for _ in range(n)]
+    close = df["close"].astype(float).reset_index(drop=True)
+    ma20_series = close.rolling(_PRICE_LEVEL_WINDOW).mean()
+    swing_series = (
+        df["low"].astype(float).reset_index(drop=True).rolling(_PRICE_LEVEL_WINDOW).min()
+        if "low" in df.columns else None
+    )
+    atr_arr = atr(df).reset_index(drop=True)   # 默认 period=14,与 config 解耦
+    out: "list[PriceLevels]" = []
+    for t in range(n):
+        current_price = _scalar_or_none(close.iloc[t])
+        ma20 = _scalar_or_none(ma20_series.iloc[t])
+        swing_low = None
+        if swing_series is not None and (t + 1) >= _PRICE_LEVEL_WINDOW:
+            swing_low = _scalar_or_none(swing_series.iloc[t])
+        last_atr = _scalar_or_none(atr_arr.iloc[t])
+        out.append(_price_levels_scalar_core(
+            ma20, swing_low, current_price, last_atr, atr_mult=atr_mult, rr_target=rr_target))
+    return out
