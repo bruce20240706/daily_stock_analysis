@@ -373,38 +373,11 @@ def derive_price_levels(
     if "low" in df.columns and len(df) >= _PRICE_LEVEL_WINDOW:
         swing_low = _last_finite(df["low"].astype(float).rolling(_PRICE_LEVEL_WINDOW).min())
 
-    # entry = 支撑候选中 <= 现价的最高值（最贴近现价的支撑）
-    entry_candidates = [c for c in (ma20, swing_low) if c is not None]
-    if current_price is not None:
-        below = [c for c in entry_candidates if c <= current_price]
-        entry = max(below) if below else (min(entry_candidates) if entry_candidates else None)
-    else:
-        entry = max(entry_candidates) if entry_candidates else None
-
     # ATR：复用 M1 canonical atr()，窗口不足时末值为 NaN
     last_atr = _last_finite(atr(df))
-    if entry is None or last_atr is None or last_atr <= 0:
-        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
-
-    stop = entry - atr_mult * last_atr
-    risk = entry - stop  # == atr_mult * last_atr，恒 > 0
-    if risk <= 0:
-        # 防御：理论上不可达，但 float 精度问题时不产出无意义价位
-        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
-
-    target = entry + rr_target * risk
-    risk_reward = (target - entry) / risk
-    candidate = PriceLevels(entry=entry, stop=stop, target=target, risk_reward=risk_reward)
-    if is_invalid_price_level(
-        entry=candidate.entry,
-        stop=candidate.stop,
-        target=candidate.target,
-        current_price=current_price,
-    ):
-        return _fallback_atr_levels(
-            current_price, last_atr, atr_mult=atr_mult, rr_target=rr_target
-        )
-    return candidate
+    return _price_levels_scalar_core(
+        ma20, swing_low, current_price, last_atr, atr_mult=atr_mult, rr_target=rr_target
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1019,6 +992,34 @@ def _detect_vsa_bars(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
     return out
 
 
+def _detect_vsa_bars_rows(prim: pd.DataFrame, config: VPSConfig) -> list[tuple[int, VPSignal]]:
+    """_detect_vsa_bars 的快速变体:hoist close.astype 出循环(消除 O(n²)),返回 (行号, marker)。
+    与 _detect_vsa_bars 逐条等价。"""
+    close = prim["close"].astype(float).reset_index(drop=True)
+    rv_s = prim["rel_vol"].reset_index(drop=True)
+    rp_s = prim["range_pos"].reset_index(drop=True)
+    body_s = prim["body"].reset_index(drop=True)
+    spread_s = prim["spread"].reset_index(drop=True)
+    limit_s = prim["is_limit_bar"].reset_index(drop=True)
+    date_s = prim["date"].reset_index(drop=True)
+    out: list[tuple[int, VPSignal]] = []
+    for i in range(len(prim)):
+        rv = rv_s.iloc[i]; rp = rp_s.iloc[i]; body = body_s.iloc[i]
+        if pd.isna(rv) or bool(limit_s.iloc[i]):
+            continue
+        ts = _to_epoch_ms_shanghai(date_s.iloc[i])
+        price = float(close.iloc[i])
+        if rv < config.vol_shrink and body > 0 and not pd.isna(rp) and rp < 0.5:
+            out.append((i, _vsa_signal(ts, price, "vsa_no_demand", "bearish", rv)))
+        elif rv < config.vol_shrink and body < 0 and not pd.isna(rp) and rp > 0.5:
+            out.append((i, _vsa_signal(ts, price, "vsa_no_supply", "bullish", rv)))
+        elif rv >= config.vol_high and not pd.isna(rp) and 0.3 <= rp <= 0.7:
+            out.append((i, _vsa_signal(ts, price, "vsa_stopping", "neutral", rv)))
+        elif rv >= config.vol_high and abs(body) < (spread_s.iloc[i] * 0.2):
+            out.append((i, _vsa_signal(ts, price, "vsa_effort_vs_result", "neutral", rv)))
+    return out
+
+
 def _vsa_signal(ts: int, price: float, sig_type: str, direction: str, rv: float) -> VPSignal:
     """构造 VSA B 类信号（降权标记）。"""
     return VPSignal(
@@ -1061,6 +1062,43 @@ def _detect_upthrust_spring(prim: pd.DataFrame, config: VPSConfig) -> list[VPSig
                 reason="假跌破底（Spring，日线近似）", threshold=float(prior_lows[-1].price),
                 observed_value=float(low.iloc[i]),
             ))
+    return out
+
+
+def _detect_upthrust_spring_causal_rows(
+    prim: pd.DataFrame, config: VPSConfig
+) -> list[tuple[int, VPSignal]]:
+    """upthrust/spring 因果变体:对每根 i,仅用确认索引 center+swing_k ≤ i 的最近 pivot。
+    单调指针沿 pivot(已按 center 升序)推进,O(n+p)。等价于原 _detect_upthrust_spring(prim[:i+1]) 末根。"""
+    high = prim["high"].astype(float).reset_index(drop=True)
+    low = prim["low"].astype(float).reset_index(drop=True)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    date_s = prim["date"].reset_index(drop=True)
+    k = config.swing_k
+    pivots = _attach_pivot_timestamps(find_swing_pivots(close, k), prim)
+    highs = [p for p in pivots if p.kind == "high"]   # center 升序
+    lows = [p for p in pivots if p.kind == "low"]
+    out: list[tuple[int, VPSignal]] = []
+    hi_ptr = 0; last_high = None
+    lo_ptr = 0; last_low = None
+    for i in range(len(prim)):
+        while hi_ptr < len(highs) and highs[hi_ptr].index + k <= i:
+            last_high = highs[hi_ptr]; hi_ptr += 1
+        while lo_ptr < len(lows) and lows[lo_ptr].index + k <= i:
+            last_low = lows[lo_ptr]; lo_ptr += 1
+        ts = _to_epoch_ms_shanghai(date_s.iloc[i])
+        if last_high is not None and high.iloc[i] > last_high.price and close.iloc[i] < last_high.price:
+            out.append((i, VPSignal(
+                timestamp=ts, price=float(close.iloc[i]), anchor="high", direction="bearish",
+                signal_type="upthrust", confidence="low", is_daily_approx=True, is_anomalous=False,
+                reason="假突破顶（Upthrust，日线近似）", threshold=float(last_high.price),
+                observed_value=float(high.iloc[i]))))
+        if last_low is not None and low.iloc[i] < last_low.price and close.iloc[i] > last_low.price:
+            out.append((i, VPSignal(
+                timestamp=ts, price=float(close.iloc[i]), anchor="low", direction="bullish",
+                signal_type="spring", confidence="low", is_daily_approx=True, is_anomalous=False,
+                reason="假跌破底（Spring，日线近似）", threshold=float(last_low.price),
+                observed_value=float(low.iloc[i]))))
     return out
 
 
@@ -1148,3 +1186,410 @@ def compute_volume_price_signals(df, *, config: VPSConfig | None = None) -> VPSR
 
     status = "degraded" if degraded_reason else "ok"
     return VPSResult(markers=markers, status=status, degraded_reason=degraded_reason)
+
+
+# ---------------------------------------------------------------------------
+# Task 2: scalar core + 序列版价位(向量化基础)
+# ---------------------------------------------------------------------------
+
+
+def _scalar_or_none(value) -> "float | None":
+    """单值取 float;NaN/None/不可转 → None(镜像 _last_finite 的标量语义)。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if v != v else v
+
+
+def _price_levels_scalar_core(
+    ma20: "float | None",
+    swing_low: "float | None",
+    current_price: "float | None",
+    last_atr: "float | None",
+    *,
+    atr_mult: float,
+    rr_target: float,
+) -> PriceLevels:
+    """derive_price_levels 的标量内核(逐 bar 复用);entry/回退分支与原实现字节一致。"""
+    entry_candidates = [c for c in (ma20, swing_low) if c is not None]
+    if current_price is not None:
+        below = [c for c in entry_candidates if c <= current_price]
+        entry = max(below) if below else (min(entry_candidates) if entry_candidates else None)
+    else:
+        entry = max(entry_candidates) if entry_candidates else None
+
+    if entry is None or last_atr is None or last_atr <= 0:
+        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
+    stop = entry - atr_mult * last_atr
+    risk = entry - stop
+    if risk <= 0:
+        return PriceLevels(entry=entry, stop=None, target=None, risk_reward=None)
+    target = entry + rr_target * risk
+    risk_reward = (target - entry) / risk
+    candidate = PriceLevels(entry=entry, stop=stop, target=target, risk_reward=risk_reward)
+    if is_invalid_price_level(entry=candidate.entry, stop=candidate.stop,
+                              target=candidate.target, current_price=current_price):
+        return _fallback_atr_levels(current_price, last_atr, atr_mult=atr_mult, rr_target=rr_target)
+    return candidate
+
+
+def derive_price_levels_series(
+    df,
+    *,
+    atr_mult: float = _DEFAULT_ATR_MULT,
+    rr_target: float = _DEFAULT_RR_TARGET,
+) -> "list[PriceLevels]":
+    """derive_price_levels 的全 df 序列版(raw 空间,逐 bar O(1) 取值)。
+
+    与 derive_price_levels(df.iloc[:t+1]) 逐 bar 等价:rolling/atr 因果且位置稳定,
+    series.iloc[t] == _last_finite(window[:t+1] 对应序列)。硬编码 20/14,不接 config。
+    """
+    n = len(df) if df is not None else 0
+    if df is None or getattr(df, "empty", True) or "close" not in df.columns:
+        return [PriceLevels(entry=None, stop=None, target=None, risk_reward=None) for _ in range(n)]
+    close = df["close"].astype(float).reset_index(drop=True)
+    ma20_series = close.rolling(_PRICE_LEVEL_WINDOW).mean()
+    swing_series = (
+        df["low"].astype(float).reset_index(drop=True).rolling(_PRICE_LEVEL_WINDOW).min()
+        if "low" in df.columns else None
+    )
+    atr_arr = atr(df).reset_index(drop=True)   # 默认 period=14,与 config 解耦
+    out: "list[PriceLevels]" = []
+    for t in range(n):
+        current_price = _scalar_or_none(close.iloc[t])
+        ma20 = _scalar_or_none(ma20_series.iloc[t])
+        swing_low = None
+        if swing_series is not None and (t + 1) >= _PRICE_LEVEL_WINDOW:
+            swing_low = _scalar_or_none(swing_series.iloc[t])
+        last_atr = _scalar_or_none(atr_arr.iloc[t])
+        out.append(_price_levels_scalar_core(
+            ma20, swing_low, current_price, last_atr, atr_mult=atr_mult, rr_target=rr_target))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Task 5: _detect_shrink_pullback_causal_rows(last-bar → per-bar + O(1) 段增量)
+# ---------------------------------------------------------------------------
+
+
+def _detect_shrink_pullback_causal_rows(
+    prim: pd.DataFrame, config: VPSConfig
+) -> list[tuple[int, VPSignal]]:
+    """逐 bar 因果变体:bar i 的输出 == _detect_shrink_pullback(prim[:i+1]) 的末根判定。
+
+    段内全低于阈值检查使用前缀增量 O(1):
+      - nonnan_prefix[j]:prim[0:j] 中非 NaN rel_vol 的累计个数
+      - last_violation_prefix[j]:prim[0:j+1] 中最近一个 rel_vol>=pullback_rel_vol 的行号(-1=无)
+    段 [anchor, i] 非空且无违例 ⟺ seg_nonnan>0 且 last_violation_prefix[i] < anchor
+    其中 anchor = last_high.index + 1。
+    """
+    close = prim["close"].astype(float).reset_index(drop=True)
+    ma5 = prim["ma5"].reset_index(drop=True)
+    ma20 = prim["ma20"].reset_index(drop=True)
+    rel_vol = prim["rel_vol"].reset_index(drop=True)
+    pct = prim["pct_chg"].reset_index(drop=True)
+    date_s = prim["date"].reset_index(drop=True)
+    atr_series = atr(prim, config.atr_period).reset_index(drop=True)
+    k = config.swing_k
+    pivots = _attach_pivot_timestamps(find_swing_pivots(close, k), prim)
+    highs = [p for p in pivots if p.kind == "high"]
+    out: list[tuple[int, VPSignal]] = []
+    hi_ptr = 0
+    last_high = None
+    # 前缀:nonnan 累计计数 + 最近违例行号
+    nonnan_prefix = [0] * (len(prim) + 1)
+    last_violation_idx = -1
+    last_violation_prefix = [-1] * len(prim)
+    for j in range(len(prim)):
+        rv = rel_vol.iloc[j]
+        nonnan_prefix[j + 1] = nonnan_prefix[j] + (0 if pd.isna(rv) else 1)
+        if (not pd.isna(rv)) and rv >= config.pullback_rel_vol:
+            last_violation_idx = j
+        last_violation_prefix[j] = last_violation_idx
+    for i in range(len(prim)):
+        while hi_ptr < len(highs) and highs[hi_ptr].index + k <= i:
+            last_high = highs[hi_ptr]
+            hi_ptr += 1
+        if last_high is None:
+            continue
+        if pd.isna(ma5.iloc[i]) or pd.isna(ma20.iloc[i]) or ma5.iloc[i] <= ma20.iloc[i]:
+            continue
+        drawdown = last_high.price - float(close.iloc[i])
+        anchor = last_high.index + 1          # 段 [anchor, i]
+        if anchor > i:
+            continue
+        seg_nonnan = nonnan_prefix[i + 1] - nonnan_prefix[anchor]
+        seg_ok = (seg_nonnan > 0) and (last_violation_prefix[i] < anchor)
+        atr_now = float(atr_series.iloc[i])
+        if (drawdown > 0 and seg_ok and not np.isnan(atr_now)
+                and drawdown < config.pullback_atr_mult * atr_now):
+            curr_rv = float(rel_vol.iloc[i]) if not pd.isna(rel_vol.iloc[i]) else float("nan")
+            curr_pct = float(pct.iloc[i]) if not pd.isna(pct.iloc[i]) else 0.0
+            close_now = float(close.iloc[i])
+            atr_norm_now = (atr_now / close_now) if close_now > 0 else 0.0
+            if not math.isnan(curr_rv):
+                vp = classify_volume_pattern(curr_rv, curr_pct, atr_norm_now, config)
+                reason_str = (
+                    f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）[量能形态:{vp}]"
+                )
+            else:
+                reason_str = f"上升趋势缩量回调（回撤<{config.pullback_atr_mult}*ATR）"
+            out.append((i, VPSignal(
+                timestamp=_to_epoch_ms_shanghai(date_s.iloc[i]),
+                price=float(close.iloc[i]),
+                anchor="close",
+                direction="bullish",
+                signal_type="shrink_pullback",
+                confidence="medium",
+                is_daily_approx=True,
+                is_anomalous=False,
+                reason=reason_str,
+                threshold=config.pullback_atr_mult * atr_now,
+                observed_value=drawdown,
+            )))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Task 6: _detect_vfx_all_bars_rows(vfx 全 bar 变体,复刻 _detect_latest_vfx 字段覆写)
+# ---------------------------------------------------------------------------
+
+
+def _detect_vfx_all_bars_rows(
+    prim: pd.DataFrame, config: VPSConfig
+) -> list[tuple[int, VPSignal]]:
+    """vfx 全 bar 变体:每根用当根 causal primitive 跑 _classify_vfx,复刻 _detect_latest_vfx 字段覆写。
+    与逐窗 _detect_latest_vfx(prim[:i+1]) 逐根等价。neutral/anomalous 跳过。"""
+    if prim.empty:
+        return []
+    close = prim["close"].astype(float).reset_index(drop=True)
+    rv_s = prim["rel_vol"].reset_index(drop=True)
+    pct_s = prim["pct_chg"].reset_index(drop=True)
+    body_s = prim["body"].reset_index(drop=True)
+    rp_s = prim["range_pos"].reset_index(drop=True)
+    date_s = prim["date"].reset_index(drop=True)
+    out: list[tuple[int, VPSignal]] = []
+    for i in range(len(prim)):
+        classified = _classify_vfx(
+            rel_vol=rv_s.iloc[i], pct_chg=pct_s.iloc[i],
+            body=body_s.iloc[i], range_pos=rp_s.iloc[i], config=config)
+        if classified.direction == "neutral" or classified.is_anomalous:
+            continue
+        out.append((i, VPSignal(
+            timestamp=_to_epoch_ms_shanghai(date_s.iloc[i]), price=float(close.iloc[i]),
+            anchor="close", direction=classified.direction, signal_type=classified.signal_type,
+            confidence="low", is_daily_approx=True, is_anomalous=False,
+            reason=classified.reason, threshold=None, observed_value=classified.observed_value)))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Task 7: A 类行号变体
+# ---------------------------------------------------------------------------
+
+
+def _detect_breakouts_rows(prim: pd.DataFrame, config: VPSConfig) -> list[tuple[int, VPSignal]]:
+    """_detect_breakouts 行号变体:atr_series.iloc[i] 取代 _last_finite(atr_series.iloc[:i+1])(O(1))。
+    对 signal_type/threshold/observed_value 等价(reason 仅在 ATR seed 前极端 config 下可能不同,回测不用 reason)。"""
+    high = prim["high"].astype(float).reset_index(drop=True)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    prior_max = high.rolling(config.breakout_window).max().shift(1)
+    rel_vol = prim["rel_vol"].reset_index(drop=True)
+    pct_s = prim["pct_chg"].reset_index(drop=True)
+    date_s = prim["date"].reset_index(drop=True)
+    atr_series = atr(prim, config.atr_period).reset_index(drop=True)
+    out: list[tuple[int, VPSignal]] = []
+    for i in range(len(prim)):
+        pm = prior_max.iloc[i]
+        rv = rel_vol.iloc[i]
+        if pd.isna(pm) or pd.isna(rv):
+            continue
+        if close.iloc[i] >= pm and rv >= config.breakout_rel_vol:
+            pct = float(pct_s.iloc[i]) if not pd.isna(pct_s.iloc[i]) else 0.0
+            av = atr_series.iloc[i]
+            atr_val = None if pd.isna(av) else float(av)
+            atr_norm = (atr_val / float(close.iloc[i])) if (atr_val is not None and float(close.iloc[i]) > 0) else 0.0
+            vp = classify_volume_pattern(float(rv), pct, atr_norm, config)
+            out.append((i, VPSignal(
+                timestamp=_to_epoch_ms_shanghai(date_s.iloc[i]), price=float(close.iloc[i]),
+                anchor="close", direction="bullish", signal_type="volume_breakout", confidence="high",
+                is_daily_approx=True, is_anomalous=False,
+                reason=f"放量突破近{config.breakout_window}日高点（不含当日）[量能形态:{vp}]",
+                threshold=float(pm), observed_value=float(rv))))
+    return out
+
+
+def _anchored_vwap_signals_rows(prim: pd.DataFrame, config: VPSConfig) -> list[tuple[int, VPSignal]]:
+    """_anchored_vwap_signals 行号变体:突破锚点用 bar 行号(消除 ts.index 线扫与重复时间戳误锚)。"""
+    breakout_rows = _detect_breakouts_rows(prim, config)
+    if not breakout_rows:
+        return []
+    high = prim["high"].astype(float).reset_index(drop=True)
+    low = prim["low"].astype(float).reset_index(drop=True)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    volume = prim["volume"].astype(float).reset_index(drop=True)
+    typical = (high + low + close) / 3.0
+    out: list[tuple[int, VPSignal]] = []
+    for start, _bsig in breakout_rows:
+        cum_pv = 0.0
+        cum_v = 0.0
+        vwap: list[float] = []
+        for j in range(start, len(prim)):
+            cum_pv += float(typical.iloc[j]) * float(volume.iloc[j])
+            cum_v += float(volume.iloc[j])
+            vwap.append(cum_pv / cum_v if cum_v > 0 else float("nan"))
+        for off in range(1, len(vwap)):
+            j = start + off
+            prev_delta = float(close.iloc[j - 1]) - vwap[off - 1]
+            curr_delta = float(close.iloc[j]) - vwap[off]
+            if prev_delta < 0 <= curr_delta:
+                out.append((j, _avwap_signal(prim, j, "anchored_vwap_reclaim", "bullish", vwap[off])))
+            elif prev_delta >= 0 > curr_delta:
+                out.append((j, _avwap_signal(prim, j, "anchored_vwap_loss", "bearish", vwap[off])))
+    return out
+
+
+def _detect_obv_divergence_rows(prim: pd.DataFrame, config: VPSConfig) -> list[tuple[int, VPSignal]]:
+    """_detect_obv_divergence 行号变体:行号 = conf_idx(curr.index+swing_k);逻辑逐字复刻。"""
+    close = prim["close"].astype(float).reset_index(drop=True)
+    vol = prim["volume"].astype(float).reset_index(drop=True)
+    high = prim["high"].astype(float).reset_index(drop=True)
+    low = prim["low"].astype(float).reset_index(drop=True)
+    obv_series = _obv(close, vol)
+    cmf_series = _cmf(high, low, close, vol, _DIV_CMF_WINDOW)
+    mfi_series = _mfi(high, low, close, vol, _DIV_MFI_WINDOW)
+    pivots = _attach_pivot_timestamps(find_swing_pivots(close, config.swing_k), prim)
+    out: list[tuple[int, VPSignal]] = []
+    for kind, sig_type, cmp_price, cmp_ind, direction in (
+        ("high", "obv_top_divergence", lambda a, b: a > b, lambda a, b: a <= b, "bearish"),
+        ("low", "obv_bottom_divergence", lambda a, b: a < b, lambda a, b: a >= b, "bullish"),
+    ):
+        same = [p for p in pivots if p.kind == kind]
+        for prev, curr in zip(same, same[1:]):
+            if not cmp_price(curr.price, prev.price):
+                continue
+            obv_prev = float(obv_series.iloc[prev.index])
+            obv_curr = float(obv_series.iloc[curr.index])
+            cmf_prev = float(cmf_series.iloc[prev.index])
+            cmf_curr = float(cmf_series.iloc[curr.index])
+            mfi_prev = float(mfi_series.iloc[prev.index])
+            mfi_curr = float(mfi_series.iloc[curr.index])
+            obv_div = cmp_ind(obv_curr, obv_prev) and not math.isnan(obv_curr) and not math.isnan(obv_prev)
+            cmf_div = cmp_ind(cmf_curr, cmf_prev) and not math.isnan(cmf_curr) and not math.isnan(cmf_prev)
+            mfi_div = cmp_ind(mfi_curr, mfi_prev) and not math.isnan(mfi_curr) and not math.isnan(mfi_prev)
+            k = sum([obv_div, cmf_div, mfi_div])
+            if k == 0:
+                continue
+            confidence = "high" if k >= 3 else ("medium" if k >= 2 else "low")
+            rel_divs: list[float] = []
+            if obv_div:
+                denom_obv = max(abs(obv_curr), abs(obv_prev), 1.0)
+                rel_divs.append(min(abs(obv_curr - obv_prev) / denom_obv, 1.0))
+            if cmf_div:
+                rel_divs.append(min(abs(cmf_curr - cmf_prev) / 2.0, 1.0))
+            if mfi_div:
+                rel_divs.append(min(abs(mfi_curr - mfi_prev) / 100.0, 1.0))
+            grade = _divergence_strength_grade(k, rel_divs)
+            sources_desc = "+".join(s for s, d in [("OBV", obv_div), ("CMF", cmf_div), ("MFI", mfi_div)] if d)
+            conf_idx = curr.index + config.swing_k
+            out.append((conf_idx, VPSignal(
+                timestamp=_to_epoch_ms_shanghai(prim["date"].iloc[conf_idx]), price=curr.price,
+                anchor=kind, direction=direction, signal_type=sig_type, confidence=confidence,
+                is_daily_approx=True, is_anomalous=False,
+                reason=f"价格创新极值但量能指标未同步（{sources_desc} 背离，强度:{grade}）",
+                threshold=float(obv_prev), observed_value=float(obv_curr))))
+    return out
+
+
+def _streaming_topk_kept(b_items: list[tuple[int, int, VPSignal]], k: int) -> set[int]:
+    """因果流式 top-k:bar t 的 marker 保留 ⇔ 在冻结池 [0:t] 的 top-k。
+    键 (-abs(observed_value), block, bar) 为严格全序(同 bar+block 至多一 marker)。
+    全方向竞争;调用方负责 top-k 之后再过滤 bullish。"""
+    if k <= 0:
+        return set()
+
+    def keyf(bar: int, block: int, sig: VPSignal):
+        ov = abs(sig.observed_value) if sig.observed_value is not None else 0.0
+        return (-ov, block, bar)
+
+    by_bar: dict[int, list[tuple[int, int, VPSignal]]] = {}
+    for bar, block, sig in b_items:
+        by_bar.setdefault(bar, []).append((bar, block, sig))
+
+    kept_ids: set[int] = set()
+    best: list[tuple[tuple, VPSignal]] = []   # 升序键、容量 k 的当前 top-k
+    for bar in sorted(by_bar):
+        for (b, blk, sig) in by_bar[bar]:
+            kx = keyf(b, blk, sig)
+            if len(best) < k:
+                best.append((kx, sig))
+                best.sort(key=lambda e: e[0])
+            elif kx < best[-1][0]:
+                best[-1] = (kx, sig)
+                best.sort(key=lambda e: e[0])
+        bar_ids = {id(s) for (_, _, s) in by_bar[bar]}
+        for (_, s) in best:
+            if id(s) in bar_ids:
+                kept_ids.add(id(s))
+    return kept_ids
+
+
+# Task 9: compute_signals_for_all_bars(整合 + 退化三态 + norm 空间 warmup gate + norm2raw)
+
+def compute_signals_for_all_bars(
+    df, *, config: "VPSConfig | None" = None, now=None
+) -> "dict[int, list[str]]":
+    """对全 df 单遍算出每根 bar 因果触发的 bullish signal_type(回测专用,因果修正语义)。
+    返回 {原始 bar 行号: [bullish signal_type, ...]}(装配序去重)。图表路径不调用本函数。"""
+    cfg = config or VPSConfig()
+    try:
+        norm = normalize_ohlcv(df, required_columns=_REQUIRED_COLUMNS,
+                               now=now, keep_original_index=True)
+    except ValueError:
+        return {}
+    if norm.empty:
+        return {}
+    prim = _compute_primitives(norm, cfg)
+    orig_idx = norm["_orig_idx"].astype(int).tolist()   # norm 行 → raw 行
+    min_bars = max(cfg.vol_ma_window, cfg.atr_period, cfg.breakout_window) + 1
+
+    # norm 行 → 装配序 bullish signal_type 列表
+    by_norm: dict[int, list[str]] = {}
+
+    def _add(norm_row: int, sig: VPSignal):
+        if sig.direction != "bullish":
+            return
+        if (norm_row + 1) < min_bars:        # per-bar warmup gate(norm 行号空间)
+            return
+        lst = by_norm.setdefault(norm_row, [])
+        if sig.signal_type not in lst:
+            lst.append(sig.signal_type)
+
+    # 1) A 类(装配序:obv → breakout → shrink → vwap)
+    for r, s in _detect_obv_divergence_rows(prim, cfg):
+        _add(r, s)
+    for r, s in _detect_breakouts_rows(prim, cfg):
+        _add(r, s)
+    for r, s in _detect_shrink_pullback_causal_rows(prim, cfg):
+        _add(r, s)
+    for r, s in _anchored_vwap_signals_rows(prim, cfg):
+        _add(r, s)
+
+    # 2) B 类:RAW 因果 marker(VSA block0 + upthrust/spring block1)→ 流式 top-k
+    b_items: list[tuple[int, int, VPSignal]] = []
+    for r, s in _detect_vsa_bars_rows(prim, cfg):
+        b_items.append((r, 0, s))
+    for r, s in _detect_upthrust_spring_causal_rows(prim, cfg):
+        b_items.append((r, 1, s))
+    kept = _streaming_topk_kept(b_items, cfg.b_class_top_k)
+    for r, blk, s in b_items:
+        if id(s) in kept:
+            _add(r, s)
+
+    # 3) vfx(旁路 top-k)
+    for r, s in _detect_vfx_all_bars_rows(prim, cfg):
+        _add(r, s)
+
+    # 4) norm 行 → raw 行
+    return {orig_idx[nr]: lst for nr, lst in by_norm.items()}

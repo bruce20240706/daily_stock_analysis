@@ -1094,3 +1094,34 @@ def test_to_epoch_iso_t_separated_string_preserves_time():
     midnight = _to_epoch_ms_shanghai("2026-06-22")
     assert _to_epoch_ms_shanghai("2026-06-22T09:35:00") == t_space   # 'T' 与空格等价
     assert _to_epoch_ms_shanghai("2026-06-22T09:35:00") != midnight  # 不坍缩到午夜
+
+
+# ---------------------------------------------------------------------------
+# Task 12: 近边界 viz 回归——路径1(图表)全 df 调用仍渲染 upthrust
+# ---------------------------------------------------------------------------
+
+def test_chart_path_renders_near_boundary_upthrust():
+    """路径1(图表)用全 df 调用,应保留近边界非因果 upthrust/spring viz marker。
+    锁死'因果变体是并列新函数、未就地改共享 _detect_upthrust_spring'。"""
+    from src.services.volume_price_signals import compute_volume_price_signals, VPSConfig
+    cfg = VPSConfig(swing_k=2, b_class_top_k=10)
+    # 制造一个高点 pivot center=c,在 c+1 处假突破(c+1 时 pivot 未确认,但全 df viz 会渲染)
+    n = 30
+    high = [10.0] * n
+    close = [9.5] * n
+    low = [9.0] * n
+    high[20] = 12.0
+    close[20] = 11.5            # 高点 center=20(confirm@22)
+    high[21] = 12.5
+    close[21] = 11.0            # bar21 假突破前高、收回 → upthrust(non-causal at 21)
+    df = pd.DataFrame({
+        "date": pd.date_range("2020-01-01", periods=n, freq="D").strftime("%Y-%m-%d"),
+        "open": close,
+        "high": high,
+        "low": low,
+        "close": close,
+        "volume": [100.0] * n,
+    })
+    res = compute_volume_price_signals(df, config=cfg)
+    types = {m.signal_type for m in res.markers}
+    assert "upthrust" in types   # 路径1 全 df 仍渲染(若被就地改成 center+k<=i 则消失 → 本测试守护)

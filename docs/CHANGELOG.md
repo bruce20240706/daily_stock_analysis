@@ -113,6 +113,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 日线信号新增多周期共振标记（高周期趋势与信号方向同向：周线共振/周月双共振），看板行与钻取面板可见
 - [改进] GET /api/v1/stocks/{code}/history 放宽 days 上限至 1825 以支撑周/月线窗口（纯加宽，向后兼容）
 - [新功能] 信号资产新增细粒度字段:horizon(胜率验证窗口,与 hit_rate 同源)/plan_quality(交易计划完整度+一致性,与可信度正交)/status(active/aging/expired 生命周期),实时 /signals + 信号看板 + K线 drilldown 呈现(transient-only,不进 DB/历史,对决策与既有字段只读)
+- [改进] 信号回测走查向量化(O(n²)→O(n log k)),链路B 分钟路径可用;回测改因果修正语义,命中率统计重跑后更新(图表 marker 几何不变)
+- [测试] 新增信号引擎向量化因果 oracle golden(绕过 _limit_b_class)与 F1–F12 区分性反例 fixture
 
 ## [3.20.0] - 2026-06-03
 
