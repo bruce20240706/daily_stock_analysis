@@ -1065,6 +1065,43 @@ def _detect_upthrust_spring(prim: pd.DataFrame, config: VPSConfig) -> list[VPSig
     return out
 
 
+def _detect_upthrust_spring_causal_rows(
+    prim: pd.DataFrame, config: VPSConfig
+) -> list[tuple[int, VPSignal]]:
+    """upthrust/spring 因果变体:对每根 i,仅用确认索引 center+swing_k ≤ i 的最近 pivot。
+    单调指针沿 pivot(已按 center 升序)推进,O(n+p)。等价于原 _detect_upthrust_spring(prim[:i+1]) 末根。"""
+    high = prim["high"].astype(float).reset_index(drop=True)
+    low = prim["low"].astype(float).reset_index(drop=True)
+    close = prim["close"].astype(float).reset_index(drop=True)
+    date_s = prim["date"].reset_index(drop=True)
+    k = config.swing_k
+    pivots = _attach_pivot_timestamps(find_swing_pivots(close, k), prim)
+    highs = [p for p in pivots if p.kind == "high"]   # center 升序
+    lows = [p for p in pivots if p.kind == "low"]
+    out: list[tuple[int, VPSignal]] = []
+    hi_ptr = 0; last_high = None
+    lo_ptr = 0; last_low = None
+    for i in range(len(prim)):
+        while hi_ptr < len(highs) and highs[hi_ptr].index + k <= i:
+            last_high = highs[hi_ptr]; hi_ptr += 1
+        while lo_ptr < len(lows) and lows[lo_ptr].index + k <= i:
+            last_low = lows[lo_ptr]; lo_ptr += 1
+        ts = _to_epoch_ms_shanghai(date_s.iloc[i])
+        if last_high is not None and high.iloc[i] > last_high.price and close.iloc[i] < last_high.price:
+            out.append((i, VPSignal(
+                timestamp=ts, price=float(close.iloc[i]), anchor="high", direction="bearish",
+                signal_type="upthrust", confidence="low", is_daily_approx=True, is_anomalous=False,
+                reason="假突破顶（Upthrust，日线近似）", threshold=float(last_high.price),
+                observed_value=float(high.iloc[i]))))
+        if last_low is not None and low.iloc[i] < last_low.price and close.iloc[i] > last_low.price:
+            out.append((i, VPSignal(
+                timestamp=ts, price=float(close.iloc[i]), anchor="low", direction="bullish",
+                signal_type="spring", confidence="low", is_daily_approx=True, is_anomalous=False,
+                reason="假跌破底（Spring，日线近似）", threshold=float(last_low.price),
+                observed_value=float(low.iloc[i]))))
+    return out
+
+
 def _limit_b_class(b_markers: list[VPSignal], config: VPSConfig) -> list[VPSignal]:
     """按 observed_value 绝对值降序取 top-k，控制 B 类信号密度上限。"""
     ranked = sorted(

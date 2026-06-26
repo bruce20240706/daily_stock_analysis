@@ -43,3 +43,43 @@ def test_price_levels_series_matches_per_window():
         assert got.entry == pytest.approx(ref.entry) if ref.entry is not None else got.entry == ref.entry
         assert got.stop == pytest.approx(ref.stop) if ref.stop is not None else got.stop == ref.stop
         assert got.target == pytest.approx(ref.target) if ref.target is not None else got.target == ref.target
+
+
+def test_upthrust_spring_causal_equiv_per_window_lastbar():
+    from src.services.volume_price_signals import (
+        VPSConfig, _compute_primitives, _normalize, _detect_upthrust_spring,
+        _detect_upthrust_spring_causal_rows, _to_epoch_ms_shanghai)
+    df = _synthetic_df(150, seed=3)
+    cfg = VPSConfig()
+    norm, _ = _normalize(df, cfg)
+    prim = _compute_primitives(norm, cfg)
+    causal = _detect_upthrust_spring_causal_rows(prim, cfg)
+    # 参照:逐窗 [0:i+1] 末根
+    ref: list[tuple[int, str]] = []
+    for i in range(len(prim)):
+        sub = prim.iloc[: i + 1]
+        last_ts = _to_epoch_ms_shanghai(sub["date"].iloc[-1])
+        for m in _detect_upthrust_spring(sub, cfg):
+            if m.timestamp == last_ts:
+                ref.append((i, m.signal_type))
+    assert [(i, s.signal_type) for i, s in causal] == ref
+
+
+def test_upthrust_spring_causal_excludes_unconfirmed_pivot():
+    # 构造一个 center 落在 (i-k, i] 的 pivot:因果变体不得在 bar i 用它(F1)
+    from src.services.volume_price_signals import (
+        VPSConfig, _compute_primitives, _normalize, _detect_upthrust_spring_causal_rows)
+    cfg = VPSConfig(swing_k=2)
+    # 24 根:制造一个低点 pivot center=20(confirm@22),并在 bar 21 试图触发 spring
+    close = [10.0] * 24
+    low = [10.0] * 24
+    low[20] = 5.0; close[20] = 9.0          # 低点
+    low[21] = 4.0; close[21] = 9.5          # bar21 跌破前低收回 → 若用未确认 pivot20 会误产 spring
+    df = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=24, freq="D").strftime("%Y-%m-%d"),
+                       "open": close, "high": [c + 0.5 for c in close], "low": low,
+                       "close": close, "volume": [100.0] * 24})
+    norm, _ = _normalize(df, cfg)
+    prim = _compute_primitives(norm, cfg)
+    causal = _detect_upthrust_spring_causal_rows(prim, cfg)
+    # bar21: pivot20 的确认索引 = 20+2 = 22 > 21 → 不可用 → bar21 无 spring
+    assert not any(i == 21 and s.signal_type == "spring" for i, s in causal)
