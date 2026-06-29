@@ -216,6 +216,16 @@ GET /api/v1/backtest/performance?interval=5m
 
 分钟回测的**入场价**取 `analysis_date` 当日日线收盘价（与日线路径语义一致）。分钟**价格路径**起点为 `analysis_date + 1 day` 00:00 UTC（即 crypto 日线 bar 收盘后的第一根分钟 bar 所在时刻），向未来延伸 `eval_window_days` 天。如果分析日期较早且所需分钟数据不可用，该条记录会被跳过并记录错误日志。
 
+### 9.4 链路A end_date 右边界核验（只读结论，2026-06-26）
+
+链路A 分钟取数路径（`src/services/backtest_service.py`）已显式计算并下传 `end_date=_window_end_date.isoformat()`（`_window_end_date = _minute_window_start + timedelta(days=_end_offset)`）：
+
+- **A股/美股**：`end_date` 由 `tushare_fetcher.get_intraday_data`、`akshare_fetcher.get_intraday_data`、`yfinance_fetcher.get_intraday_data` 直传源 API，右边界由源端截断，已闭合。
+- **crypto**：`binance_fetcher._page_klines` 不接收 `end_date` 参数，但 `limit ≈ days × bars_per_day` 正向翻页封顶右边界——`len(out) >= limit` 即停止翻页，不会越界取到未来数据。
+- **引擎二次截断**：`evaluate_single`（链路A 引擎，`src/core/backtest_engine.py`）对传入的 `forward_bars` 执行 `forward_bars[:eval_days]`，再次将评估窗口限制在 `eval_window_days` 根之内。
+
+**结论**：链路A `end_date` 右边界已等价闭合（A股/美股由源 API 截断；crypto 由 `limit` 翻页封顶 + 引擎 `[:eval_days]` 共同受控）。本特性（链路B 窗口正确性）**不改链路A 代码**，以上结论仅作只读核验登记。
+
 ---
 
 ## 10. A 股盘中/分钟级回测（沪深为主，北交 best-effort）
@@ -309,6 +319,23 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 - **成本**：沿用 crypto 对称 `fee/slippage`（默认 0）；美股无印花税（仅极小 SEC/TAF 费），不单独建模。
 - **复权基准漂移**：yfinance `auto_adjust=True`，与库内日线收盘入场价的复权锚点可能不同步（同 A 股 §10.5），窗口短/无公司行动时可忽略。
 - **仅个股**：美股指数（SPX/DJI 等）无 operation_advice、非回测候选，不支持。
+
+### 11.6 A股/美股分钟数据深度（链路B，2026-06-26）
+
+**行为变更（C2）**：自本特性起，链路B 分钟回测（`signal_backtest_service`）对非 crypto 来源显式下传 `start_date`，将历史窗口锚定到更早起点，解决此前源默认浅窗导致样本量不足的问题。crypto 路径字节级不变。
+
+| 市场 | interval | start_date 锚点 | 说明 |
+|------|----------|-----------------|------|
+| 美股（us） | 1h | today − `_INTRADAY_MAX_DAYS["us"]["1h"]`（≈730d） | 夹 yfinance band 上限 |
+| 美股（us） | 5m/15m | today − `_INTRADAY_MAX_DAYS["us"]["5m"]`（≈60d） | 夹 yfinance band 上限 |
+| A股（cn） | 1h | today − 730d | tushare 保守上限，待在线核验校准 |
+| A股（cn） | 15m/5m | today − 365d | tushare 保守上限，待在线核验校准 |
+| A股（cn） | 1m | 夹保守上限（见实现） | 防止超出 tushare 可得范围 |
+| crypto | 不变 | 字节级不变（仍按 days 估算 limit） | C2 不改 crypto 路径 |
+
+**cn band 保守值待 tushare 在线核验校准**：当前 A股 band 为保守估计，实际 tushare `stk_mins` 可得范围需在有外网时用真实 token 验证，并根据结果收紧上限（见 spec §5.7）。
+
+此变更仅影响链路B 信号可信度批作业（`--signal-backtest-interval`），链路A 盘中回测（`--backtest-interval`）路径不变（见 §9.4）。
 
 ---
 

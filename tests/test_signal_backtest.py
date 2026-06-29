@@ -75,11 +75,12 @@ def test_evaluate_signal_outcomes_tags_market_and_signal_type():
 
 
 def test_evaluate_signal_outcomes_exact_dedup_count():
-    """I3 去重计数守卫：fixture 在 bar 60 恰好触发 1 条 volume_breakout（每根 bar 最多产出 1 次）。
+    """去重计数守卫：fixture 在 bar 60 唯一触发 1 条 volume_breakout。
 
-    此测试在 signal_backtest._eval 的 `m.timestamp == last_bar_ts` 去重过滤被删除后
-    必定变红（若过滤删除导致多个相邻 bar 产生重复 volume_breakout，则 Counter 将 > 1）。
-    断言用精确计数，而非 > 0，以确保去重逻辑正确。
+    向量化 _eval 经 compute_signals_for_all_bars 单遍预计算每根 bar 的因果信号集合，每根 bar
+    的同类信号至多计一次；此测试用精确计数(==1 而非 >0)守护该去重语义：若预计算把相邻 bar 的
+    volume_breakout 重复计入，Counter 将 > 1。bar 60 落在 C1 新边界 range(40, 70) 内，截尾修复
+    不影响本断言。
     """
     from collections import Counter
     df = _make_history_with_signals()
@@ -88,7 +89,7 @@ def test_evaluate_signal_outcomes_exact_dedup_count():
     # fixture 的 bar 60 设计为唯一触发点，period 内恰好 1 条 volume_breakout
     assert vb_count == 1, (
         f"期望 volume_breakout 恰好 1 条，实际得到 {vb_count}；"
-        "若去重过滤（m.timestamp == last_bar_ts）被删除则此测试会在此处失败。"
+        "若向量化 _eval 经 compute_signals_for_all_bars 预计算把相邻 bar 的 volume_breakout 重复计入则此处失败。"
     )
 
 
@@ -226,3 +227,37 @@ def _make_history_with_signals():
         "close": close,
         "volume": volume,
     })
+
+
+# ---------------------------------------------------------------------------
+# C1: 右端截尾边界（绝对计数锁定 n-horizon）
+# ---------------------------------------------------------------------------
+
+def _smooth_uptrend_df(n):
+    """全有效价位 fixture：平滑上升 + OHLC 振幅（ATR>0），价位从 t=19 起非 None。
+
+    derive_price_levels 仅依赖 rolling MA20 / 20根 swing-low / ATR14（不依赖 swing pivot），
+    平滑趋势即可让 t>=19 全部产出有效 stop/target；high>low 保证 ATR>0（避免退化为 None）。
+    """
+    close = np.linspace(50.0, 50.0 + 0.4 * n, n)
+    high = close + 0.5
+    low = close - 0.5
+    open_ = close - 0.1
+    vol = np.full(n, 1000.0)
+    dates = pd.date_range("2024-01-01", periods=n, freq="D").strftime("%Y-%m-%d")
+    return pd.DataFrame({"date": dates, "open": open_, "high": high,
+                         "low": low, "close": close, "volume": vol})
+
+
+@pytest.mark.parametrize("n,h,expected", [(50, 10, 0), (51, 10, 1), (120, 10, 70), (120, 5, 75)])
+def test_eval_right_edge_absolute_count(n, h, expected):
+    """C1: 评估上界为 n-horizon，每个被评估 bar 都有完整 horizon 前瞻。
+
+    全有效价位 fixture 下，baseline 计数 == max(0, (n-h)-min_history)（min_history=40）。
+    绝对计数对上界 off-by-one 敏感：n-1（旧）与 n-h±1 都会被 (50,10)/(51,10) 边界例 + (120,*) 检出。
+    (51,10)→1 顺带证明唯一被评估 bar t=40 的前瞻 df.iloc[41:51] 恰 10 根（末根满 horizon）；
+    (50,10)→0 证明不足完整 horizon 的 bar 一律不评估。
+    """
+    df = _smooth_uptrend_df(n)
+    base = evaluate_baseline_outcomes(df, market="cn", horizon=h)
+    assert len(base) == expected

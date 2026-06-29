@@ -324,7 +324,7 @@ def _oracle_signal_outcomes(df, *, market, horizon, cfg, min_history=40):
     n = len(df)
     bull = _oracle_bullish_by_bar(df, cfg)
     out = []
-    for t in range(min_history, n - 1):
+    for t in range(min_history, n - horizon):
         ref = derive_price_levels(df.iloc[: t + 1])
         if ref.stop is None or ref.target is None:
             continue
@@ -359,7 +359,7 @@ def test_golden_baseline_unchanged():
     df2 = df.reset_index(drop=True)
     n = len(df2)
     ref = []
-    for t in range(40, n - 1):
+    for t in range(40, n - 10):
         lv = derive_price_levels(df2.iloc[: t + 1])
         if lv.stop is None or lv.target is None:
             continue
