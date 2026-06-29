@@ -105,3 +105,24 @@ def test_bars_per_day_ceil_keeps_crypto_cn_unchanged():
 def test_derive_window_bar_count_us():
     assert derive_window_bar_count(10, "5m", "us") == 780
     assert derive_window_bar_count(10, "1h", "us") == 70
+
+
+def test_apply_round_trip_cost_sell_side_only():
+    # 仅卖出单边(印花税 5bp) → 扣 5/100 = 0.05
+    assert apply_round_trip_cost(10.0, 0.0, 0.0, sell_side_bps=5.0) == pytest.approx(9.95)
+
+
+def test_apply_round_trip_cost_three_components():
+    # 双边 fee 2 + slip 3 → 2*(2+3)/100 = 0.10;加卖出单边 5 → 0.05;共扣 0.15
+    assert apply_round_trip_cost(10.0, 2.0, 3.0, sell_side_bps=5.0) == pytest.approx(9.85)
+
+
+def test_apply_round_trip_cost_default_sell_side_byte_identical():
+    # 不传 sell_side_bps:全 0 走早退守卫,字节级不变
+    assert apply_round_trip_cost(10.0, 0.0, 0.0) == pytest.approx(10.0)
+    # 与旧两参实现同值(7.7 - 2*(2+3)/100 = 7.6)
+    assert apply_round_trip_cost(7.7, 2.0, 3.0) == pytest.approx(7.6)
+
+
+def test_apply_round_trip_cost_none_passthrough_with_sell_side():
+    assert apply_round_trip_cost(None, 0.0, 0.0, sell_side_bps=5.0) is None

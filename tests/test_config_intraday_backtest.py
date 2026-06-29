@@ -20,12 +20,13 @@ def _load_config(**env):
 
 
 def test_intraday_defaults_are_status_quo():
-    """All 6 new fields must have status-quo defaults when no env var is set."""
+    """All 7 new fields must have status-quo defaults when no env var is set."""
     env_overrides = {}
     for k in [
         "CRYPTO_INTRADAY_BACKTEST_INTERVAL", "CRYPTO_INTRADAY_MINUTE_CACHE_TTL_S",
         "CRYPTO_INTRADAY_BACKTEST_FEE_BPS", "CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS",
         "INTRADAY_BACKTEST_ENABLED", "INTRADAY_BACKTEST_SCHEDULE_MINUTES",
+        "ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS",
     ]:
         # Ensure these vars are absent from env during the test
         os.environ.pop(k, None)
@@ -37,6 +38,7 @@ def test_intraday_defaults_are_status_quo():
     assert cfg.crypto_intraday_backtest_slippage_bps == 0.0
     assert cfg.intraday_backtest_enabled is False
     assert cfg.intraday_backtest_schedule_minutes == 60
+    assert cfg.ashare_intraday_backtest_stamp_duty_bps == 0.0
 
 
 def test_intraday_env_override():
@@ -46,8 +48,10 @@ def test_intraday_env_override():
         CRYPTO_INTRADAY_BACKTEST_FEE_BPS="4",
         INTRADAY_BACKTEST_ENABLED="true",
         INTRADAY_BACKTEST_SCHEDULE_MINUTES="30",
+        ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS="5",
     )
     assert cfg.crypto_intraday_backtest_interval == "15m"
     assert cfg.crypto_intraday_backtest_fee_bps == 4.0
     assert cfg.intraday_backtest_enabled is True
     assert cfg.intraday_backtest_schedule_minutes == 30
+    assert cfg.ashare_intraday_backtest_stamp_duty_bps == 5.0

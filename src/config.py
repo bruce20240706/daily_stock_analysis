@@ -904,6 +904,8 @@ class Config:
     crypto_intraday_minute_cache_ttl_s: int = 900
     crypto_intraday_backtest_fee_bps: float = 0.0
     crypto_intraday_backtest_slippage_bps: float = 0.0
+    # A股盘中回测卖出单边印花税(基点);默认 0=理想化无成本;A股现行 5bps(0.05%)
+    ashare_intraday_backtest_stamp_duty_bps: float = 0.0
     intraday_backtest_enabled: bool = False
     intraday_backtest_schedule_minutes: int = 60
 
@@ -1904,6 +1906,10 @@ class Config:
             crypto_intraday_backtest_slippage_bps=parse_env_float(
                 os.getenv('CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS'), 0.0,
                 field_name='CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS', minimum=0.0,
+            ),
+            ashare_intraday_backtest_stamp_duty_bps=parse_env_float(
+                os.getenv('ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS'), 0.0,
+                field_name='ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS', minimum=0.0,
             ),
             intraday_backtest_enabled=parse_env_bool(
                 os.getenv('INTRADAY_BACKTEST_ENABLED'), False,

@@ -103,11 +103,13 @@ CRYPTO_INTRADAY_BACKTEST_FEE_BPS=5
 CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS=2
 ```
 
-成本后处理公式：
+成本后处理公式（手续费/滑点对称双边，印花税单边）：
 
 ```
-net_return = gross_return − 2 × (fee_bps + slippage_bps) / 100
+net_return = gross_return − 2 × (fee_bps + slippage_bps) / 100 − 1 × stamp_duty_bps / 100
 ```
+
+**A股卖出印花税（单边，opt-in）：** A股现行印花税为**卖出单边 5bps（0.05%）**。设 `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS=5` 后，仅 A股盘中回测的多头(long)出场会额外扣一次卖出税；crypto/美股/cash/日线一律不征。注意 `fee/slippage` 是跨市场共享的对称佣金分量（默认 0），A股真实总成本需**同时**设 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS/SLIPPAGE_BPS`。该 knob 也可在 Web 设置页 Backtest 分类直接调整。
 
 ---
 
@@ -269,7 +271,7 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 - **Tushare 分钟接口需积分**：免费账户积分可能不足，此时（除 `1m` 外）自动走 akshare。
 - **`1m` 仅 Tushare**：akshare 兜底不支持历史 `1m`（见 [§10.1](#101-数据源tushare-主源--akshare-免费兜底)），无 token 时 `1m` 不可得。
 - **akshare 限频/稳定性**：东财免费接口有访问频率限制，长窗口/大批量可能偶发失败（按数据源降级与错误计数处理）。
-- **印花税未建模**：A 股卖出印花税（单边）等不对称成本暂未单独建模，成本开关沿用 crypto 的对称 `fee/slippage`（默认 0）。
+- **印花税可选建模（默认 0）**：A 股卖出印花税（单边）已由 `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS` 支持（opt-in，默认 0，仅 cn + long 出场计征；现行 5bps）；佣金等其它分量仍沿用跨市场共享的对称 `fee/slippage`（默认 0）。过户费（沪市）等暂未单独建模。
 - **复权基准漂移**：入场价取库内日线收盘（其复权口径以落库时为准），分钟 bar 按 `qfq` 即时拉取，二者复权锚点可能不同步；若窗口内发生除权除息，模拟收益会有偏差。窗口短、无分红配股时影响可忽略。
 - **北交所 best-effort**：北交所分钟数据源覆盖不确定，作尽力支持，不保证可得。
 - **港股仍不支持**分钟路径（美股见 [§11](#11-美股盘中分钟级回测)）。
@@ -350,10 +352,11 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 | `CRYPTO_INTRADAY_MINUTE_CACHE_TTL_S` | `900` | 分钟数据缓存 TTL（秒），0 禁用 |
 | `CRYPTO_INTRADAY_BACKTEST_FEE_BPS` | `0` | 单边手续费（基点，默认 0 理想化） |
 | `CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS` | `0` | 单边滑点（基点，默认 0 理想化） |
+| `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS` | `0` | A股卖出单边印花税（基点，默认 0；现行 5；仅 cn+long） |
 | `INTRADAY_BACKTEST_ENABLED` | `false` | 是否启用后台定时任务 |
 | `INTRADAY_BACKTEST_SCHEDULE_MINUTES` | `60` | 后台调度间隔（分钟） |
 
-所有配置项均有合理默认值，**不配置即可运行**，现有行为不变。A 股分钟回测复用 `TUSHARE_TOKEN` 与上述 intraday 配置，**本阶段不新增配置项**。
+所有配置项均有合理默认值，**不配置即可运行**，现有行为不变。A 股分钟回测复用 `TUSHARE_TOKEN` 与上述 intraday 配置；A股卖出印花税为可选追加项 `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS`（默认 0，不配置即字节级现状）。
 
 ---
 

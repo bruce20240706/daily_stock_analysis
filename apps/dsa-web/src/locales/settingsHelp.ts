@@ -943,6 +943,17 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响盘中回测的实际成本模拟精度。'],
     notes: ['仅影响盘中回测结果，不影响真实下单。'],
   },
+  'settings.backtest.ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS': {
+    title: 'A股盘中印花税',
+    summary: 'A股盘中回测卖出单边印花税（基点），默认 0 表示理想化无成本回测。',
+    usage: '默认 0；A股现行印花税为卖出单边 5bps（0.05%）。仅 A股盘中回测的多头(long)出场计征一次。',
+    valueNotes: [
+      '1 基点 = 0.01%；A股现行 5bps = 0.05%（2023-08 起由 0.1% 下调）。',
+      '仅卖出单边计一次；佣金/滑点仍走盘中手续费/滑点（跨市场共享），A股真实总成本需一并设。',
+    ],
+    impact: ['影响 A股盘中回测的收益率和胜率计算。'],
+    notes: ['仅影响盘中回测结果，不影响真实下单；crypto/美股不征此税。'],
+  },
   'settings.backtest.INTRADAY_BACKTEST_ENABLED': {
     title: '盘中回测定时任务',
     summary: '是否在调度模式下启用盘中回测后台自动任务，默认关闭。',
