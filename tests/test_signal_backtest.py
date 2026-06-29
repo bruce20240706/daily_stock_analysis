@@ -226,3 +226,37 @@ def _make_history_with_signals():
         "close": close,
         "volume": volume,
     })
+
+
+# ---------------------------------------------------------------------------
+# C1: 右端截尾边界（绝对计数锁定 n-horizon）
+# ---------------------------------------------------------------------------
+
+def _smooth_uptrend_df(n):
+    """全有效价位 fixture：平滑上升 + OHLC 振幅（ATR>0），价位从 t=19 起非 None。
+
+    derive_price_levels 仅依赖 rolling MA20 / 20根 swing-low / ATR14（不依赖 swing pivot），
+    平滑趋势即可让 t>=19 全部产出有效 stop/target；high>low 保证 ATR>0（避免退化为 None）。
+    """
+    close = np.linspace(50.0, 50.0 + 0.4 * n, n)
+    high = close + 0.5
+    low = close - 0.5
+    open_ = close - 0.1
+    vol = np.full(n, 1000.0)
+    dates = pd.date_range("2024-01-01", periods=n, freq="D").strftime("%Y-%m-%d")
+    return pd.DataFrame({"date": dates, "open": open_, "high": high,
+                         "low": low, "close": close, "volume": vol})
+
+
+@pytest.mark.parametrize("n,h,expected", [(50, 10, 0), (51, 10, 1), (120, 10, 70), (120, 5, 75)])
+def test_eval_right_edge_absolute_count(n, h, expected):
+    """C1: 评估上界为 n-horizon，每个被评估 bar 都有完整 horizon 前瞻。
+
+    全有效价位 fixture 下，baseline 计数 == max(0, (n-h)-min_history)（min_history=40）。
+    绝对计数对上界 off-by-one 敏感：n-1（旧）与 n-h±1 都会被 (50,10)/(51,10) 边界例 + (120,*) 检出。
+    (51,10)→1 顺带证明唯一被评估 bar t=40 的前瞻 df.iloc[41:51] 恰 10 根（末根满 horizon）；
+    (50,10)→0 证明不足完整 horizon 的 bar 一律不评估。
+    """
+    df = _smooth_uptrend_df(n)
+    base = evaluate_baseline_outcomes(df, market="cn", horizon=h)
+    assert len(base) == expected

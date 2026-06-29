@@ -6,6 +6,8 @@
 
 设计要点：
 - 因果约束：评估 bar t 仅使用 df.iloc[:t+1]，绝无未来函数。
+- 右端截尾：评估范围 range(min_history, n-horizon)，保证每个被评估 bar 都有完整
+  horizon 根前瞻，消除右端欠龄 bar 引入的截尾偏差（见 C1 修复）。
 - 信号查询：先对全 df 调用 compute_signals_for_all_bars(df) 单遍预计算，
   得到每根 bar 因果触发的 bullish signal_type 集合；_eval 逐 bar O(1) 查表命中，
   无需在每根 bar 内重算窗口。价位走 derive_price_levels_series 统一预计算。
@@ -100,7 +102,8 @@ def _eval(
     Args:
         df:          完整历史 OHLCV DataFrame（含 date 列）。
         market:      市场标识，透传至 SignalOutcome。
-        horizon:     前瞻 bar 数（含）。
+        horizon:     完整前瞻 bar 数；评估上界为 n-horizon，确保每个被评估 bar 都有
+                     完整 horizon 根前瞻，消除右端截尾偏差。
         config:      VPSConfig，None 时使用默认值。
         all_bars:    True → baseline 模式（每个有效 bar 均入场）；
                      False → 信号模式（仅当前 bar 触发的 bullish 信号入场）。
@@ -117,7 +120,7 @@ def _eval(
     levels = derive_price_levels_series(df)                                 # O(n)，全量预计算价位
     sig_by_bar = {} if all_bars else compute_signals_for_all_bars(df, config=cfg)  # O(n log k)
 
-    for t in range(min_history, n - 1):                                    # 至少留 1 根前瞻
+    for t in range(min_history, n - horizon):                              # 保证完整 horizon 根前瞻（右端欠龄不计入）
         lv = levels[t]
         if lv.stop is None or lv.target is None:
             continue
@@ -152,7 +155,7 @@ def evaluate_signal_outcomes(
     Args:
         df:          完整历史 OHLCV DataFrame（date/open/high/low/close/volume）。
         market:      市场标识（透传至 SignalOutcome.market）。
-        horizon:     前瞻 bar 数上限。
+        horizon:     完整前瞻 bar 数；仅 [min_history, n-horizon) 内的 bar 参与评估。
         config:      VPSConfig，None 时使用默认值。
         min_history: 进入评估前所需最小历史 bar 数。
 
@@ -185,7 +188,7 @@ def evaluate_baseline_outcomes(
     Args:
         df:          完整历史 OHLCV DataFrame（date/open/high/low/close/volume）。
         market:      市场标识（透传至 SignalOutcome.market）。
-        horizon:     前瞻 bar 数上限。
+        horizon:     完整前瞻 bar 数；仅 [min_history, n-horizon) 内的 bar 参与评估。
         config:      VPSConfig，None 时用于 derive_price_levels 默认值（baseline 不跑信号规则）。
         min_history: 进入评估前所需最小历史 bar 数。
 
