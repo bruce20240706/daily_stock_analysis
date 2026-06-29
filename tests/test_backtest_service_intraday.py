@@ -622,6 +622,35 @@ def test_stamp_duty_gate(monkeypatch, tmp_path, label, code, position, engine_re
     )
 
 
+@pytest.mark.parametrize(
+    "label,code,position,engine_return,stamp_bps,fee_bps,slip_bps,expected",
+    [
+        # F1 cn + cash:无成交,fee/slip 不应计征 → 维持 0.0(改前 -0.20)
+        ("F1_cn_cash",     "600519",        "cash",  0.0, 0.0, 5.0, 5.0, 0.0),
+        # F2 crypto + cash:跨市场一致,无成交不计 → 0.0(改前 -0.20)
+        ("F2_crypto_cash", "BTC/USDT:PERP", "cash",  0.0, 0.0, 5.0, 5.0, 0.0),
+        # F3 perp short:真实 round-trip,照常扣 2*(5+5)/100=0.20 → 9.80(锁定非 long-only)
+        ("F3_perp_short",  "BTC/USDT:PERP", "short", 10.0, 0.0, 5.0, 5.0, 9.80),
+        # F4 long:照常扣 → 9.80(显式回归)
+        ("F4_long",        "BTC/USDT:PERP", "long",  10.0, 0.0, 5.0, 5.0, 9.80),
+    ],
+)
+def test_cost_charged_only_when_filled(monkeypatch, tmp_path, label, code, position, engine_return, stamp_bps, fee_bps, slip_bps, expected):
+    """成本仅对确有成交计征:cash(无成交、entry=None)豁免 fee/slip;long/perp short 照常 round-trip。"""
+    svc, saved_results = _make_intraday_svc_with_engine_return(
+        monkeypatch, tmp_path, engine_return_pct=engine_return,
+        fee_bps=fee_bps, slippage_bps=slip_bps,
+        code=code, position=position, stamp_bps=stamp_bps,
+    )
+    out = svc.run_backtest(interval="5m", eval_window_days=1)
+    assert out["completed"] == 1, f"{label}: expected completed=1, got {out}"
+    assert len(saved_results) == 1, f"{label}: expected 1 saved, got {len(saved_results)}"
+    r = saved_results[0]
+    assert r.simulated_return_pct == pytest.approx(expected), (
+        f"{label}: expected simulated_return_pct≈{expected}, got {r.simulated_return_pct}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Finding #1: validate_interval regression tests
 # ---------------------------------------------------------------------------
