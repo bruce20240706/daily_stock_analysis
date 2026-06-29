@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 链路B 分钟回测非 crypto 历史深度受控：_load_bars 按 market×interval 下传 start_date(美股夹 yfinance band、A股 tushare 加深、crypto 字节级不变)
 - [文档] 登记链路A end_date 右边界已闭合(核验结论) + 链路B 窗口正确性行为变更(signal-credibility §5.2 / intraday-backtest)
 - [测试] 补 _eval 右端截尾绝对边界回归 + _minute_fetch_days/_minute_fetch_start_date 单测 + _load_bars 抓参
+- [文档] 记 cn band 在线核验结果(akshare/东财 路径深窗优雅返回可得子集、不报错；tushare 路径无 token 待补验)+ 订正 intraday-backtest cn 5m band(today−90，原误标 365)
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
 - [修复] `/health` 根路径健康检查现在始终返回 JSON，避免静态 Web fallback 吞掉健康探针；`/api/health` 与 `/api/v1/health` 继续保持兼容。

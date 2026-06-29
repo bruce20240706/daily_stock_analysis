@@ -374,6 +374,11 @@ monkeypatch `DataFetcherManager.get_intraday_data` 捕获调用 kwargs（返回�
 注与 §3.6 表。**离线门禁（§5.8）只验夹取逻辑（mock 抓参），不验源活体行为**；活体核验走 `-m network`
 观测测试（不可达时 skip，不阻断），结论以交付说明登记。沙箱无外网时该项标「未验证」，须有网环境补跑。
 
+**核验结果（2026-06-29，关沙箱前台 real-network，东财可达，无密钥）**：
+- **akshare 路径（无 token 部署的实际 cn 来源）实测优雅**：`today−90` 与 `today−365` 返回同一可得子集（5m 仅东财保留的 ~46 日历天/1511 行、15m 504 行），**绝不报错、不返回错窗** → cn band 在 akshare 路径**安全、无需收紧**；cn 1m 无 token → akshare fail-closed 干净 `DataFetchError`。
+- **tushare 路径本环境无 token（`config.tushare_token` 未设）无法验**，其单次行数上限风险仍属理论；保守 band（5m=90≈3072 根 / 1m=30≈5040 根，在常见 ~8000 行/次上限内）**由构造安全**，留待有 token 环境补验后可放宽。
+- 据此 `_INTRADAY_MAX_DAYS["cn"]` **不需校准/改值**。
+
 ### 5.8 门禁
 
 `./scripts/ci_gate.sh`（flake8 + `pytest -m "not network"`，含承重 golden）全绿；记录 passed 数相对

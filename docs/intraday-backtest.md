@@ -328,12 +328,15 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 |------|----------|-----------------|------|
 | 美股（us） | 1h | today − `_INTRADAY_MAX_DAYS["us"]["1h"]`（≈730d） | 夹 yfinance band 上限 |
 | 美股（us） | 5m/15m | today − `_INTRADAY_MAX_DAYS["us"]["5m"]`（≈60d） | 夹 yfinance band 上限 |
-| A股（cn） | 1h | today − 730d | tushare 保守上限，待在线核验校准 |
-| A股（cn） | 15m/5m | today − 365d | tushare 保守上限，待在线核验校准 |
-| A股（cn） | 1m | 夹保守上限（见实现） | 防止超出 tushare 可得范围 |
+| A股（cn） | 1h | today − 730d | 见下「核验结果」 |
+| A股（cn） | 15m | today − 365d | 见下「核验结果」 |
+| A股（cn） | 5m | today − 90d | 见下「核验结果」 |
+| A股（cn） | 1m | today − 30d（tushare 独占；无 token 时 akshare fail-closed） | 见下「核验结果」 |
 | crypto | 不变 | 字节级不变（仍按 days 估算 limit） | C2 不改 crypto 路径 |
 
-**cn band 保守值待 tushare 在线核验校准**：当前 A股 band 为保守估计，实际 tushare `stk_mins` 可得范围需在有外网时用真实 token 验证，并根据结果收紧上限（见 spec §5.7）。
+**cn band 在线核验结果（2026-06-29，关沙箱前台 real-network，东财可达，无密钥）**：
+- **akshare 路径（无 tushare token 部署的实际 cn 来源）已实测**：东财 `stock_zh_a_hist_min_em` 对深窗**优雅返回可得子集**——`req_start=today−90` 与 `today−365` 返回完全相同的数据（5m 仅东财保留的 ~46 日历天/1511 行，15m 504 行），**绝不报错、不返回错窗**。故 cn band 在 akshare 路径上**安全**（band 偏大无害，东财自身封顶），无需收紧。cn 1m 无 token 时 akshare fail-closed（干净 `DataFetchError`，单股跳过、不拖垮整批）。
+- **tushare 路径未验证**：核验环境无 `config.tushare_token`。其 `stk_mins` 单次行数上限风险仍属理论；保守 band（5m=90≈3072 根、1m=30≈5040 根，均在常见 ~8000 行/次上限内）**由构造安全**，留待有 token 环境补验后可放宽。
 
 此变更仅影响链路B 信号可信度批作业（`--signal-backtest-interval`），链路A 盘中回测（`--backtest-interval`）路径不变（见 §9.4）。
 
