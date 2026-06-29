@@ -61,7 +61,7 @@ def _minute_fetch_days(*, market: str, interval: str) -> int:
     return min(base, band.get(interval, base))
 
 
-def _minute_fetch_start_date(*, market: str, interval: str, today=None):
+def _minute_fetch_start_date(*, market: str, interval: str, today: Optional[date] = None) -> Optional[str]:
     """非 crypto 分钟取数的历史起点（ISO date 字符串）。
 
     crypto 返回 None → 维持 get_intraday_data 的 days-only 近窗行为(字节级不变)；

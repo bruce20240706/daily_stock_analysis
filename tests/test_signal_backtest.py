@@ -89,7 +89,7 @@ def test_evaluate_signal_outcomes_exact_dedup_count():
     # fixture 的 bar 60 设计为唯一触发点，period 内恰好 1 条 volume_breakout
     assert vb_count == 1, (
         f"期望 volume_breakout 恰好 1 条，实际得到 {vb_count}；"
-        "若去重过滤（m.timestamp == last_bar_ts）被删除则此测试会在此处失败。"
+        "若向量化 _eval 经 compute_signals_for_all_bars 预计算把相邻 bar 的 volume_breakout 重复计入则此处失败。"
     )
 
 
