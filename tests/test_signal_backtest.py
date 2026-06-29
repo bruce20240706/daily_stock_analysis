@@ -75,11 +75,12 @@ def test_evaluate_signal_outcomes_tags_market_and_signal_type():
 
 
 def test_evaluate_signal_outcomes_exact_dedup_count():
-    """I3 去重计数守卫：fixture 在 bar 60 恰好触发 1 条 volume_breakout（每根 bar 最多产出 1 次）。
+    """去重计数守卫：fixture 在 bar 60 唯一触发 1 条 volume_breakout。
 
-    此测试在 signal_backtest._eval 的 `m.timestamp == last_bar_ts` 去重过滤被删除后
-    必定变红（若过滤删除导致多个相邻 bar 产生重复 volume_breakout，则 Counter 将 > 1）。
-    断言用精确计数，而非 > 0，以确保去重逻辑正确。
+    向量化 _eval 经 compute_signals_for_all_bars 单遍预计算每根 bar 的因果信号集合，每根 bar
+    的同类信号至多计一次；此测试用精确计数(==1 而非 >0)守护该去重语义：若预计算把相邻 bar 的
+    volume_breakout 重复计入，Counter 将 > 1。bar 60 落在 C1 新边界 range(40, 70) 内，截尾修复
+    不影响本断言。
     """
     from collections import Counter
     df = _make_history_with_signals()

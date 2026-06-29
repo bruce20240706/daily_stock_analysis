@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 新增分析任务与历史报告运行流快照 API，提供 lanes、nodes、edges、events、summary 等统一契约，并从任务队列、运行诊断和 AnalysisContextPack overview 构建脱敏数据流/信息流。
 - [修复] 修复历史报告运行流快照在混合时区事件时间戳下返回 500 的问题。
 - [改进] #1459 持仓管理页新增持仓账户删除入口，复用现有账户软删除接口，误建账户会从默认列表、快照、风险、录入入口和事件列表隐藏且不物理清理历史流水。
+- [修复] 链路B 信号可信度回测消除右端截尾偏差：_eval 评估上界由 n-1 收紧为 n-horizon，仅统计有完整 horizon 前瞻的信号(日线+分钟，signal_stats 重跑后命中率注解微调)
+- [改进] 链路B 分钟回测非 crypto 历史深度受控：_load_bars 按 market×interval 下传 start_date(美股夹 yfinance band、A股 tushare 加深、crypto 字节级不变)
+- [文档] 登记链路A end_date 右边界已闭合(核验结论) + 链路B 窗口正确性行为变更(signal-credibility §5.2 / intraday-backtest)
+- [测试] 补 _eval 右端截尾绝对边界回归 + _minute_fetch_days/_minute_fetch_start_date 单测 + _load_bars 抓参
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
 - [修复] `/health` 根路径健康检查现在始终返回 JSON，避免静态 Web fallback 吞掉健康探针；`/api/health` 与 `/api/v1/health` 继续保持兼容。

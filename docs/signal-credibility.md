@@ -148,6 +148,15 @@ verified = (
 
 因果路径修正后，今日已完成收盘的 bar（`i == len(df)-1`）可以正常产出信号并进入评估，不再因前视检查而被意外过滤。图表 viz 路径行为不变。
 
+- **链路B 右端截尾修复（2026-06-26）**：`_eval` 评估上界由 `n-1` 收紧为 `n-horizon`，仅统计有完整
+  horizon 前瞻的信号，消除「慢解析者记 expired 被排除、快解析者计入」的右端截尾偏差。影响**日线 +
+  分钟** signal_stats：`win/loss/sample/win_rate/ci_low/ci_high/baseline_win_rate/excess` 小幅变化，
+  最近 `horizon-1` 根欠龄信号不再计入。图表 marker 与几何不变；重跑 `--signal-backtest` 落库后命中率
+  注解数值随之刷新，并可能跨 `min_sample` 阈值出现/消失。
+- **非 crypto 分钟历史深度（2026-06-26）**：链路B 分钟回测对非 crypto 显式下传 `start_date` 加深历史
+  （美股夹 yfinance band 5m/15m=60d、1h=730d；A股 tushare 经 start_date 加深，5m/1m 夹保守上限）。
+  crypto 不变。美股分钟可信度统计由「源默认浅窗」变为可用。
+
 ---
 
 ## 6. `signal_stats` 表
