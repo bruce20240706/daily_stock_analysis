@@ -306,9 +306,13 @@ class BacktestService:
                     from src.core.intraday_backtest import apply_round_trip_cost
                     _fee = float(getattr(config, "crypto_intraday_backtest_fee_bps", 0.0))
                     _slip = float(getattr(config, "crypto_intraday_backtest_slippage_bps", 0.0))
-                    if _fee or _slip:
+                    # A股印花税:卖出单边,仅 cn 且 long 仓出场计征(cash/crypto/us 不征)
+                    _stamp = 0.0
+                    if market == "cn" and evaluation.get("position_recommendation") == "long":
+                        _stamp = float(getattr(config, "ashare_intraday_backtest_stamp_duty_bps", 0.0))
+                    if _fee or _slip or _stamp:
                         evaluation["simulated_return_pct"] = apply_round_trip_cost(
-                            evaluation.get("simulated_return_pct"), _fee, _slip
+                            evaluation.get("simulated_return_pct"), _fee, _slip, sell_side_bps=_stamp
                         )
 
                 status = evaluation.get("eval_status")

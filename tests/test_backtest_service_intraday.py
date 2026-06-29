@@ -453,7 +453,11 @@ def test_intraday_service_passes_start_date(monkeypatch, tmp_path):
 # Task 6: 成本可选后处理
 # ---------------------------------------------------------------------------
 
-def _make_intraday_svc_with_engine_return(monkeypatch, tmp_path, engine_return_pct: float, fee_bps: float = 0.0, slippage_bps: float = 0.0):
+def _make_intraday_svc_with_engine_return(
+    monkeypatch, tmp_path, engine_return_pct: float,
+    fee_bps: float = 0.0, slippage_bps: float = 0.0,
+    *, code: str = "BTC/USDT:PERP", position: str = "long", stamp_bps: float = 0.0,
+):
     """Helper shared by Task-6 cost tests.
 
     Returns (svc, saved_results_list).
@@ -480,8 +484,9 @@ def _make_intraday_svc_with_engine_return(monkeypatch, tmp_path, engine_return_p
     real_cfg = _config_mod.get_config()
     monkeypatch.setattr(real_cfg, "crypto_intraday_backtest_fee_bps", fee_bps)
     monkeypatch.setattr(real_cfg, "crypto_intraday_backtest_slippage_bps", slippage_bps)
+    monkeypatch.setattr(real_cfg, "ashare_intraday_backtest_stamp_duty_bps", stamp_bps)
 
-    candidate = _fake_analysis(code="BTC/USDT:PERP", analysis_id=101)
+    candidate = _fake_analysis(code=code, analysis_id=101)
     analysis_date = date(2026, 5, 1)
     monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
     monkeypatch.setattr(svc, "_resolve_analysis_date", lambda a: analysis_date)
@@ -508,7 +513,7 @@ def _make_intraday_svc_with_engine_return(monkeypatch, tmp_path, engine_return_p
             "eval_window_days": kwargs["config"].eval_window_days,
             "engine_version": kwargs["config"].engine_version,
             "operation_advice": "买入",
-            "position_recommendation": "long",
+            "position_recommendation": position,
             "start_price": 100.0,
             "end_close": 110.0,
             "max_high": 115.0,
@@ -524,7 +529,7 @@ def _make_intraday_svc_with_engine_return(monkeypatch, tmp_path, engine_return_p
             "first_hit": "neither",
             "first_hit_date": None,
             "first_hit_trading_days": 3,
-            "simulated_entry_price": 100.0,
+            "simulated_entry_price": None if position == "cash" else 100.0,
             "simulated_exit_price": 110.0,
             "simulated_exit_reason": "window_end",
             "simulated_return_pct": engine_return_pct,
@@ -581,6 +586,39 @@ def test_cost_positive_deducts_round_trip(monkeypatch, tmp_path):
     assert abs(r.simulated_return_pct - expected) < 1e-9, (
         f"fee=5bp/slip=5bp: expected simulated_return_pct={expected}, "
         f"got {r.simulated_return_pct}"
+    )
+
+
+@pytest.mark.parametrize(
+    "label,code,position,engine_return,stamp_bps,fee_bps,slip_bps,expected",
+    [
+        # G1 cn + long:计一次卖出印花税 5bp → 10.0 - 0.05
+        ("G1_cn_long",      "600519",        "long", 10.0, 5.0, 0.0, 0.0, 9.95),
+        # G2 cn + cash:门控挡掉印花税(非 long),原值不变
+        ("G2_cn_cash",      "600519",        "cash",  0.0, 5.0, 0.0, 0.0, 0.0),
+        # G3 crypto + long:market!=cn,即便 stamp=5 也不征
+        ("G3_crypto_long",  "BTC/USDT:PERP", "long", 10.0, 5.0, 0.0, 0.0, 10.0),
+        # G4 cn + long + stamp=0:全 0 → 后处理跳过,字节级不变
+        ("G4_cn_long_zero", "600519",        "long", 10.0, 0.0, 0.0, 0.0, 10.0),
+        # G5 us + long:已上线美股,门控须为 == "cn",不得误征(防 in{cn,us} 变异)
+        ("G5_us_long",      "AAPL",          "long", 10.0, 5.0, 0.0, 0.0, 10.0),
+        # G6 cn + long + 三项叠加:2*(2+3)/100 + 5/100 = 0.15 → 10.0 - 0.15
+        ("G6_cn_long_3way", "600519",        "long", 10.0, 5.0, 2.0, 3.0, 9.85),
+    ],
+)
+def test_stamp_duty_gate(monkeypatch, tmp_path, label, code, position, engine_return, stamp_bps, fee_bps, slip_bps, expected):
+    """A股印花税后处理门控:仅 cn+long 计卖出单边税;crypto/us/cash 不征;默认 0 字节不变。"""
+    svc, saved_results = _make_intraday_svc_with_engine_return(
+        monkeypatch, tmp_path, engine_return_pct=engine_return,
+        fee_bps=fee_bps, slippage_bps=slip_bps,
+        code=code, position=position, stamp_bps=stamp_bps,
+    )
+    out = svc.run_backtest(interval="5m", eval_window_days=1)
+    assert out["completed"] == 1, f"{label}: expected completed=1, got {out}"
+    assert len(saved_results) == 1, f"{label}: expected 1 saved, got {len(saved_results)}"
+    r = saved_results[0]
+    assert r.simulated_return_pct == pytest.approx(expected), (
+        f"{label}: expected simulated_return_pct≈{expected}, got {r.simulated_return_pct}"
     )
 
 
