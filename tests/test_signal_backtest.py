@@ -238,6 +238,8 @@ def _smooth_uptrend_df(n):
 
     derive_price_levels 仅依赖 rolling MA20 / 20根 swing-low / ATR14（不依赖 swing pivot），
     平滑趋势即可让 t>=19 全部产出有效 stop/target；high>low 保证 ATR>0（避免退化为 None）。
+    该「t>=19 非 None」由 test_eval_right_edge_absolute_count 的绝对计数断言自守：若 fixture
+    退化致某 bar 价位 None，baseline 计数将低于期望、测试立即变红，故无需单独 assert。
     """
     close = np.linspace(50.0, 50.0 + 0.4 * n, n)
     high = close + 0.5

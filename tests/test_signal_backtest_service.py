@@ -265,6 +265,9 @@ def test_minute_fetch_days_band_clamp():
     assert sbs._minute_fetch_days(market="cn", interval="1h") == 730
     assert sbs._minute_fetch_days(market="crypto", interval="5m") == 365
     assert sbs._minute_fetch_days(market="crypto", interval="1h") == 730
+    # hk/None 不在 band 表 → band.get 回退基线（同 crypto fallback 分支，显式锁定回退）
+    assert sbs._minute_fetch_days(market="hk", interval="5m") == 365
+    assert sbs._minute_fetch_days(market="hk", interval="1h") == 730
 
 
 def test_minute_fetch_start_date_crypto_is_none():
