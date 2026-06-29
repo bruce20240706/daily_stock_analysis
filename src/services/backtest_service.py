@@ -310,7 +310,8 @@ class BacktestService:
                     _stamp = 0.0
                     if market == "cn" and evaluation.get("position_recommendation") == "long":
                         _stamp = float(getattr(config, "ashare_intraday_backtest_stamp_duty_bps", 0.0))
-                    if _fee or _slip or _stamp:
+                    # 成本仅对确有成交计征:cash 仓(无成交、entry=None)豁免;long/short 照常 round-trip
+                    if (_fee or _slip or _stamp) and evaluation.get("simulated_entry_price") is not None:
                         evaluation["simulated_return_pct"] = apply_round_trip_cost(
                             evaluation.get("simulated_return_pct"), _fee, _slip, sell_side_bps=_stamp
                         )
