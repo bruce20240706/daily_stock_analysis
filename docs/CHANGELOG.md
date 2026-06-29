@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 盘中回测成本仅对确有成交计征：cash 仓（无成交）不再被 fee/slippage 误扣成负收益（此前 fee/slip>0 时 cash 样本 simulated_return_pct 被算成 0−成本，并经 avg_simulated_return_pct 聚合污染均值）；long/perp short 照常 round-trip；默认 0 字节级不变；历史聚合需重跑 run_backtest(force=True) 订正
 - [新功能] A股盘中回测支持卖出单边印花税：新增 ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS（opt-in 默认 0，现行 5bps），仅 cn + long 仓出场计征一次卖出税，crypto/美股/cash/日线不征；扩展成本枢纽 apply_round_trip_cost 追加 sell_side_bps 单边分量；随 config_registry 注册经 /config/schema 暴露并在 Web 设置页 Backtest 分类可调；佣金仍走跨市场共享的 fee/slippage，默认 0 时数值字节级不变
 - [新功能] 信号可信度回测分钟化：--signal-backtest-interval 在分钟 bar 上重算 VPS 信号 + 三重门评估，产出 (signal_type×market×interval×horizon) 隔离的 signal_stats（零迁移）；_to_epoch_ms_shanghai 升级为分钟分辨率感知（日线午夜不变，分钟保留时分）使分钟触发对齐成立；读路径 interval-aware（/signals/board?interval= 与 resolve_marker_hit_fields 加可选 interval），默认 1d 与现状一致
 - [新功能] 美股分钟级回测：扩展美股个股分钟前向回测，yfinance 免 key 单源；bars_per_day 市场化（us=390，1h 计末根半根=7，bars_per_day 改 ceil）；美股 1m 因 yfinance 历史/请求上限 fail-closed；类股 BRK.B→BRK-B 符号映射；interval/默认/成本/调度沿用，默认 1d 与现状一致

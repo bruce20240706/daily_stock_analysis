@@ -111,6 +111,8 @@ net_return = gross_return − 2 × (fee_bps + slippage_bps) / 100 − 1 × stamp
 
 **A股卖出印花税（单边，opt-in）：** A股现行印花税为**卖出单边 5bps（0.05%）**。设 `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS=5` 后，仅 A股盘中回测的多头(long)出场会额外扣一次卖出税；crypto/美股/cash/日线一律不征。注意 `fee/slippage` 是跨市场共享的对称佣金分量（默认 0），A股真实总成本需**同时**设 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS/SLIPPAGE_BPS`。该 knob 也可在 Web 设置页 Backtest 分类直接调整。
 
+**成本仅对确有成交计征**：cash 仓（无买卖成交）不扣 fee/slippage/印花税；仅 long 与 perp short（确有成交）计 round-trip 成本。
+
 ---
 
 ## 6. Opt-in 定时调度开关（默认关闭）
