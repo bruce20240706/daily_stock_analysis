@@ -58,15 +58,23 @@ def build_engine_version_tag(base: str, interval: str, leverage: int) -> str:
 
 
 def apply_round_trip_cost(
-    return_pct: Optional[float], fee_bps: float, slippage_bps: float
+    return_pct: Optional[float],
+    fee_bps: float,
+    slippage_bps: float,
+    sell_side_bps: float = 0.0,
 ) -> Optional[float]:
-    """对一进一出收益(百分比)扣减成本。默认 0 → 原样返回(行为不变)。
+    """对一进一出收益(百分比)扣减成本。默认全 0 → 原样返回(行为不变)。
 
-    一进一出 = 2 次成交,每次成本 = fee_bps + slippage_bps(基点,1bp=0.01%)。
+    - fee_bps / slippage_bps：对称双边成本,一进一出各计一次 → ×2(基点,1bp=0.01%)。
+    - sell_side_bps：单边卖出成本(如 A股印花税),仅出场计一次 → ×1。调用方负责仅在
+      「确有卖出」(long 出场)时传非 0;cash/无成交不应传。
     """
     if return_pct is None:
         return None
-    if not fee_bps and not slippage_bps:
+    if not fee_bps and not slippage_bps and not sell_side_bps:
         return return_pct
-    cost_pct = 2.0 * (float(fee_bps) + float(slippage_bps)) / 100.0
+    cost_pct = (
+        2.0 * (float(fee_bps) + float(slippage_bps)) / 100.0
+        + 1.0 * float(sell_side_bps) / 100.0
+    )
     return return_pct - cost_pct
