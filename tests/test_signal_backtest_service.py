@@ -248,3 +248,60 @@ def test_run_rejects_bad_interval():
     svc.repo = SimpleNamespace(save_batch=lambda rows, **k: len(rows))
     with pytest.raises(ValueError):
         svc.run(interval="2h")
+
+
+from datetime import date as _date, timedelta as _td
+
+
+def test_minute_fetch_days_band_clamp():
+    # us 夹 yfinance band；cn 保守夹取；crypto 走基线（字节级不变）
+    assert sbs._minute_fetch_days(market="us", interval="5m") == 60
+    assert sbs._minute_fetch_days(market="us", interval="15m") == 60
+    assert sbs._minute_fetch_days(market="us", interval="1h") == 730
+    assert sbs._minute_fetch_days(market="us", interval="1m") == 7
+    assert sbs._minute_fetch_days(market="cn", interval="1m") == 30
+    assert sbs._minute_fetch_days(market="cn", interval="5m") == 90
+    assert sbs._minute_fetch_days(market="cn", interval="15m") == 365
+    assert sbs._minute_fetch_days(market="cn", interval="1h") == 730
+    assert sbs._minute_fetch_days(market="crypto", interval="5m") == 365
+    assert sbs._minute_fetch_days(market="crypto", interval="1h") == 730
+
+
+def test_minute_fetch_start_date_crypto_is_none():
+    assert sbs._minute_fetch_start_date(market="crypto", interval="5m") is None
+    assert sbs._minute_fetch_start_date(market="crypto", interval="1h") is None
+
+
+def test_minute_fetch_start_date_non_crypto_anchored():
+    today = _date(2026, 6, 26)
+    assert sbs._minute_fetch_start_date(market="us", interval="5m", today=today) == (today - _td(days=60)).isoformat()
+    assert sbs._minute_fetch_start_date(market="us", interval="1h", today=today) == (today - _td(days=730)).isoformat()
+    assert sbs._minute_fetch_start_date(market="cn", interval="5m", today=today) == (today - _td(days=90)).isoformat()
+    assert sbs._minute_fetch_start_date(market="cn", interval="1m", today=today) == (today - _td(days=30)).isoformat()
+
+
+def test_load_bars_passes_market_aware_start_date(monkeypatch):
+    """_load_bars 按 market 下传 start_date/days：crypto 字节级不变；us/cn 夹 band。"""
+    from data_provider.base import DataFetcherManager
+    captured = {}
+
+    def fake_intraday(self, code, interval, start_date=None, days=30, **kw):
+        captured["start_date"] = start_date
+        captured["days"] = days
+        return _minute_df(60), "FakeFetcher"
+
+    monkeypatch.setattr(DataFetcherManager, "get_intraday_data", fake_intraday)
+    # _load_bars 不透传 today → monkeypatch 模块级 date 锁定确定性
+    FIXED = _date(2026, 6, 26)
+    monkeypatch.setattr(sbs, "date", SimpleNamespace(today=lambda: FIXED))
+
+    svc = sbs.SignalBacktestService.__new__(sbs.SignalBacktestService)
+
+    svc._load_bars(None, "BTC/USDT", "5m", "crypto")
+    assert captured["start_date"] is None and captured["days"] == 365  # 字节级不变
+
+    svc._load_bars(None, "AAPL", "5m", "us")
+    assert captured["start_date"] == (FIXED - _td(days=60)).isoformat() and captured["days"] == 60
+
+    svc._load_bars(None, "600519", "5m", "cn")
+    assert captured["start_date"] == (FIXED - _td(days=90)).isoformat() and captured["days"] == 90

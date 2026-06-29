@@ -7,6 +7,7 @@ watchlist 来源与看板完全一致：读取 SystemConfigService 的 STOCK_LIS
 CLI/批作业路径不应承担此代价。等价逻辑在本模块内独立实现，数据源相同。
 """
 import logging
+from datetime import date, timedelta
 from typing import List, Optional
 
 import pandas as pd
@@ -34,15 +35,44 @@ _MIN_BARS = 50
 _FETCH_DAYS = 365
 
 
-def _minute_fetch_days(*, market_interval: str) -> int:
-    """分钟取数的近窗"天数提示"(传给 get_intraday_data 的 days)。
+# 各源分钟历史「单次安全回看上限」(日历天)：据 start_date 加深历史时按 市场×interval 夹取，
+# 避免向源请求其单次调用无法稳定返回的过深窗口。
+#   us(yfinance)：5m/15m≈60d、1h≈730d 为文档硬上限；1m=7d(且 1m 已在 fetcher fail-closed)。
+#   cn(tushare)：stk_mins 单次有行数上限，下列为保守值——
+#     ⚠ 实现期须在线核验 tushare 对 today-N 的 1m/5m/15m/1h 真实单次返回(优雅近端子集 / 报错 /
+#       返回错窗)，据实校准本表(可放宽)；核验前以保守上限避免 cn 高频从「浅窗可用」恶化为单股 errors。
+#       关键：tushare get_intraday_data 体内不读 days(no-op)，但真正消费 start_date，故旧「days 偏大
+#       不取错数」的安全性不可迁移到 start_date——这正是本表对 cn 也必须夹取的原因。
+# crypto 不在表中：按 days 锚定、不下传 start_date(见 _minute_fetch_start_date)，行为字节级不变。
+_INTRADAY_MAX_DAYS = {
+    "us": {"1m": 7, "5m": 60, "15m": 60, "1h": 730},
+    "cn": {"1m": 30, "5m": 90, "15m": 365, "1h": 730},
+}
 
-    注意:days 的实际生效程度因数据源而异——crypto 源按 days 估算回看根数;
-    A股(Tushare/akshare)与美股(yfinance)分钟历史窗口主要由各源自身默认/上限决定,
-    days 偏大不会取错数据(各源自身封顶)。取值给足即可:1h 历史一般更深(取 730),
-    其余分钟粒度取 365。如需为非 crypto 源真正加深历史,应改为下传 start_date(留待后续)。
+
+def _minute_fetch_days(*, market: str, interval: str) -> int:
+    """分钟取数回看天数（传给 get_intraday_data 的 days，并据此推 start_date）。
+
+    1h 历史更深取 730、其余取 365 为基线；再按 _INTRADAY_MAX_DAYS[market][interval] 夹取
+    (us/cn 各源单次安全上限)。crypto 不在表中→返回基线(与旧 _minute_fetch_days 逐 interval 相等)。
     """
-    return 730 if market_interval == "1h" else 365
+    base = 730 if interval == "1h" else 365
+    band = _INTRADAY_MAX_DAYS.get(market, {})
+    return min(base, band.get(interval, base))
+
+
+def _minute_fetch_start_date(*, market: str, interval: str, today=None):
+    """非 crypto 分钟取数的历史起点（ISO date 字符串）。
+
+    crypto 返回 None → 维持 get_intraday_data 的 days-only 近窗行为(字节级不变)；
+    非 crypto 返回 today - _minute_fetch_days，使 tushare/yfinance 真正加深历史。
+    today 默认 date.today()；helper 单测可显式注入 today，_load_bars 集成测试经 monkeypatch
+    模块级 date 锁定(本函数不透传 today)。
+    """
+    if market == "crypto":
+        return None
+    ref = today or date.today()
+    return (ref - timedelta(days=_minute_fetch_days(market=market, interval=interval))).isoformat()
 
 
 def _read_watchlist_codes(service: SystemConfigService) -> list:
@@ -111,7 +141,7 @@ class SignalBacktestService:
                     skipped += 1
                     continue
 
-                df = self._load_bars(svc, code, interval)
+                df = self._load_bars(svc, code, interval, market)
                 if df is None or len(df) < _MIN_BARS:
                     bars = 0 if df is None else len(df)
                     logger.debug("跳过数据不足股票: %s (bars=%d)", code, bars)
@@ -159,21 +189,22 @@ class SignalBacktestService:
             "interval": interval,
         }
 
-    def _load_bars(self, svc, code, interval):
+    def _load_bars(self, svc, code, interval, market):
         """按 interval 取 bar：日线走 StockService（不变），分钟走链路A get_intraday_data。
 
-        分钟路径复用链路A 的 DataFetcherManager.get_intraday_data（market 路由在其内部按 code
-        判定，本函数不需要 market），并把 'datetime' 列重命名为 'date'，供下游 VPS/_eval 复用
-        既有 'date' 列契约（保留分钟时间戳，配合 _to_epoch_ms_shanghai 分钟分辨率感知）。
-        取不到数据返回 None（交由 run 计入 skipped）。
+        分钟路径按 market 计算回看深度与历史起点：crypto 维持 days-only(字节级不变)，
+        非 crypto 下传 start_date 真正加深历史(美股夹 yfinance band)。把 'datetime' 列重命名为
+        'date' 复用既有 'date' 列契约。取不到数据返回 None(交由 run 计入 skipped)。
         """
         if not is_intraday_interval(interval):       # '1d'
             hist = svc.get_history_data(stock_code=code, period="daily", days=_FETCH_DAYS)
             rows = (hist or {}).get("data") or []
             return pd.DataFrame(rows) if rows else None
         from data_provider.base import DataFetcherManager
+        days = _minute_fetch_days(market=market, interval=interval)
+        start_date = _minute_fetch_start_date(market=market, interval=interval)
         df, _src = DataFetcherManager().get_intraday_data(
-            code, interval, days=_minute_fetch_days(market_interval=interval))
+            code, interval, start_date=start_date, days=days)
         if df is None or df.empty:
             return None
         return df.rename(columns={"datetime": "date"})
