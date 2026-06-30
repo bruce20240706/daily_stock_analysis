@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 港股(HK)分钟级回测:扩展港股个股分钟前向回测(链路A 操作建议 + 链路B 信号可信度),双源 akshare 东财(stock_hk_hist_min_em)主 + yfinance(0700.HK)兜底;bars_per_day 市场化(hk=330,1h ceil=6);港股 1m fail-closed;Tushare 经路由白名单排除(仅 A股);interval/默认/成本沿用,默认 1d 与现状一致;成本暂走跨市场 fee/slip(默认 0),港股双边印花税另立
 - [修复] 盘中回测成本仅对确有成交计征：cash 仓（无成交）不再被 fee/slippage 误扣成负收益（此前 fee/slip>0 时 cash 样本 simulated_return_pct 被算成 0−成本，并经 avg_simulated_return_pct 聚合污染均值）；long/perp short 照常 round-trip；默认 0 字节级不变；历史聚合需重跑 run_backtest(force=True) 订正
 - [新功能] A股盘中回测支持卖出单边印花税：新增 ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS（opt-in 默认 0，现行 5bps），仅 cn + long 仓出场计征一次卖出税，crypto/美股/cash/日线不征；扩展成本枢纽 apply_round_trip_cost 追加 sell_side_bps 单边分量；随 config_registry 注册经 /config/schema 暴露并在 Web 设置页 Backtest 分类可调；佣金仍走跨市场共享的 fee/slippage，默认 0 时数值字节级不变
 - [新功能] 信号可信度回测分钟化：--signal-backtest-interval 在分钟 bar 上重算 VPS 信号 + 三重门评估，产出 (signal_type×market×interval×horizon) 隔离的 signal_stats（零迁移）；_to_epoch_ms_shanghai 升级为分钟分辨率感知（日线午夜不变，分钟保留时分）使分钟触发对齐成立；读路径 interval-aware（/signals/board?interval= 与 resolve_marker_hit_fields 加可选 interval），默认 1d 与现状一致
