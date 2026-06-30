@@ -154,7 +154,7 @@ class SignalBacktestService:
                     skipped += 1
                     continue
 
-                cfg_m = VPSConfig.for_market(market)
+                cfg_m = VPSConfig.for_market_interval(market, interval)
                 all_sig.extend(evaluate_signal_outcomes(df, market=market, horizon=hz, config=cfg_m))
                 all_base.extend(evaluate_baseline_outcomes(df, market=market, horizon=hz, config=cfg_m))
                 processed += 1
