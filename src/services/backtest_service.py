@@ -310,12 +310,18 @@ class BacktestService:
                     _slip = float(getattr(config, "crypto_intraday_backtest_slippage_bps", 0.0))
                     # A股印花税:卖出单边,仅 cn 且 long 仓出场计征(cash/crypto/us 不征)
                     _stamp = 0.0
+                    _hk_stamp = 0.0
                     if market == "cn" and evaluation.get("position_recommendation") == "long":
                         _stamp = float(getattr(config, "ashare_intraday_backtest_stamp_duty_bps", 0.0))
+                    elif market == "hk":
+                        # 港股印花税买卖双边对称(×2);链路A 中 hk 仅 long/cash 可达,
+                        # cash 由下方 entry-gate 豁免,故 market 级门控即可(不限 long)
+                        _hk_stamp = float(getattr(config, "hk_intraday_backtest_stamp_duty_bps", 0.0))
                     # 成本仅对确有成交计征:cash 仓(无成交、entry=None)豁免;long/short 照常 round-trip
-                    if (_fee or _slip or _stamp) and evaluation.get("simulated_entry_price") is not None:
+                    if (_fee or _slip or _stamp or _hk_stamp) and evaluation.get("simulated_entry_price") is not None:
                         evaluation["simulated_return_pct"] = apply_round_trip_cost(
-                            evaluation.get("simulated_return_pct"), _fee, _slip, sell_side_bps=_stamp
+                            evaluation.get("simulated_return_pct"), _fee, _slip,
+                            sell_side_bps=_stamp, both_side_bps=_hk_stamp
                         )
 
                 status = evaluation.get("eval_status")
