@@ -47,6 +47,8 @@ _FETCH_DAYS = 365
 _INTRADAY_MAX_DAYS = {
     "us": {"1m": 7, "5m": 60, "15m": 60, "1h": 730},
     "cn": {"1m": 30, "5m": 90, "15m": 365, "1h": 730},
+    # hk 双源(akshare 东财主 + yfinance 兜底):保守对齐 yfinance 上限;1m fail-closed 不设键
+    "hk": {"5m": 60, "15m": 60, "1h": 730},
 }
 
 
@@ -114,7 +116,7 @@ class SignalBacktestService:
             horizon:  前瞻 bar 数；None 时取 config.signal_backtest_horizon_bars（默认 10）。
             interval: bar 粒度；'1d' 走日线（行为不变），分钟（1m/5m/15m/1h）在分钟 bar
                       上重算 VPS 信号 + 前向三重门，落库行标记 interval=<interval>。
-                      分钟仅覆盖 crypto/A股沪深/美股个股；HK/指数无分钟取数,单股计入 errors。
+                      分钟覆盖 crypto/A股沪深/美股个股/港股个股(best-effort);指数等无分钟取数,单股计入 errors。
 
         Returns:
             dict，字段：processed, codes, stats_written, skipped, errors, interval。
