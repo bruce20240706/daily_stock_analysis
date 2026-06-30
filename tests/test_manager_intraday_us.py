@@ -1,7 +1,7 @@
 """门面 DataFetcherManager.get_intraday_data 放行美股(us → yfinance 单源)。
 
 验证 us 经 _intraday_fetchers_for 仅保留 yfinance(override 过滤剔除 Longbridge/Finnhub/
-AlphaVantage 等未覆写源);facade 路由命中 yfinance;非 crypto/cn/us(港股)抛 DataFetchError。
+AlphaVantage 等未覆写源);facade 路由命中 yfinance;非 crypto/cn/us(如 ETF 510050)抛 DataFetchError。
 """
 import pandas as pd
 import pytest
@@ -55,7 +55,7 @@ def test_us_facade_routes_to_yfinance(monkeypatch):
 
 def test_unsupported_market_raises():
     with pytest.raises(DataFetchError):
-        DataFetcherManager().get_intraday_data("HK00700", interval="5m", days=3)
+        DataFetcherManager().get_intraday_data("510050", interval="5m", days=3)
 
 
 def test_yfinance_excluded_from_cn_intraday():
