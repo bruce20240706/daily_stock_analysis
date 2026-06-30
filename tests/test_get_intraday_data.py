@@ -25,10 +25,10 @@ def _clear_cache():
 
 
 def test_non_crypto_intraday_raises():
-    # A股/美股均已支持，故用仍不支持的港股码验证"非支持市场在任何 fetcher 调用前被拒"
+    # A股/美股/港股均已支持，故用仍不支持的非支持标的(ETF 510050)验证"非支持市场在任何 fetcher 调用前被拒"
     mgr = DataFetcherManager()
     with pytest.raises(DataFetchError):
-        mgr.get_intraday_data("HK00700", interval="5m", days=1)
+        mgr.get_intraday_data("510050", interval="5m", days=1)
 
 
 def test_crypto_intraday_returns_ohlc_without_indicators(monkeypatch):

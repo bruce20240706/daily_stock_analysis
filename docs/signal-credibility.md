@@ -292,10 +292,11 @@ python main.py --signal-backtest --signal-backtest-interval 5m
 | crypto | 交易所（Binance 等） | 较深；按 `days` 估算回看根数 |
 | A股沪深 | Tushare（1m 需 token）/ akshare | 较深；窗口由源默认/上限决定 |
 | 美股个股 | yfinance（免 key 单源） | 5m/15m≈60d、1h≈730d；**1m 不支持**（fail-closed） |
+| 港股个股 | akshare（`stock_hk_hist_min_em`，主）/ yfinance（兜底） | 5m/15m≈60d、1h≈730d（保守对齐 yfinance）；**1m** fail-closed |
 
 `_minute_fetch_days` 给 `get_intraday_data` 传"天数提示"（`1h → 730`，其余 `→ 365`）。**注意**：`days` 的实际生效程度因源而异——crypto 按 `days` 估算回看根数；A股（Tushare/akshare）与美股（yfinance）分钟历史窗口主要由各源自身默认/上限决定，`days` 偏大不会取错数据（各源自身封顶），故"取值给足"。如需为非 crypto 源真正加深历史，应改为下传 `start_date`（留待后续）。单股不足 `_MIN_BARS=50` 根则跳过。
 
-> **市场支持范围**：分钟路径目前覆盖 crypto / A股沪深 / 美股个股（见上表）。港股（HK）及指数代码无分钟取数支持，走分钟回测时单股取数失败被计入 `errors`（单股失败不拖垮整批，符合稳定性护栏），不产出分钟桶。
+> **市场支持范围**：分钟路径目前覆盖 crypto / A股沪深 / 美股个股 / 港股个股（best-effort，见上表）。港股（HK）个股已支持分钟（akshare 东财主 + yfinance 兜底，best-effort）；指数代码无分钟取数支持，单股取数失败被计入 `errors`（单股失败不拖垮整批，符合稳定性护栏），不产出分钟桶。
 
 ### 11.4 读出（最小可查）
 

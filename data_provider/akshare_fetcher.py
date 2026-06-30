@@ -432,6 +432,24 @@ class AkshareFetcher(BaseFetcher):
 
         import akshare as ak
 
+        if is_hk_stock_code(stock_code):
+            if interval == "1m":   # 独立守卫:HK 1m fail-closed,不依赖 _AK_PERIOD 共享表(防 A股 1m 将来入表静默激活)
+                raise NotImplementedError(f"[{self.name}] 港股 1m 不支持(东财 trends2 仅 ndays=5,无法锚定历史窗口)")
+            hk_symbol = stock_code.lower().replace("hk", "").zfill(5)   # 同日线 _fetch_hk_data:876
+            hk_sd = f"{start_date} 09:00:00" if start_date else "1970-01-01 09:00:00"
+            hk_ed = f"{end_date} 16:00:00" if end_date else "2099-01-01 16:00:00"
+            raw_hk = ak.stock_hk_hist_min_em(
+                symbol=hk_symbol, period=period, start_date=hk_sd, end_date=hk_ed, adjust="qfq"
+            )
+            if raw_hk is None or raw_hk.empty:
+                raise DataFetchError(f"[{self.name}] {stock_code} 无港股分钟数据（period={period}）")
+            from .intraday_normalize import normalize_intraday_df
+            raw_hk = raw_hk.rename(columns={
+                "时间": "datetime", "开盘": "open", "收盘": "close",
+                "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount",
+            })
+            return normalize_intraday_df(raw_hk, stock_code)
+
         symbol = normalize_stock_code(stock_code)
         sd = f"{start_date} 09:00:00" if start_date else "1970-01-01 09:00:00"
         ed = f"{end_date} 16:00:00" if end_date else "2099-01-01 16:00:00"

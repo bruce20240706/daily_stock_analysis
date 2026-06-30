@@ -1,7 +1,7 @@
 # 盘中/分钟级回测（crypto + A股 + 美股）
 
-> **范围**：crypto 现货与永续合约、A 股沪深（北交 best-effort）、美股个股（yfinance 免 key）；港股不在计划内。  
-> **专章**：A 股见 [§10](#10-a-股盘中分钟级回测沪深为主北交-best-effort)、美股见 [§11](#11-美股盘中分钟级回测)，均复用本文全部引擎/服务/API/Web/CLI，仅做市场化适配。
+> **范围**：crypto 现货与永续合约、A 股沪深（北交 best-effort）、美股个股（yfinance 免 key）、港股个股（akshare 东财 + yfinance 兜底，best-effort）。  
+> **专章**：A 股见 [§10](#10-a-股盘中分钟级回测沪深为主北交-best-effort)、美股见 [§11](#11-美股盘中分钟级回测)、港股见 [§12](#12-港股盘中分钟级回测)，均复用本文全部引擎/服务/API/Web/CLI，仅做市场化适配。
 
 ---
 
@@ -44,16 +44,16 @@ CRYPTO_INTRADAY_BACKTEST_INTERVAL=5m
 window_bar_count = eval_window_days × bars_per_day(interval)
 ```
 
-其中 `bars_per_day` **按市场查表**（`MARKET_TRADING_MINUTES`，**ceil 取整**计入会话末尾不足整段的半根）；crypto 7×24（1440 分钟），A 股每日 240 分钟（见 [§10.2](#102-bars_per_day市场化)），美股常规时段 390 分钟（见 [§11.2](#112-bars_per_day与-1h-半根)）：
+其中 `bars_per_day` **按市场查表**（`MARKET_TRADING_MINUTES`，**ceil 取整**计入会话末尾不足整段的半根）；crypto 7×24（1440 分钟），A 股每日 240 分钟（见 [§10.2](#102-bars_per_day市场化)），美股常规时段 390 分钟（见 [§11.2](#112-bars_per_day与-1h-半根)），港股 330 分钟（09:30–12:00 + 13:00–16:00，午休不计，见 [§12.2](#122-bars_per_day港股)）：
 
-| interval | crypto（1440/日） | A股（240/日） | 美股（390/日） |
-|----------|------------------|---------------|----------------|
-| `1m`     | 1440             | 240           | 390（美股不支持，见 §11）|
-| `5m`     | 288              | 48            | 78             |
-| `15m`    | 96               | 16            | 26             |
-| `1h`     | 24               | 4             | 7（ceil(390/60)，末根半根）|
+| interval | crypto（1440/日） | A股（240/日） | 美股（390/日） | 港股（330/日） |
+|----------|------------------|---------------|----------------|----------------|
+| `1m`     | 1440             | 240           | 390（美股不支持，见 §11）| 330（港股 1m fail-closed，见 §12）|
+| `5m`     | 288              | 48            | 78             | 66             |
+| `15m`    | 96               | 16            | 26             | 22             |
+| `1h`     | 24               | 4             | 7（ceil(390/60)，末根半根）| 6（ceil(330/60)）|
 
-市场由标的代码自动判定（crypto/perp → crypto；沪深/北交 → cn；美股个股 → us）。ceil 仅对有余数的 (市场,粒度) 生效——当前唯一是美股 1h（6→7）；crypto/A股 各粒度整除，值不变。
+市场由标的代码自动判定（crypto/perp → crypto；沪深/北交 → cn；美股个股 → us；港股个股 → hk）。ceil 仅对有余数的 (市场,粒度) 生效——美股 1h（ceil(390/60)=7，末根半根）、港股 1h（ceil(330/60)=6）；crypto/A股各粒度整除，值不变。
 
 入场价取 `analysis_date` 当日的**日线收盘价**（与日线路径一致，代表 AI 建议成立时点）。分钟窗口起点为 `analysis_date + 1 day` 00:00 UTC（crypto 日线 bar 收盘后第一根分钟 bar），向前延伸 `eval_window_days` 天。
 
@@ -214,7 +214,7 @@ GET /api/v1/backtest/performance?interval=5m
 - **crypto**（Binance/OKX/Coinbase 现货 + 永续合约）：本节及上文均以 crypto 为例。
 - **A 股**（沪深为主，北交 best-effort）：见 [§10](#10-a-股盘中分钟级回测沪深为主北交-best-effort)。
 - **美股**（个股，yfinance 免 key）：见 [§11](#11-美股盘中分钟级回测)。
-- **港股不在计划内**；港股标的在分钟路径下会被跳过（`skipped_unsupported` 计数），日线路径不受影响。
+- **港股**（个股，best-effort）：见 [§12](#12-港股盘中分钟级回测)。
 
 ### 9.3 历史窗口锚点
 
@@ -276,7 +276,7 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 - **印花税可选建模（默认 0）**：A 股卖出印花税（单边）已由 `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS` 支持（opt-in，默认 0，仅 cn + long 出场计征；现行 5bps）；佣金等其它分量仍沿用跨市场共享的对称 `fee/slippage`（默认 0）。过户费（沪市）等暂未单独建模。
 - **复权基准漂移**：入场价取库内日线收盘（其复权口径以落库时为准），分钟 bar 按 `qfq` 即时拉取，二者复权锚点可能不同步；若窗口内发生除权除息，模拟收益会有偏差。窗口短、无分红配股时影响可忽略。
 - **北交所 best-effort**：北交所分钟数据源覆盖不确定，作尽力支持，不保证可得。
-- **港股仍不支持**分钟路径（美股见 [§11](#11-美股盘中分钟级回测)）。
+- **港股**分钟路径已支持（akshare 东财主 + yfinance 兜底，见 [§12](#12-港股盘中分钟级回测)）；1m fail-closed。
 
 ---
 
@@ -289,7 +289,7 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 - **yfinance**（Yahoo Finance，免 key、已在仓）是美股分钟唯一源。给 `YfinanceFetcher.get_intraday_data` 经 `yf.download(interval=…, auto_adjust=True)` 取数 → 共享 `normalize_intraday_df`。
 - interval 映射：`5m→5m`、`15m→15m`、`1h→60m`。
 - 类股（`BRK.B`/`BF.B`）符号自动 `.`→`-`（Yahoo 用连字符 `BRK-B`）。
-- yfinance 日线虽支持 A 股/港股，但其**分钟仅服务美股**；门面已将其在非 us 市场排除，A 股分钟仍只用 Tushare/akshare（契约不变）。
+- yfinance 日线虽支持 A 股/港股，但其**分钟服务美股与港股**；门面已将其在非 (us, hk) 市场排除，港股分钟由 akshare 主 + yfinance 兜底（见 [§12](#12-港股盘中分钟级回测)），A 股分钟仍只用 Tushare/akshare（契约不变）。
 
 ### 11.2 bars_per_day 与 1h 半根
 
@@ -346,7 +346,69 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 
 ---
 
-## 12. 配置项汇总
+## 12. 港股盘中/分钟级回测
+
+港股复用全部引擎 / 服务 / API / Web / CLI 能力，仅做市场化适配；**crypto / A 股 / 美股 / 日线路径行为不变**。
+
+### 12.1 数据源（akshare 东财主 + yfinance 兜底）
+
+| 数据源 | 接口 | Token | 说明 |
+|--------|------|-------|------|
+| akshare（主源） | `stock_hk_hist_min_em`（东财） | 免费、无需 token | 默认主源；5m/15m/1h 可用 |
+| yfinance（兜底） | Yahoo Finance（如 `0700.HK`） | 免费、无需 key | akshare 不可用 / 取数失败时自动降级 |
+
+- **不配置密钥即可用**：akshare 与 yfinance 均免 key/token，开箱即用。
+- interval 词表与其他市场统一（`1m/5m/15m/1h`），各源内部做 interval 映射。
+- **港股 1m fail-closed**：东财 `stock_hk_hist_min_em` 历史窗口受限，无法锚定回测所需历史区间；故 `1m` 直接抛 `NotImplementedError`（fail-closed，避免静默取回错窗口）。**港股 1m 回测不可得**，`5m/15m/1h` 不受影响。
+- 路由白名单仅 `[AkshareFetcher, YfinanceFetcher]`；`TushareFetcher` 经路由排除（仅服务 A 股），港股请求不会误走 Tushare。
+
+### 12.2 bars_per_day（港股）
+
+港股每个交易日两段连续竞价：09:30–12:00 + 13:00–16:00 = **330 分钟**（午休 12:00–13:00 及竞价收市不计），`bars_per_day` 按市场查表（对照表见 [§3](#3-同日历窗口分钟路径)）：
+
+| interval | bars_per_day | 备注 |
+|----------|-------------|------|
+| `5m`     | 66          | |
+| `15m`    | 22          | |
+| `1h`     | 6           | ceil(330/60)；AM 末根 11:30–12:00 为 30 min 半根，PM 段整时收盘（15:00–16:00） |
+
+### 12.3 可用 band（链路B 信号可信度）
+
+链路B 信号可信度 band 保守对齐 yfinance 历史上限：
+
+| interval | band | 说明 |
+|----------|------|------|
+| `5m`/`15m` | 60 天 | 对齐 yfinance 5m/15m 上限 |
+| `1h`     | 730 天 | 对齐 yfinance 1h 上限（**推荐**，可用范围最宽） |
+
+band 在线深度核验（港股 akshare/yfinance 实际历史深度）**deferred**——保守值由构造安全，留待有网环境补验。
+
+### 12.4 用法
+
+与 crypto/A股/美股 完全一致，把标的换成港股代码（如 `hk00700`）：
+
+```bash
+# 对腾讯控股跑 5m 分钟回测（1m 不支持）
+python main.py --backtest --backtest-interval 5m --backtest-code hk00700
+
+# 推荐 1h（链路B 可用范围最宽）
+python main.py --backtest --backtest-interval 1h --backtest-code hk00700
+```
+
+API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` 词表不变。
+
+### 12.5 限制
+
+- **1m fail-closed**：港股 1m 数据源限制，不可得（见 [§12.1](#121-数据源akshare-东财主--yfinance-兜底)）。
+- **成本暂走跨市场 fee/slip（默认 0）**：HK 双边印花税（买卖各约 0.1%，另有印花税征费）尚未单独建模，另立 follow-up；现行默认 0；可通过 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS` / `CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS` 近似配置。
+- **akshare 限频/稳定性**：东财免费接口有访问频率限制，大批量可能偶发失败 → 该条 `insufficient_data`/error 计数，不拖垮整批（best-effort）。
+- **仅个股**：港股指数（恒指等）无 operation_advice、非回测候选；ETF / REIT 代码作 best-effort，未单独验证。
+- **复权基准漂移**：入场价取库内日线收盘，分钟 bar 按 `qfq` 即时拉取，复权锚点可能不同步（同 §10.5），窗口短/无公司行动时可忽略。
+- **band 在线核验 deferred**：链路B 港股 5m/15m=60 天、1h=730 天保守值暂未在线验证（见 [§12.3](#123-可用-band链路b-信号可信度)）。
+
+---
+
+## 13. 配置项汇总
 
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
@@ -362,7 +424,7 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 
 ---
 
-## 13. 回滚说明
+## 14. 回滚说明
 
 如需回退到分钟回测前的状态，无需任何代码变更，只需确保：
 

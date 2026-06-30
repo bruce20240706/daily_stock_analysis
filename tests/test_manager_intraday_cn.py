@@ -65,9 +65,9 @@ def test_cn_failover_to_akshare(monkeypatch):
 
 
 def test_non_crypto_non_cn_raises():
-    # AAPL 已是美股(us)支持;用仍不支持的港股码验证非支持市场被拒
+    # AAPL 已是美股(us)支持;用仍不支持的 ETF 510050 验证非支持市场被拒
     with pytest.raises(DataFetchError):
-        DataFetcherManager().get_intraday_data("HK00700", interval="5m", days=1)
+        DataFetcherManager().get_intraday_data("510050", interval="5m", days=1)
 
 
 def test_intraday_fetchers_for_cn_orders_tushare_before_akshare():

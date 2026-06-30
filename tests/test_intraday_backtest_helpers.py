@@ -77,7 +77,7 @@ def test_bars_per_day_cn_market():
 
 def test_bars_per_day_unknown_market_raises():
     with pytest.raises((KeyError, ValueError)):
-        bars_per_day("5m", "hk")              # hk 未登记
+        bars_per_day("5m", "jp")              # jp 未登记
 
 
 def test_derive_window_bar_count_market_aware():
@@ -126,3 +126,18 @@ def test_apply_round_trip_cost_default_sell_side_byte_identical():
 
 def test_apply_round_trip_cost_none_passthrough_with_sell_side():
     assert apply_round_trip_cost(None, 0.0, 0.0, sell_side_bps=5.0) is None
+
+
+def test_market_trading_minutes_hk():
+    assert MARKET_TRADING_MINUTES["hk"] == 330
+
+
+def test_bars_per_day_hk_market():
+    assert bars_per_day("1m", "hk") == 330
+    assert bars_per_day("5m", "hk") == 66      # (150+180)/5
+    assert bars_per_day("15m", "hk") == 22
+    assert bars_per_day("1h", "hk") == 6       # ceil(330/60)=6(早市末半根)
+
+
+def test_derive_window_bar_count_hk():
+    assert derive_window_bar_count(10, "5m", "hk") == 660   # 10*66
