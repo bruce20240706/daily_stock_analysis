@@ -954,6 +954,17 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响 A股盘中回测的收益率和胜率计算。'],
     notes: ['仅影响盘中回测结果，不影响真实下单；crypto/美股不征此税。'],
   },
+  'settings.backtest.HK_INTRADAY_BACKTEST_STAMP_DUTY_BPS': {
+    title: '港股盘中印花税',
+    summary: '港股盘中回测买卖双边印花税（基点），默认 0 表示理想化无成本回测。',
+    usage: '默认 0；HK 现行印花税为买卖双边各 10bps（0.1%）。仅港股盘中回测的成交标的计征，买卖各一次（×2）。',
+    valueNotes: [
+      '1 基点 = 0.01%；HK 现行 10bps = 0.1%（买入与卖出各计一次，合计 ×2）。',
+      '区别于 A股单边：港股买卖双边均计；佣金/滑点仍走盘中手续费/滑点（跨市场共享），港股真实总成本需一并设。',
+    ],
+    impact: ['影响 港股盘中回测的收益率和胜率计算。'],
+    notes: ['仅影响盘中回测结果，不影响真实下单；crypto/A股/美股不征此税。'],
+  },
   'settings.backtest.INTRADAY_BACKTEST_ENABLED': {
     title: '盘中回测定时任务',
     summary: '是否在调度模式下启用盘中回测后台自动任务，默认关闭。',
