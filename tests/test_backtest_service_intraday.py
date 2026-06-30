@@ -641,6 +641,9 @@ def test_stamp_duty_gate(monkeypatch, tmp_path, label, code, position, engine_re
         ("HK6_us_long",       "AAPL",    "long", 10.0, 10.0, 0.0, 0.0, 0.0, 10.0),
         # HK7(反例) crypto + long + hk_stamp=10:market!=hk → 不计征
         ("HK7_crypto_long",   "BTC/USDT:PERP", "long", 10.0, 10.0, 0.0, 0.0, 0.0, 10.0),
+        # HK8(双 knob 不串)cn + long + ashare=5 + hk=10:cn 走 if 仅取 ashare 单边(0.05),
+        # 不取 hk(elif 未触发)→ 9.95(证 cn 不漏取 hk,且双计结构不可能)
+        ("HK8_cn_both_no_leak", "600519",      "long", 10.0, 10.0, 5.0, 0.0, 0.0, 9.95),
     ],
 )
 def test_hk_stamp_duty_gate(monkeypatch, tmp_path, label, code, position, engine_return, hk_stamp_bps, ashare_stamp_bps, fee_bps, slip_bps, expected):

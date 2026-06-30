@@ -110,6 +110,7 @@ net_return = gross_return
            − 2 × (fee_bps + slippage_bps + hk_stamp_bps) / 100   # 对称双边(含港股印花税)
            − 1 × ashare_stamp_bps / 100                          # A股卖出单边
 ```
+（公式中 `hk_stamp_bps` / `ashare_stamp_bps` 为按税种命名的可读量,对应代码 `apply_round_trip_cost` 的参数 `both_side_bps` / `sell_side_bps`。）
 
 **A股卖出印花税（单边，opt-in）：** A股现行印花税为**卖出单边 5bps（0.05%）**。设 `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS=5` 后，仅 A股盘中回测的多头(long)出场会额外扣一次卖出税；crypto/美股/cash/日线一律不征。注意 `fee/slippage` 是跨市场共享的对称佣金分量（默认 0），A股真实总成本需**同时**设 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS/SLIPPAGE_BPS`。该 knob 也可在 Web 设置页 Backtest 分类直接调整。
 
