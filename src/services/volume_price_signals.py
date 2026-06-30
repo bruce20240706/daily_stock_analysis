@@ -25,6 +25,14 @@ from src.services.alert_indicators import normalize_ohlcv
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
 
+# for_market_interval 可按 interval 覆盖的窗口字段 → minimum 下限（与 from_env 一致）
+_INTERVAL_OVERRIDE_FIELDS: dict[str, float] = {
+    "vol_ma_window": 5.0,
+    "breakout_window": 2.0,
+    "atr_period": 2.0,
+    "swing_k": 1.0,
+}
+
 
 @dataclass(frozen=True)
 class VPSConfig:
@@ -85,6 +93,35 @@ class VPSConfig:
                 breakout_rel_vol=base.crypto_breakout_rel_vol,
             )
         return base
+
+    @classmethod
+    def for_market_interval(cls, market: str | None, interval: str | None) -> "VPSConfig":
+        """返回适合 (market, interval) 的 VPSConfig。
+
+        在 for_market(market)（含 crypto 旁路）之上，对受支持的分钟 interval 叠加窗口阈值
+        覆盖：读 VPS_<FIELD>_<INTERVAL 大写> env（仅 4 个 window 字段），set 的才覆盖。
+        默认不配 / interval 为 '1d'/None/未知 → 原样返回 for_market(market)，日线与未配分钟
+        均字节级不变。优先级：interval 覆盖 > crypto 旁路 > 日线默认。
+        """
+        from src.core.intraday_backtest import is_intraday_interval
+
+        base = cls.for_market(market)
+        if not interval or not is_intraday_interval(interval):
+            return base
+        suffix = interval.upper()
+        overrides: dict = {}
+        for field_name, floor in _INTERVAL_OVERRIDE_FIELDS.items():
+            env_key = f"VPS_{field_name.upper()}_{suffix}"
+            raw = os.getenv(env_key)
+            if raw is None or not raw.strip():
+                continue
+            cur = getattr(base, field_name)
+            overrides[field_name] = int(parse_env_float(
+                raw, float(cur), field_name=env_key, minimum=floor))
+        if not overrides:
+            return base
+        import dataclasses
+        return dataclasses.replace(base, **overrides)
 
 
 @dataclass(frozen=True)
