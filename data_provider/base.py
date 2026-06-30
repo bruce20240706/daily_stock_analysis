@@ -311,13 +311,15 @@ def is_a_share_code(code: str) -> bool:
 
 
 def market_of(code: str) -> str:
-    """分钟回测市场归类:crypto(含 perp)/ cn / us。其他(港股、美股指数等)抛 ValueError。"""
+    """分钟回测市场归类:crypto(含 perp)/ cn / us / hk。其他(美股指数等)抛 ValueError。"""
     if is_crypto_code(code) or is_perp_code(code):
         return "crypto"
     if is_a_share_code(code):
         return "cn"
     if is_us_stock_code(code):
         return "us"
+    if _is_hk_market(code):
+        return "hk"
     raise ValueError(f"无分钟市场归类: {code!r}")
 
 

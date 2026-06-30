@@ -23,5 +23,4 @@ def test_market_of_order_no_collision():
     assert market_of("600519") == "cn"
     assert market_of("BTC/USDT") == "crypto"
     assert market_of("ETH/USDT:PERP") == "crypto"
-    with pytest.raises(ValueError):
-        market_of("HK00700")   # 港股不归类(分钟回测暂不支持)
+    assert market_of("HK00700") == "hk"   # 港股已纳入分钟回测
