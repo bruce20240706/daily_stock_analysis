@@ -1531,6 +1531,8 @@ class DataFetcherManager:
             market = "cn"
         elif is_us_stock_code(code):
             market = "us"
+        elif _is_hk_market(code):
+            market = "hk"
         else:
             return []
 
@@ -1541,10 +1543,15 @@ class DataFetcherManager:
             f for f in fetchers
             if type(f).get_intraday_data is not BaseFetcher.get_intraday_data
         ]
-        # yfinance 日线支持 cn/hk/us,但其分钟数据仅服务美股(A股分钟走 Tushare/akshare);
-        # 非 us 市场排除 yfinance,避免其漏入 A股分钟路径改变既有契约。
-        if market != "us":
+        # yfinance 日线支持 cn/hk/us;其分钟数据服务美股与港股(A股分钟走 Tushare/akshare);
+        # 非 (us, hk) 市场排除 yfinance,避免其漏入 A股分钟路径改变既有契约。
+        if market not in ("us", "hk"):
             fetchers = [f for f in fetchers if f.name != "YfinanceFetcher"]
+        if market == "hk":
+            # HK 分钟仅 akshare(东财) + yfinance;Tushare stk_mins 仅 A股(日线表含 hk 会漏入)
+            _hk_order = {"AkshareFetcher": 0, "YfinanceFetcher": 1}
+            fetchers = [f for f in fetchers if f.name in _hk_order]
+            fetchers.sort(key=lambda f: _hk_order[f.name])
         if market == "cn":
             _cn_order = {"TushareFetcher": 0, "AkshareFetcher": 1}
             fetchers.sort(key=lambda f: _cn_order.get(f.name, 2))
@@ -1576,8 +1583,9 @@ class DataFetcherManager:
         stock_code = normalize_stock_code(stock_code)
 
         if not (is_crypto_code(stock_code) or is_perp_code(stock_code)
-                or is_a_share_code(stock_code) or is_us_stock_code(stock_code)):
-            raise DataFetchError(f"{stock_code} 暂不支持分钟级数据（仅 crypto / A股 / 美股）")
+                or is_a_share_code(stock_code) or is_us_stock_code(stock_code)
+                or _is_hk_market(stock_code)):
+            raise DataFetchError(f"{stock_code} 暂不支持分钟级数据（仅 crypto / A股 / 港股 / 美股）")
 
         # 缓存命中（键含 start/end，避免回测跨 analysis_date 同窗口键碰撞取回错数据）
         cache_key: Tuple = (stock_code, interval, days, str(start_date), str(end_date))
