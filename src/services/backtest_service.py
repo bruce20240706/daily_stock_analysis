@@ -106,6 +106,7 @@ class BacktestService:
         skipped_unsupported = 0  # 分钟路径不支持的非 crypto 标的
 
         from data_provider.base import is_perp_code, is_crypto_code, is_a_share_code, is_us_stock_code, market_of
+        from data_provider import is_hk_stock_code
 
         for analysis in candidates:
             if perp_only and not is_perp_code(analysis.code):
@@ -117,8 +118,9 @@ class BacktestService:
                 or is_perp_code(analysis.code)
                 or is_a_share_code(analysis.code)
                 or is_us_stock_code(analysis.code)
+                or is_hk_stock_code(analysis.code)
             ):
-                # 分钟路径支持 crypto/perp、A股沪深/北交、美股个股；其余市场跳过（计入 skipped_unsupported）
+                # 分钟路径支持 crypto/perp、A股沪深/北交、美股个股、港股个股(best-effort);其余市场跳过（计入 skipped_unsupported）
                 skipped_unsupported += 1
                 continue
             processed += 1

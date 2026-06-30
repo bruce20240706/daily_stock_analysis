@@ -232,9 +232,9 @@ def test_intraday_tag_and_window_and_persistence(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_intraday_non_crypto_skipped(monkeypatch, tmp_path):
-    """interval='5m' + 港股 code → skipped (分钟路径暂不支持港股), processed=0。
+    """interval='5m' + 非支持标的(如 ETF 510050) → skipped, processed=0。
 
-    A股/美股已纳入分钟路径，故此处改用仍不支持的港股码验证"非支持市场被整体跳过"。
+    A股/美股/港股已纳入分钟路径，故此处改用仍不支持的 ETF 510050 验证"非支持标的被整体跳过"。
     """
     import os
 
@@ -250,7 +250,7 @@ def test_intraday_non_crypto_skipped(monkeypatch, tmp_path):
 
     svc = BacktestService(db_manager=db)
 
-    candidate = _fake_analysis(code="HK00700", analysis_id=10)
+    candidate = _fake_analysis(code="510050", analysis_id=10)
     monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
     monkeypatch.setattr(svc, "_resolve_analysis_date", lambda a: date(2026, 5, 1))
 
@@ -265,8 +265,8 @@ def test_intraday_non_crypto_skipped(monkeypatch, tmp_path):
 
     out = svc.run_backtest(interval="5m", eval_window_days=2)
 
-    assert intraday_called["n"] == 0, "get_intraday_data must not be called for 港股 code"
-    assert out["processed"] == 0, f"非支持市场应被整体跳过, got {out}"
+    assert intraday_called["n"] == 0, "get_intraday_data must not be called for 非支持 code"
+    assert out["processed"] == 0, f"非支持标的应被整体跳过, got {out}"
 
 
 # ---------------------------------------------------------------------------
@@ -316,9 +316,9 @@ def test_df_to_bars_shape_and_date():
 # ---------------------------------------------------------------------------
 
 def test_intraday_non_crypto_skip_counter(monkeypatch, tmp_path):
-    """interval='5m' + 港股 code → skipped_unsupported 计数 +1,且返回 dict 含该键。
+    """interval='5m' + 非支持 code(ETF 510050) → skipped_unsupported 计数 +1,且返回 dict 含该键。
 
-    A股/美股已支持,改用仍不支持的港股码验证 skipped_unsupported 计数路径。
+    A股/美股/港股已支持,改用仍不支持的 ETF 510050 验证 skipped_unsupported 计数路径。
     """
     import os
 
@@ -334,18 +334,18 @@ def test_intraday_non_crypto_skip_counter(monkeypatch, tmp_path):
 
     svc = BacktestService(db_manager=db)
 
-    candidate = _fake_analysis(code="HK00700", analysis_id=20)
+    candidate = _fake_analysis(code="510050", analysis_id=20)
     monkeypatch.setattr(svc.repo, "get_candidates", lambda **k: [candidate])
     monkeypatch.setattr(svc, "_resolve_analysis_date", lambda a: date(2026, 5, 1))
 
     out = svc.run_backtest(interval="5m", eval_window_days=2)
 
-    assert out["processed"] == 0, "非支持市场不应被处理"
+    assert out["processed"] == 0, "非支持标的不应被处理"
     assert "skipped_unsupported" in out, (
         "'skipped_unsupported' key must be in return dict for unsupported-market minute skips"
     )
     assert out["skipped_unsupported"] == 1, (
-        f"skipped_unsupported should be 1 for one 美股 code, got {out.get('skipped_unsupported')}"
+        f"skipped_unsupported should be 1 for one 非支持 code, got {out.get('skipped_unsupported')}"
     )
 
 
