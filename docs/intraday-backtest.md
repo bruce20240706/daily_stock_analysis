@@ -406,7 +406,7 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 ### 12.5 限制
 
 - **1m fail-closed**：港股 1m 数据源限制，不可得（见 [§12.1](#121-数据源akshare-东财主--yfinance-兜底)）。
-- **港股双边印花税（opt-in，默认 0）**：港股印花税买卖双边各 10bps，通过 `HK_INTRADAY_BACKTEST_STAMP_DUTY_BPS` 配置（默认 0；设为 10 后按 ×2 双边扣除）；门控 `market==hk` + 确有成交（cash 豁免），cn/us/crypto/日线不征。佣金/滑点仍走跨市场共享 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS/SLIPPAGE_BPS`（默认 0）。`持有/hold` 建议在回测中映射为 long 且按 `entry@start` 全 round-trip 建模，故 both-side 印花税会对 hold 也计买腿——与 A股 knob 同源（A股已对 hold→long 计卖腿），HK 仅幅度翻倍 ×2；此为回测既有约定，非本特性新增。
+- **港股双边印花税（opt-in，默认 0）**：港股印花税买卖双边各 10bps，通过 `HK_INTRADAY_BACKTEST_STAMP_DUTY_BPS` 配置（默认 0；设为 10 后按 ×2 双边扣除）；门控 `market==hk` + 确有成交（cash 豁免；成交即征、不限 long——区别于 A股 long-only;HK 在链路A 实际仅 long/cash 可达,故今日等同 long-only,entry-based 门控为前向兼容），cn/us/crypto/日线不征。佣金/滑点仍走跨市场共享 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS/SLIPPAGE_BPS`（默认 0）。`持有/hold` 建议在回测中映射为 long 且按 `entry@start` 全 round-trip 建模，故 both-side 印花税会对 hold 也计买腿——与 A股 knob 同源（A股已对 hold→long 计卖腿），HK 仅幅度翻倍 ×2；此为回测既有约定，非本特性新增。
 - **akshare 限频/稳定性**：东财免费接口有访问频率限制，大批量可能偶发失败 → 该条 `insufficient_data`/error 计数，不拖垮整批（best-effort）。
 - **仅个股**：港股指数（恒指等）无 operation_advice、非回测候选；ETF / REIT 代码作 best-effort，未单独验证。
 - **复权基准漂移**：入场价取库内日线收盘，分钟 bar 按 `qfq` 即时拉取，复权锚点可能不同步（同 §10.5），窗口短/无公司行动时可忽略。
