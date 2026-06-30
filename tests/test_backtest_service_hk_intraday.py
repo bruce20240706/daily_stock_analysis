@@ -75,7 +75,7 @@ def test_hk_intraday_processed_with_hk_market_window(monkeypatch, tmp_path):
     out = svc.run_backtest(interval="5m", eval_window_days=10)
 
     assert out["processed"] == 1 and out["completed"] == 1, f"HK 应被处理: {out}"
-    assert out.get("skipped_unsupported", 0) == 0
+    assert out["skipped_unsupported"] == 0
     assert captured_eval["config"].eval_window_days == 660    # 10 * bars_per_day(5m, hk)=66
     assert len(saved) == 1
     r = saved[0]

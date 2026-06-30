@@ -1515,7 +1515,7 @@ class DataFetcherManager:
     def _intraday_fetchers_for(self, code: str) -> List[BaseFetcher]:
         """返回某代码可用的分钟数据源（已按市场/能力过滤并排序）。
 
-        - market 由代码判定：crypto_perp / crypto / cn / us；其余返回空列表（由调用方拒绝）。
+        - market 由代码判定：crypto_perp / crypto / cn / us / hk；其余返回空列表（由调用方拒绝）。
         - 剔除未覆写 get_intraday_data 的源（BaseFetcher 默认抛 NotImplementedError），
           避免对 Efinance/Pytdx/Baostock 等纯日线源做无谓调用。
         - cn 显式把 Tushare 主源排到 akshare 兜底之前；无 token 的 Tushare 已被
@@ -1565,12 +1565,12 @@ class DataFetcherManager:
         end_date: Optional[str] = None,
         days: int = 30,
     ) -> Tuple[pd.DataFrame, str]:
-        """获取分钟级 K 线数据（crypto/crypto_perp、A股沪深/北交、美股个股）。
+        """获取分钟级 K 线数据（crypto/crypto_perp、A股沪深/北交、港股个股、美股个股）。
 
         路由策略：
         - 非 crypto / 非 A股 / 非港股 / 非美股个股 代码直接抛 DataFetchError。
         - 经 _intraday_fetchers_for 按市场 + capability="intraday_data" 过滤并排序
-          （cn 时 Tushare 主源优先、akshare 兜底；us 仅 yfinance）。
+          （cn 时 Tushare 主源优先、akshare 兜底；us 仅 yfinance；hk 走 akshare 主 + yfinance 兜底）。
         - 依次尝试各 fetcher，返回首个非空结果 (df, fetcher_name)。
         - 带进程内 TTL 缓存，key=(code, interval, days, start, end)；TTL=0 时不缓存。
 

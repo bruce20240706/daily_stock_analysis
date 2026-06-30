@@ -32,6 +32,7 @@ from tenacity import (
 )
 
 from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, is_bse_code
+from .akshare_fetcher import is_hk_stock_code
 from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
 from .us_index_mapping import get_us_index_yf_symbol, is_us_stock_code
 
@@ -134,6 +135,11 @@ class YfinanceFetcher(BaseFetcher):
 
         # 去除可能的 .SH 后缀
         code = code.replace('.SH', '')
+
+        # 港股裸数字形（无 HK 前缀/无 .HK 后缀，如候选码 00700）：统一 → NNNN.HK，与 HK 前缀分支一致
+        if is_hk_stock_code(code):
+            hk_code = (code.lstrip('0') or '0').zfill(4)
+            return f"{hk_code}.HK"
 
         # ETF: Shanghai ETF (51xx, 52xx, 56xx, 58xx) -> .SS; Shenzhen ETF (15xx, 16xx, 18xx) -> .SZ
         if len(code) == 6:

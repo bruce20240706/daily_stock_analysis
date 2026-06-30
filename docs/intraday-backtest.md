@@ -400,7 +400,7 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 ### 12.5 限制
 
 - **1m fail-closed**：港股 1m 数据源限制，不可得（见 [§12.1](#121-数据源akshare-东财主--yfinance-兜底)）。
-- **成本暂走跨市场 fee/slip（默认 0）**：HK 双边印花税（买卖各约 0.1%，另有印花税征费）尚未单独建模，另立 follow-up；现行默认 0；可通过 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS` / `SLIPPAGE_BPS` 近似配置。
+- **成本暂走跨市场 fee/slip（默认 0）**：HK 双边印花税（买卖各约 0.1%，另有印花税征费）尚未单独建模，另立 follow-up；现行默认 0；可通过 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS` / `CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS` 近似配置。
 - **akshare 限频/稳定性**：东财免费接口有访问频率限制，大批量可能偶发失败 → 该条 `insufficient_data`/error 计数，不拖垮整批（best-effort）。
 - **仅个股**：港股指数（恒指等）无 operation_advice、非回测候选；ETF / REIT 代码作 best-effort，未单独验证。
 - **复权基准漂移**：入场价取库内日线收盘，分钟 bar 按 `qfq` 即时拉取，复权锚点可能不同步（同 §10.5），窗口短/无公司行动时可忽略。
