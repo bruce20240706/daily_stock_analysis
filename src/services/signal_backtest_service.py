@@ -45,10 +45,14 @@ _FETCH_DAYS = 365
 #       不取错数」的安全性不可迁移到 start_date——这正是本表对 cn 也必须夹取的原因。
 # crypto 不在表中：按 days 锚定、不下传 start_date(见 _minute_fetch_start_date)，行为字节级不变。
 _INTRADAY_MAX_DAYS = {
-    "us": {"1m": 7, "5m": 60, "15m": 60, "1h": 730},
+    # yfinance 要求请求严格在 last-N-天内；请求恰好 N 天会被硬拒(返回空→DataFetchError)。
+    # 真网核验：5m 59天OK/60天FAIL、1h 729天OK/730天FAIL。
+    # us/hk(分钟均走 yfinance 路径)band 取上限再留 1-4 天余量，抵消实时 vs 午夜基准 + HK UTC+8 偏移。
+    "us": {"1m": 7, "5m": 58, "15m": 58, "1h": 725},
     "cn": {"1m": 30, "5m": 90, "15m": 365, "1h": 730},
-    # hk 双源(akshare 东财主 + yfinance 兜底):保守对齐 yfinance 上限;1m fail-closed 不设键
-    "hk": {"5m": 60, "15m": 60, "1h": 730},
+    # hk 双源(akshare 东财主 + yfinance 兜底):yfinance 要求请求严格在 last-N-天内(真网核验 5m 60/1h 730 即被硬拒)，
+    # 故 band 取 yfinance 上限再留 1-2 天余量(58/725);1m fail-closed 不设键
+    "hk": {"5m": 58, "15m": 58, "1h": 725},
 }
 
 

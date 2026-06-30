@@ -301,8 +301,10 @@ yfinance 免费分钟仅近期可得，回测需 `analysis_date` 既够老（for
 
 | interval | yfinance 历史窗口 | 实际可用 band | 说明 |
 |----------|-------------------|---------------|------|
-| `1h`     | ≈ 730 天          | `[now-730d, now-窗口]` | **推荐**，可用范围最宽 |
-| `5m`/`15m` | ≈ 60 天         | `[now-60d, now-窗口]`  | 仅近两月 |
+| `1h`     | 上限 730 天（硬拒，见注）| `[now-725d, now-窗口]` | **推荐**，可用范围最宽 |
+| `5m`/`15m` | 上限 60 天（硬拒，见注）| `[now-58d, now-窗口]` | 仅近两月 |
+
+> **注（yfinance 严格 last-N-天边界，真网核验）**：Yahoo Finance 要求请求严格在 last-N-天内；请求恰好 N 天会被硬拒（返回空 → `DataFetchError`）。真网核验：5m 59 天 OK / 60 天 FAIL，1h 729 天 OK / 730 天 FAIL。band 取上限再留 1–4 天余量（5m/15m=58、1h=725），抵消实时 vs 午夜基准偏差与时区漂移。
 | `1m`     | ≈ 7 天 + 单请求 ≤8 天 | **不支持** | 与 min_age/窗口缓冲恒冲突 → fail-closed（`NotImplementedError`→`insufficient_data`，不发请求） |
 
 超出窗口的老 `analysis_date` → 取数失败 → 优雅降级 `insufficient_data`（与 A 股取数失败同路径，不加新逻辑）。
@@ -319,7 +321,7 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 ### 11.5 限制
 
 - **批量可靠性**：yfinance 抓取 Yahoo，大批量（数百候选）可能限频/瞬断；入口已包 `@retry` 指数退避，仍可能偶发失败 → 该条 `insufficient_data`/error 计数。美股分钟回测建议小批量/手动触发。
-- **5m/15m 大窗口受 yfinance 60 天上限约束**：取数窗口含周末/节假日缓冲（`max(N*2, N*3//2+14)` 自然日），当 `eval_window_days` 偏大（约 ≥40）时整窗会超出 yfinance 5m/15m 的 60 天可得范围 → 整体落 `insufficient_data`。大窗口请改用 `1h`（≈730 天，见 [§11.3](#113-可用-band关键限制)）。
+- **5m/15m 大窗口受 yfinance band 约束**：取数窗口含周末/节假日缓冲（`max(N*2, N*3//2+14)` 自然日），当 `eval_window_days` 偏大（约 ≥40）时整窗会超出 yfinance 5m/15m 的 58 天可得 band → 整体落 `insufficient_data`。大窗口请改用 `1h`（≈725 天，见 [§11.3](#113-可用-band关键限制)）。
 - **成本**：沿用 crypto 对称 `fee/slippage`（默认 0）；美股无印花税（仅极小 SEC/TAF 费），不单独建模。
 - **复权基准漂移**：yfinance `auto_adjust=True`，与库内日线收盘入场价的复权锚点可能不同步（同 A 股 §10.5），窗口短/无公司行动时可忽略。
 - **仅个股**：美股指数（SPX/DJI 等）无 operation_advice、非回测候选，不支持。
@@ -330,8 +332,8 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 
 | 市场 | interval | start_date 锚点 | 说明 |
 |------|----------|-----------------|------|
-| 美股（us） | 1h | today − `_INTRADAY_MAX_DAYS["us"]["1h"]`（≈730d） | 夹 yfinance band 上限 |
-| 美股（us） | 5m/15m | today − `_INTRADAY_MAX_DAYS["us"]["5m"]`（≈60d） | 夹 yfinance band 上限 |
+| 美股（us） | 1h | today − `_INTRADAY_MAX_DAYS["us"]["1h"]`（≈725d） | 夹 yfinance band 余量值（上限 730 被硬拒，真网核验） |
+| 美股（us） | 5m/15m | today − `_INTRADAY_MAX_DAYS["us"]["5m"]`（≈58d） | 夹 yfinance band 余量值（上限 60 被硬拒，真网核验） |
 | A股（cn） | 1h | today − 730d | 见下「核验结果」 |
 | A股（cn） | 15m | today − 365d | 见下「核验结果」 |
 | A股（cn） | 5m | today − 90d | 见下「核验结果」 |
@@ -374,14 +376,14 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 
 ### 12.3 可用 band（链路B 信号可信度）
 
-链路B 信号可信度 band 保守对齐 yfinance 历史上限：
+链路B 信号可信度 band（yfinance 要求请求严格在 last-N-天内；请求恰好上限天数被硬拒，真网核验）：
 
 | interval | band | 说明 |
 |----------|------|------|
-| `5m`/`15m` | 60 天 | 对齐 yfinance 5m/15m 上限 |
-| `1h`     | 730 天 | 对齐 yfinance 1h 上限（**推荐**，可用范围最宽） |
+| `5m`/`15m` | 58 天 | yfinance 上限 60 天会被硬拒（真网核验：59 天 OK / 60 天 FAIL），留余量 |
+| `1h`     | 725 天 | yfinance 上限 730 天会被硬拒（真网核验：729 天 OK / 730 天 FAIL），留余量（**推荐**，可用范围最宽） |
 
-band 在线深度核验（港股 akshare/yfinance 实际历史深度）**deferred**——保守值由构造安全，留待有网环境补验。
+yfinance 要求请求严格在 last-N-天内（请求恰好上限天数被硬拒，真网核验），故取上限再留 1–2 天余量。
 
 ### 12.4 用法
 
@@ -404,7 +406,7 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 - **akshare 限频/稳定性**：东财免费接口有访问频率限制，大批量可能偶发失败 → 该条 `insufficient_data`/error 计数，不拖垮整批（best-effort）。
 - **仅个股**：港股指数（恒指等）无 operation_advice、非回测候选；ETF / REIT 代码作 best-effort，未单独验证。
 - **复权基准漂移**：入场价取库内日线收盘，分钟 bar 按 `qfq` 即时拉取，复权锚点可能不同步（同 §10.5），窗口短/无公司行动时可忽略。
-- **band 在线核验 deferred**：链路B 港股 5m/15m=60 天、1h=730 天保守值暂未在线验证（见 [§12.3](#123-可用-band链路b-信号可信度)）。
+- **band 已通过真网核验（2026-06-30）**：yfinance 5m/15m 上限 60 天被硬拒（59 天 OK），1h 上限 730 天被硬拒（729 天 OK）；band 已收敛为 58/725（留 1–2 天余量），见 [§12.3](#123-可用-band链路b-信号可信度)。
 
 ---
 

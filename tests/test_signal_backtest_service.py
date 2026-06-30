@@ -255,9 +255,9 @@ from datetime import date as _date, timedelta as _td
 
 def test_minute_fetch_days_band_clamp():
     # us 夹 yfinance band；cn 保守夹取；crypto 走基线（字节级不变）
-    assert sbs._minute_fetch_days(market="us", interval="5m") == 60
-    assert sbs._minute_fetch_days(market="us", interval="15m") == 60
-    assert sbs._minute_fetch_days(market="us", interval="1h") == 730
+    assert sbs._minute_fetch_days(market="us", interval="5m") == 58  # yfinance 严格 last-N-天内; 60 被硬拒(真网核验)，留余量
+    assert sbs._minute_fetch_days(market="us", interval="15m") == 58  # 同上
+    assert sbs._minute_fetch_days(market="us", interval="1h") == 725  # yfinance 1h 上限 730 被硬拒(真网核验)，留余量
     assert sbs._minute_fetch_days(market="us", interval="1m") == 7
     assert sbs._minute_fetch_days(market="cn", interval="1m") == 30
     assert sbs._minute_fetch_days(market="cn", interval="5m") == 90
@@ -265,10 +265,10 @@ def test_minute_fetch_days_band_clamp():
     assert sbs._minute_fetch_days(market="cn", interval="1h") == 730
     assert sbs._minute_fetch_days(market="crypto", interval="5m") == 365
     assert sbs._minute_fetch_days(market="crypto", interval="1h") == 730
-    # hk 已入 band 表(yfinance 上限保守):5m/15m→60、1h→730;1m 无键回退基线 365(fetch 层 fail-closed)
-    assert sbs._minute_fetch_days(market="hk", interval="5m") == 60
-    assert sbs._minute_fetch_days(market="hk", interval="15m") == 60
-    assert sbs._minute_fetch_days(market="hk", interval="1h") == 730
+    # hk 已入 band 表(yfinance 严格 last-N-天内; 60/730 被硬拒真网核验，留余量):5m/15m→58、1h→725;1m 无键回退基线 365(fetch 层 fail-closed)
+    assert sbs._minute_fetch_days(market="hk", interval="5m") == 58  # yfinance 上限 60 被硬拒(真网核验)，留余量
+    assert sbs._minute_fetch_days(market="hk", interval="15m") == 58  # 同上
+    assert sbs._minute_fetch_days(market="hk", interval="1h") == 725  # yfinance 上限 730 被硬拒(真网核验)，留余量
     assert sbs._minute_fetch_days(market="hk", interval="1m") == 365
 
 
@@ -279,8 +279,8 @@ def test_minute_fetch_start_date_crypto_is_none():
 
 def test_minute_fetch_start_date_non_crypto_anchored():
     today = _date(2026, 6, 26)
-    assert sbs._minute_fetch_start_date(market="us", interval="5m", today=today) == (today - _td(days=60)).isoformat()
-    assert sbs._minute_fetch_start_date(market="us", interval="1h", today=today) == (today - _td(days=730)).isoformat()
+    assert sbs._minute_fetch_start_date(market="us", interval="5m", today=today) == (today - _td(days=58)).isoformat()  # yfinance 60 被硬拒，余量 58
+    assert sbs._minute_fetch_start_date(market="us", interval="1h", today=today) == (today - _td(days=725)).isoformat()  # yfinance 730 被硬拒，余量 725
     assert sbs._minute_fetch_start_date(market="cn", interval="5m", today=today) == (today - _td(days=90)).isoformat()
     assert sbs._minute_fetch_start_date(market="cn", interval="1m", today=today) == (today - _td(days=30)).isoformat()
 
@@ -306,7 +306,7 @@ def test_load_bars_passes_market_aware_start_date(monkeypatch):
     assert captured["start_date"] is None and captured["days"] == 365  # 字节级不变
 
     svc._load_bars(None, "AAPL", "5m", "us")
-    assert captured["start_date"] == (FIXED - _td(days=60)).isoformat() and captured["days"] == 60
+    assert captured["start_date"] == (FIXED - _td(days=58)).isoformat() and captured["days"] == 58  # yfinance 60 被硬拒，余量 58
 
     svc._load_bars(None, "600519", "5m", "cn")
     assert captured["start_date"] == (FIXED - _td(days=90)).isoformat() and captured["days"] == 90
