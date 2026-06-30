@@ -1520,8 +1520,8 @@ class DataFetcherManager:
           避免对 Efinance/Pytdx/Baostock 等纯日线源做无谓调用。
         - cn 显式把 Tushare 主源排到 akshare 兜底之前；无 token 的 Tushare 已被
           capability="intraday_data" 的可用性探测剔除（is_available()→False）。
-        - yfinance 日线虽支持 cn/hk/us，但其分钟仅服务 us；故非 us 市场显式排除
-          YfinanceFetcher，A股分钟仍只走 Tushare/akshare，us 收敛为 yfinance 单源。
+        - yfinance 日线支持 cn/hk/us，其分钟服务 us 与 hk；故非 (us, hk) 市场显式排除
+          YfinanceFetcher，A股分钟仍只走 Tushare/akshare，us/hk 均可回落至 yfinance。
         """
         if is_perp_code(code):
             market = "crypto_perp"
@@ -1568,7 +1568,7 @@ class DataFetcherManager:
         """获取分钟级 K 线数据（crypto/crypto_perp、A股沪深/北交、美股个股）。
 
         路由策略：
-        - 非 crypto / 非 A股 / 非美股个股 代码直接抛 DataFetchError。
+        - 非 crypto / 非 A股 / 非港股 / 非美股个股 代码直接抛 DataFetchError。
         - 经 _intraday_fetchers_for 按市场 + capability="intraday_data" 过滤并排序
           （cn 时 Tushare 主源优先、akshare 兜底；us 仅 yfinance）。
         - 依次尝试各 fetcher，返回首个非空结果 (df, fetcher_name)。
@@ -1578,7 +1578,7 @@ class DataFetcherManager:
             Tuple[DataFrame, str]: (纯 OHLCV+datetime 的 DataFrame，成功的 fetcher 名称)
 
         Raises:
-            DataFetchError: 非 crypto / 非 A股 / 非美股 代码或所有 fetcher 均失败时抛出。
+            DataFetchError: 非 crypto / 非 A股 / 非港股 / 非美股 代码或所有 fetcher 均失败时抛出。
         """
         stock_code = normalize_stock_code(stock_code)
 

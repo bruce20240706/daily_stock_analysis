@@ -53,6 +53,14 @@ def test_akshare_hk_intraday_1m_fail_closed():
         AkshareFetcher().get_intraday_data("HK00700", "1m")
 
 
+def test_akshare_hk_intraday_1m_independent_guard(monkeypatch):
+    """验证 HK 独立守卫:即使 _AK_PERIOD 含 '1m'(A股将来入表),HK 路径仍 fail-closed。"""
+    import data_provider.akshare_fetcher as af_mod
+    monkeypatch.setitem(af_mod._AK_PERIOD, "1m", "1")
+    with pytest.raises(NotImplementedError, match="港股 1m 不支持"):
+        AkshareFetcher().get_intraday_data("HK00700", "1m")
+
+
 def test_intraday_fetchers_for_hk_whitelist():
     from data_provider.base import DataFetcherManager
     mgr = DataFetcherManager()
