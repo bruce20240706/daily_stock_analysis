@@ -141,3 +141,28 @@ def test_bars_per_day_hk_market():
 
 def test_derive_window_bar_count_hk():
     assert derive_window_bar_count(10, "5m", "hk") == 660   # 10*66
+
+
+def test_apply_round_trip_cost_both_side_doubles():
+    # both_side 10bp 买卖各一次 → 2*10/100 = 0.20
+    assert apply_round_trip_cost(10.0, 0.0, 0.0, both_side_bps=10.0) == pytest.approx(9.80)
+
+
+def test_apply_round_trip_cost_both_side_with_sell_side():
+    # both_side ×2 + sell_side ×1 叠加:2*10/100 + 1*5/100 = 0.25
+    assert apply_round_trip_cost(10.0, 0.0, 0.0, sell_side_bps=5.0, both_side_bps=10.0) == pytest.approx(9.75)
+
+
+def test_apply_round_trip_cost_both_side_with_fee_slip():
+    # both_side 与 fee/slip 同入 ×2 桶:2*(2+3+10)/100 = 0.30
+    assert apply_round_trip_cost(10.0, 2.0, 3.0, both_side_bps=10.0) == pytest.approx(9.70)
+
+
+def test_apply_round_trip_cost_both_side_default_byte_identical():
+    # 不传 both_side_bps:全 0 走早退守卫,字节级不变
+    assert apply_round_trip_cost(10.0, 0.0, 0.0) == pytest.approx(10.0)
+    assert apply_round_trip_cost(7.7, 2.0, 3.0) == pytest.approx(7.6)
+
+
+def test_apply_round_trip_cost_both_side_none_passthrough():
+    assert apply_round_trip_cost(None, 0.0, 0.0, both_side_bps=10.0) is None

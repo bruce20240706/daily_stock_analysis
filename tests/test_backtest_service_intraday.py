@@ -457,6 +457,7 @@ def _make_intraday_svc_with_engine_return(
     monkeypatch, tmp_path, engine_return_pct: float,
     fee_bps: float = 0.0, slippage_bps: float = 0.0,
     *, code: str = "BTC/USDT:PERP", position: str = "long", stamp_bps: float = 0.0,
+    hk_stamp_bps: float = 0.0,
 ):
     """Helper shared by Task-6 cost tests.
 
@@ -485,6 +486,7 @@ def _make_intraday_svc_with_engine_return(
     monkeypatch.setattr(real_cfg, "crypto_intraday_backtest_fee_bps", fee_bps)
     monkeypatch.setattr(real_cfg, "crypto_intraday_backtest_slippage_bps", slippage_bps)
     monkeypatch.setattr(real_cfg, "ashare_intraday_backtest_stamp_duty_bps", stamp_bps)
+    monkeypatch.setattr(real_cfg, "hk_intraday_backtest_stamp_duty_bps", hk_stamp_bps)
 
     candidate = _fake_analysis(code=code, analysis_id=101)
     analysis_date = date(2026, 5, 1)
@@ -612,6 +614,44 @@ def test_stamp_duty_gate(monkeypatch, tmp_path, label, code, position, engine_re
         monkeypatch, tmp_path, engine_return_pct=engine_return,
         fee_bps=fee_bps, slippage_bps=slip_bps,
         code=code, position=position, stamp_bps=stamp_bps,
+    )
+    out = svc.run_backtest(interval="5m", eval_window_days=1)
+    assert out["completed"] == 1, f"{label}: expected completed=1, got {out}"
+    assert len(saved_results) == 1, f"{label}: expected 1 saved, got {len(saved_results)}"
+    r = saved_results[0]
+    assert r.simulated_return_pct == pytest.approx(expected), (
+        f"{label}: expected simulated_return_pct≈{expected}, got {r.simulated_return_pct}"
+    )
+
+
+@pytest.mark.parametrize(
+    "label,code,position,engine_return,hk_stamp_bps,ashare_stamp_bps,fee_bps,slip_bps,expected",
+    [
+        # HK1 hk + long:买卖双边各 10bp → 2*10/100 = 0.20 → 10.0 - 0.20
+        ("HK1_hk_long",       "HK00700", "long", 10.0, 10.0, 0.0, 0.0, 0.0, 9.80),
+        # HK2 hk + cash:无成交,entry None → 门控挡掉,原值不变
+        ("HK2_hk_cash",       "HK00700", "cash",  0.0, 10.0, 0.0, 0.0, 0.0, 0.0),
+        # HK3 hk + long + 三项叠加:both 入 ×2 桶 → 2*(2+3+10)/100 = 0.30 → 10.0 - 0.30
+        ("HK3_hk_long_3way",  "HK00700", "long", 10.0, 10.0, 0.0, 2.0, 3.0, 9.70),
+        # HK4 hk + long + hk_stamp=0:全 0 → 后处理早退,字节级不变
+        ("HK4_hk_long_zero",  "HK00700", "long", 10.0,  0.0, 0.0, 0.0, 0.0, 10.0),
+        # HK5(反例) cn + long + hk_stamp=10(ashare=0):cn 走 if 分支不取 hk → 不计征
+        ("HK5_cn_long",       "600519",  "long", 10.0, 10.0, 0.0, 0.0, 0.0, 10.0),
+        # HK6(反例) us + long + hk_stamp=10:market!=hk(也!=cn)→ 不计征
+        ("HK6_us_long",       "AAPL",    "long", 10.0, 10.0, 0.0, 0.0, 0.0, 10.0),
+        # HK7(反例) crypto + long + hk_stamp=10:market!=hk → 不计征
+        ("HK7_crypto_long",   "BTC/USDT:PERP", "long", 10.0, 10.0, 0.0, 0.0, 0.0, 10.0),
+        # HK8(双 knob 不串)cn + long + ashare=5 + hk=10:cn 走 if 仅取 ashare 单边(0.05),
+        # 不取 hk(elif 未触发)→ 9.95(证 cn 不漏取 hk,且双计结构不可能)
+        ("HK8_cn_both_no_leak", "600519",      "long", 10.0, 10.0, 5.0, 0.0, 0.0, 9.95),
+    ],
+)
+def test_hk_stamp_duty_gate(monkeypatch, tmp_path, label, code, position, engine_return, hk_stamp_bps, ashare_stamp_bps, fee_bps, slip_bps, expected):
+    """港股双边印花税后处理门控:仅 hk+确有成交计双边税(×2);cn/us/crypto/cash 不征;默认 0 字节不变。"""
+    svc, saved_results = _make_intraday_svc_with_engine_return(
+        monkeypatch, tmp_path, engine_return_pct=engine_return,
+        fee_bps=fee_bps, slippage_bps=slip_bps,
+        code=code, position=position, stamp_bps=ashare_stamp_bps, hk_stamp_bps=hk_stamp_bps,
     )
     out = svc.run_backtest(interval="5m", eval_window_days=1)
     assert out["completed"] == 1, f"{label}: expected completed=1, got {out}"

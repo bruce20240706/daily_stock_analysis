@@ -103,13 +103,18 @@ CRYPTO_INTRADAY_BACKTEST_FEE_BPS=5
 CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS=2
 ```
 
-成本后处理公式（手续费/滑点对称双边，印花税单边）：
+成本后处理公式（手续费/滑点及港股印花税对称双边，A股印花税卖出单边）：
 
 ```
-net_return = gross_return − 2 × (fee_bps + slippage_bps) / 100 − 1 × stamp_duty_bps / 100
+net_return = gross_return
+           − 2 × (fee_bps + slippage_bps + hk_stamp_bps) / 100   # 对称双边(含港股印花税)
+           − 1 × ashare_stamp_bps / 100                          # A股卖出单边
 ```
+（公式中 `hk_stamp_bps` / `ashare_stamp_bps` 为按税种命名的可读量,对应代码 `apply_round_trip_cost` 的参数 `both_side_bps` / `sell_side_bps`。）
 
 **A股卖出印花税（单边，opt-in）：** A股现行印花税为**卖出单边 5bps（0.05%）**。设 `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS=5` 后，仅 A股盘中回测的多头(long)出场会额外扣一次卖出税；crypto/美股/cash/日线一律不征。注意 `fee/slippage` 是跨市场共享的对称佣金分量（默认 0），A股真实总成本需**同时**设 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS/SLIPPAGE_BPS`。该 knob 也可在 Web 设置页 Backtest 分类直接调整。
+
+**港股双边印花税（opt-in）：** HK 现行印花税为**买卖双边各 10bps（0.1%）**。设 `HK_INTRADAY_BACKTEST_STAMP_DUTY_BPS=10` 后，仅港股盘中回测的**成交**标的按买卖双边各计一次（×2）；crypto/A股/美股/cash/日线一律不征。区别于 A股单边。佣金/滑点仍走跨市场共享 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS/SLIPPAGE_BPS`（默认 0）。该 knob 也可在 Web 设置页 Backtest 分类调整。
 
 **成本仅对确有成交计征**：cash 仓（无买卖成交）不扣 fee/slippage/印花税；仅 long 与 perp short（确有成交）计 round-trip 成本。
 
@@ -402,7 +407,7 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 ### 12.5 限制
 
 - **1m fail-closed**：港股 1m 数据源限制，不可得（见 [§12.1](#121-数据源akshare-东财主--yfinance-兜底)）。
-- **成本暂走跨市场 fee/slip（默认 0）**：HK 双边印花税（买卖各约 0.1%，另有印花税征费）尚未单独建模，另立 follow-up；现行默认 0；可通过 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS` / `CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS` 近似配置。
+- **港股双边印花税（opt-in，默认 0）**：港股印花税买卖双边各 10bps，通过 `HK_INTRADAY_BACKTEST_STAMP_DUTY_BPS` 配置（默认 0；设为 10 后按 ×2 双边扣除）；门控 `market==hk` + 确有成交（cash 豁免；成交即征、不限 long——区别于 A股 long-only;HK 在链路A 实际仅 long/cash 可达,故今日等同 long-only,entry-based 门控为前向兼容），cn/us/crypto/日线不征。佣金/滑点仍走跨市场共享 `CRYPTO_INTRADAY_BACKTEST_FEE_BPS/SLIPPAGE_BPS`（默认 0）。`持有/hold` 建议在回测中映射为 long 且按 `entry@start` 全 round-trip 建模，故 both-side 印花税会对 hold 也计买腿——与 A股 knob 同源（A股已对 hold→long 计卖腿），HK 仅幅度翻倍 ×2；此为回测既有约定，非本特性新增。
 - **akshare 限频/稳定性**：东财免费接口有访问频率限制，大批量可能偶发失败 → 该条 `insufficient_data`/error 计数，不拖垮整批（best-effort）。
 - **仅个股**：港股指数（恒指等）无 operation_advice、非回测候选；ETF / REIT 代码作 best-effort，未单独验证。
 - **复权基准漂移**：入场价取库内日线收盘，分钟 bar 按 `qfq` 即时拉取，复权锚点可能不同步（同 §10.5），窗口短/无公司行动时可忽略。
@@ -419,10 +424,11 @@ API / Web 用法同 [§8.2](#82-api) / [§8.3](#83-web-回测页)，`interval` �
 | `CRYPTO_INTRADAY_BACKTEST_FEE_BPS` | `0` | 单边手续费（基点，默认 0 理想化） |
 | `CRYPTO_INTRADAY_BACKTEST_SLIPPAGE_BPS` | `0` | 单边滑点（基点，默认 0 理想化） |
 | `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS` | `0` | A股卖出单边印花税（基点，默认 0；现行 5；仅 cn+long） |
+| `HK_INTRADAY_BACKTEST_STAMP_DUTY_BPS` | `0` | 港股买卖双边印花税（基点，默认 0；现行 10；仅 hk+成交，×2） |
 | `INTRADAY_BACKTEST_ENABLED` | `false` | 是否启用后台定时任务 |
 | `INTRADAY_BACKTEST_SCHEDULE_MINUTES` | `60` | 后台调度间隔（分钟） |
 
-所有配置项均有合理默认值，**不配置即可运行**，现有行为不变。A 股分钟回测复用 `TUSHARE_TOKEN` 与上述 intraday 配置；A股卖出印花税为可选追加项 `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS`（默认 0，不配置即字节级现状）。
+所有配置项均有合理默认值，**不配置即可运行**，现有行为不变。A 股分钟回测复用 `TUSHARE_TOKEN` 与上述 intraday 配置；A股卖出印花税为可选追加项 `ASHARE_INTRADAY_BACKTEST_STAMP_DUTY_BPS`（默认 0，不配置即字节级现状）；港股双边印花税为可选追加项 `HK_INTRADAY_BACKTEST_STAMP_DUTY_BPS`（opt-in 默认 0，不配置即字节级现状）。
 
 ---
 
