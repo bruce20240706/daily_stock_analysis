@@ -409,7 +409,10 @@ class BaseFetcher(ABC):
     
     name: str = "BaseFetcher"
     priority: int = 99  # 优先级数字越小越优先
-    
+    # 该源 get_intraday_data 服务的市场集合(空=不提供分钟数据);与 _DAILY_MARKET_FETCHER_SUPPORT
+    # (日线)相互独立、互不派生。门面 _intraday_fetchers_for 按 market in getattr(f, "intraday_markets", ...) 路由。
+    intraday_markets: frozenset = frozenset()
+
     @abstractmethod
     def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
@@ -1516,12 +1519,11 @@ class DataFetcherManager:
         """返回某代码可用的分钟数据源（已按市场/能力过滤并排序）。
 
         - market 由代码判定：crypto_perp / crypto / cn / us / hk；其余返回空列表（由调用方拒绝）。
-        - 剔除未覆写 get_intraday_data 的源（BaseFetcher 默认抛 NotImplementedError），
-          避免对 Efinance/Pytdx/Baostock 等纯日线源做无谓调用。
+        - 按各源 `intraday_markets` 声明路由：只保留声明支持该 market 的源（BaseFetcher 默认
+          空集，纯日线源如 Efinance/Pytdx/Baostock 天然被排除，无需逐一探测）。
         - cn 显式把 Tushare 主源排到 akshare 兜底之前；无 token 的 Tushare 已被
           capability="intraday_data" 的可用性探测剔除（is_available()→False）。
-        - yfinance 日线支持 cn/hk/us，其分钟服务 us 与 hk；故非 (us, hk) 市场显式排除
-          YfinanceFetcher，A股分钟仍只走 Tushare/akshare，us/hk 均可回落至 yfinance。
+        - hk 白名单已由声明收敛（仅 Akshare/Yfinance 声明 hk），排序表保留次序。
         """
         if is_perp_code(code):
             market = "crypto_perp"
@@ -1537,21 +1539,13 @@ class DataFetcherManager:
             return []
 
         fetchers = self._get_fetchers_snapshot()
-        fetchers = self._filter_daily_fetchers_for_market(fetchers, market)
+        # 声明式过滤,替换 日线派生+stub 探测+补丁①②。用 getattr 容错(与既有探针一致):
+        # 无 intraday_markets 的 duck-typed 注入源回退空集 → 优雅排除,不抛 AttributeError。
+        fetchers = [f for f in fetchers if market in getattr(f, "intraday_markets", frozenset())]
         fetchers = self._filter_fetchers_by_capability(fetchers, capability="intraday_data")
-        fetchers = [
-            f for f in fetchers
-            if type(f).get_intraday_data is not BaseFetcher.get_intraday_data
-        ]
-        # yfinance 日线支持 cn/hk/us;其分钟数据服务美股与港股(A股分钟走 Tushare/akshare);
-        # 非 (us, hk) 市场排除 yfinance,避免其漏入 A股分钟路径改变既有契约。
-        if market not in ("us", "hk"):
-            fetchers = [f for f in fetchers if f.name != "YfinanceFetcher"]
         if market == "hk":
-            # HK 分钟仅 akshare(东财) + yfinance;Tushare stk_mins 仅 A股(日线表含 hk 会漏入)
             _hk_order = {"AkshareFetcher": 0, "YfinanceFetcher": 1}
-            fetchers = [f for f in fetchers if f.name in _hk_order]
-            fetchers.sort(key=lambda f: _hk_order[f.name])
+            fetchers.sort(key=lambda f: _hk_order.get(f.name, 2))
         if market == "cn":
             _cn_order = {"TushareFetcher": 0, "AkshareFetcher": 1}
             fetchers.sort(key=lambda f: _cn_order.get(f.name, 2))

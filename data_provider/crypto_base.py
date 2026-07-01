@@ -21,6 +21,7 @@ class CryptoExchangeBase(BaseFetcher):
     name = "CryptoExchangeBase"
     priority = 50
     timeout = 10
+    intraday_markets = frozenset({"crypto"})
     MAX_LIMIT = 1000  # 子类可覆盖（OKX 基础接口为 100）
 
     # ---- 子类需实现的钩子 ----
