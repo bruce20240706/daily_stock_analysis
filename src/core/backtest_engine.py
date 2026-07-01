@@ -432,6 +432,7 @@ class BacktestEngine:
 
         advice_breakdown = cls._compute_advice_breakdown(completed)
         diagnostics = cls._compute_diagnostics(results_list)
+        diagnostics["risk_metrics"] = cls._compute_risk_metrics(completed)
 
         return {
             "scope": scope,

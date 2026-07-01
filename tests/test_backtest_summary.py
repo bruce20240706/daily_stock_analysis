@@ -48,6 +48,26 @@ class BacktestSummaryTestCase(unittest.TestCase):
         self.assertEqual(summary["ambiguous_rate"], 0.0)
 
 
+class RiskMetricsWiringTestCase(unittest.TestCase):
+    def test_compute_summary_emits_risk_metrics_and_preserves_existing(self) -> None:
+        rows = [
+            FakeRow(simulated_return_pct=2.0, position_recommendation="long"),
+            FakeRow(simulated_return_pct=-1.0, position_recommendation="long"),
+            FakeRow(simulated_return_pct=0.0, position_recommendation="cash"),  # 应被风险指标排除
+        ]
+        summary = BacktestEngine.compute_summary(
+            results=rows, scope="overall", code="__OVERALL__",
+            eval_window_days=3, engine_version="v1",
+        )
+        rm = summary["diagnostics"]["risk_metrics"]
+        self.assertEqual(rm["sample"], 2)                      # cash 不计
+        self.assertEqual(rm["mean_return_pct"], 0.5)           # (2 + -1)/2
+        self.assertIn("sharpe", rm)
+        self.assertIn("max_drawdown_pct", rm)
+        # 既有字段不回归:cash 仍计入 avg / 既有 diagnostics 键仍在
+        self.assertIsNotNone(summary["avg_simulated_return_pct"])
+        self.assertIn("eval_status", summary["diagnostics"])
+
+
 if __name__ == "__main__":
     unittest.main()
-
