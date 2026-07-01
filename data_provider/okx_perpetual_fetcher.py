@@ -12,6 +12,7 @@ from .okx_fetcher import OkxFetcher
 class OkxPerpetualFetcher(OkxFetcher):
     name = "OkxPerpetualFetcher"
     priority = int(os.getenv("OKX_PERPETUAL_PRIORITY", "55"))
+    intraday_markets = frozenset({"crypto_perp"})
 
     def _to_exchange_symbol(self, code: str) -> str:
         base, quote = parse_perp_code(code)

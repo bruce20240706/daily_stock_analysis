@@ -37,3 +37,38 @@ def test_intraday_routing_no_cross_market_leak():
     hk = [f.name for f in mgr._intraday_fetchers_for("HK00700")]
     assert "YfinanceFetcher" not in cn      # 补丁①:yfinance 日线支持 cn,但分钟不入 cn
     assert "TushareFetcher" not in hk       # 补丁②:Tushare 日线支持 hk,但分钟不入 hk
+
+
+from data_provider.base import BaseFetcher
+from data_provider.binance_fetcher import BinanceFetcher
+from data_provider.okx_fetcher import OkxFetcher
+from data_provider.coinbase_fetcher import CoinbaseFetcher
+from data_provider.okx_perpetual_fetcher import OkxPerpetualFetcher
+from data_provider.tushare_fetcher import TushareFetcher
+from data_provider.akshare_fetcher import AkshareFetcher
+from data_provider.yfinance_fetcher import YfinanceFetcher
+
+
+def test_base_fetcher_intraday_markets_empty_by_default():
+    # 纯日线源(Efinance/Pytdx/Baostock/Longbridge/Finnhub/AlphaVantage)继承此空集 → 不入任何分钟路由
+    # (纯日线源被排除已由 Task 1 golden 的 cn=[Akshare]/hk=[Akshare,Yfinance] 间接锁定)
+    assert BaseFetcher.intraday_markets == frozenset()
+
+
+@pytest.mark.parametrize("cls,expected", [
+    (BinanceFetcher, frozenset({"crypto"})),
+    (OkxFetcher, frozenset({"crypto"})),
+    (CoinbaseFetcher, frozenset({"crypto"})),
+    (OkxPerpetualFetcher, frozenset({"crypto_perp"})),
+    (TushareFetcher, frozenset({"cn"})),
+    (AkshareFetcher, frozenset({"cn", "hk"})),
+    (YfinanceFetcher, frozenset({"us", "hk"})),
+])
+def test_fetcher_declares_intraday_markets(cls, expected):
+    assert cls.intraday_markets == expected
+
+
+def test_okx_perpetual_overrides_not_inherits_crypto():
+    # OkxPerpetualFetcher(OkxFetcher(CryptoExchangeBase)):漏覆写会经 MRO 继承 {crypto}
+    assert OkxPerpetualFetcher.intraday_markets == frozenset({"crypto_perp"})
+    assert "crypto" not in OkxPerpetualFetcher.intraday_markets

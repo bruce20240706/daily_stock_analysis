@@ -409,7 +409,10 @@ class BaseFetcher(ABC):
     
     name: str = "BaseFetcher"
     priority: int = 99  # 优先级数字越小越优先
-    
+    # 该源 get_intraday_data 服务的市场集合(空=不提供分钟数据);与 _DAILY_MARKET_FETCHER_SUPPORT
+    # (日线)相互独立、互不派生。门面 _intraday_fetchers_for 按 market in getattr(f, "intraday_markets", ...) 路由。
+    intraday_markets: frozenset = frozenset()
+
     @abstractmethod
     def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """

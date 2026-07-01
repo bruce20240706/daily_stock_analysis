@@ -80,6 +80,7 @@ class YfinanceFetcher(BaseFetcher):
 
     name = "YfinanceFetcher"
     priority = int(os.getenv("YFINANCE_PRIORITY", "4"))
+    intraday_markets = frozenset({"us", "hk"})
 
     def __init__(self):
         """初始化 YfinanceFetcher"""
