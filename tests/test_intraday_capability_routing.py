@@ -72,3 +72,52 @@ def test_okx_perpetual_overrides_not_inherits_crypto():
     # OkxPerpetualFetcher(OkxFetcher(CryptoExchangeBase)):漏覆写会经 MRO 继承 {crypto}
     assert OkxPerpetualFetcher.intraday_markets == frozenset({"crypto_perp"})
     assert "crypto" not in OkxPerpetualFetcher.intraday_markets
+
+
+def test_intraday_routing_respects_runtime_availability():
+    # 声明过滤之后仍跑 capability 可用性探测:无 token Tushare(is_available→False)从 cn 剔除,只剩 Akshare
+    class _Stub:
+        def __init__(self, name, im, avail):
+            self.name = name
+            self.priority = 0
+            self.intraday_markets = im
+            self._avail = avail
+
+        def is_available(self):
+            return self._avail
+
+        def get_intraday_data(self, *a, **k):
+            return None
+
+    ts = _Stub("TushareFetcher", frozenset({"cn"}), False)
+    ak = _Stub("AkshareFetcher", frozenset({"cn", "hk"}), True)
+    mgr = DataFetcherManager(fetchers=[ts, ak])
+    assert [f.name for f in mgr._intraday_fetchers_for("600519")] == ["AkshareFetcher"]
+
+
+def test_intraday_routing_tolerates_and_requires_declaration():
+    # 契约细化:无 intraday_markets 的 duck-typed 源 → getattr 回退空集 → 优雅排除、不抛 AttributeError;
+    # 声明后即被纳入(证路由确按 intraday_markets 而非日线派生)。
+    class _NoAttr:            # 无 intraday_markets、非 BaseFetcher 子类、名字不在日线表
+        name = "NoAttrSrc"
+        priority = 0
+
+        def is_available(self):
+            return True
+
+        def get_intraday_data(self, *a, **k):
+            return None
+
+    class _Declared:          # 声明 crypto,但名字同样不在日线表 —— 旧「日线派生」路由不会收它
+        name = "DeclaredSrc"
+        priority = 0
+        intraday_markets = frozenset({"crypto"})
+
+        def is_available(self):
+            return True
+
+        def get_intraday_data(self, *a, **k):
+            return None
+
+    assert DataFetcherManager(fetchers=[_NoAttr()])._intraday_fetchers_for("BTC/USDT") == []
+    assert [f.name for f in DataFetcherManager(fetchers=[_Declared()])._intraday_fetchers_for("BTC/USDT")] == ["DeclaredSrc"]
