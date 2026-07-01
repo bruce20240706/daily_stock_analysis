@@ -310,3 +310,46 @@ def test_load_bars_passes_market_aware_start_date(monkeypatch):
 
     svc._load_bars(None, "600519", "5m", "cn")
     assert captured["start_date"] == (FIXED - _td(days=90)).isoformat() and captured["days"] == 90
+
+
+def test_run_interval_5m_passthrough_uses_for_market_interval(monkeypatch):
+    """链路B 分钟回测必须用 for_market_interval(market, interval) 选 config：
+    设 VPS_BREAKOUT_WINDOW_5M=9 时，evaluate_* 收到的 config.breakout_window 必须 == 9。
+    若回退为 for_market(market)（无 interval 维度），该断言失败。
+    I3：patch _load_bars 返回 >= _MIN_BARS(50) 行的分钟 df，确保触达 :157/:158 捕获点。
+    """
+    monkeypatch.setenv("VPS_BREAKOUT_WINDOW_5M", "9")
+    captured: list = []
+
+    def spy_eval_sig(df, *, market, horizon, config=None, **kw):
+        captured.append(("sig", market, config))
+        return []
+
+    def spy_eval_base(df, *, market, horizon, config=None, **kw):
+        return []
+
+    with patch(
+        "src.services.signal_backtest_service._read_watchlist_codes",
+        return_value=["600519"],
+    ), patch(
+        "src.services.signal_backtest_service.StockService"
+    ), patch(
+        "src.services.signal_backtest_service.get_market_for_stock",
+        return_value="cn",
+    ), patch.object(
+        sbs.SignalBacktestService, "_load_bars", return_value=_minute_df(120),
+    ), patch(
+        "src.services.signal_backtest_service.evaluate_signal_outcomes",
+        side_effect=spy_eval_sig,
+    ), patch(
+        "src.services.signal_backtest_service.evaluate_baseline_outcomes",
+        side_effect=spy_eval_base,
+    ), patch(
+        "src.services.signal_backtest_service.SignalStatsRepository"
+    ) as Repo:
+        Repo.return_value.save_batch.return_value = 0
+        sbs.SignalBacktestService().run(horizon=10, interval="5m")
+
+    cn_sig = next(c for c in captured if c[0] == "sig" and c[1] == "cn")
+    assert cn_sig[2] is not None
+    assert cn_sig[2].breakout_window == 9

@@ -1125,3 +1125,31 @@ def test_chart_path_renders_near_boundary_upthrust():
     res = compute_volume_price_signals(df, config=cfg)
     types = {m.signal_type for m in res.markers}
     assert "upthrust" in types   # 路径1 全 df 仍渲染(若被就地改成 center+k<=i 则消失 → 本测试守护)
+
+
+def test_breakout_reason_uses_bars_not_days():
+    # 主路径(:856)：文案泛化为「根」，不再硬编码「日」
+    pad = [_bar(100, 100.0, 99.0, 100, 1000) for _ in range(30)]
+    breakout = _bar(100, 110.0, 99.0, 100.0, 5000)
+    df = _make_df(pad + [breakout])
+    res = compute_volume_price_signals(df, config=VPSConfig(breakout_window=20, breakout_rel_vol=2.0))
+    bks = [m for m in res.markers if m.signal_type == "volume_breakout"]
+    assert len(bks) == 1
+    assert "根高点" in bks[0].reason
+    assert "日高点" not in bks[0].reason
+
+
+def test_breakout_rows_reason_uses_bars_not_days():
+    # 向量化孪生(:1418)：同样泛化（虽 compute_signals_for_all_bars 丢弃 reason，仍保持一致）
+    from src.services.volume_price_signals import (
+        _normalize, _compute_primitives, _detect_breakouts_rows)
+    pad = [_bar(100, 100.0, 99.0, 100, 1000) for _ in range(30)]
+    breakout = _bar(100, 110.0, 99.0, 100.0, 5000)
+    df = _make_df(pad + [breakout])
+    cfg = VPSConfig(breakout_window=20, breakout_rel_vol=2.0)
+    norm, _ = _normalize(df, cfg)
+    prim = _compute_primitives(norm, cfg)
+    bks = [s for _, s in _detect_breakouts_rows(prim, cfg) if s.signal_type == "volume_breakout"]
+    assert len(bks) == 1
+    assert "根高点" in bks[0].reason
+    assert "日高点" not in bks[0].reason

@@ -25,6 +25,14 @@ from src.services.alert_indicators import normalize_ohlcv
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
 
+# for_market_interval 可按 interval 覆盖的窗口字段 → minimum 下限（与 from_env 一致）
+_INTERVAL_OVERRIDE_FIELDS: dict[str, float] = {
+    "vol_ma_window": 5.0,
+    "breakout_window": 2.0,
+    "atr_period": 2.0,
+    "swing_k": 1.0,
+}
+
 
 @dataclass(frozen=True)
 class VPSConfig:
@@ -85,6 +93,35 @@ class VPSConfig:
                 breakout_rel_vol=base.crypto_breakout_rel_vol,
             )
         return base
+
+    @classmethod
+    def for_market_interval(cls, market: str | None, interval: str | None) -> "VPSConfig":
+        """返回适合 (market, interval) 的 VPSConfig。
+
+        在 for_market(market)（含 crypto 旁路）之上，对受支持的分钟 interval 叠加窗口阈值
+        覆盖：读 VPS_<FIELD>_<INTERVAL 大写> env（仅 4 个 window 字段），set 的才覆盖。
+        默认不配 / interval 为 '1d'/None/未知 → 原样返回 for_market(market)，日线与未配分钟
+        均字节级不变。优先级：interval 覆盖 > crypto 旁路 > 日线默认。
+        """
+        from src.core.intraday_backtest import is_intraday_interval
+
+        base = cls.for_market(market)
+        if not interval or not is_intraday_interval(interval):
+            return base
+        suffix = interval.upper()
+        overrides: dict = {}
+        for field_name, floor in _INTERVAL_OVERRIDE_FIELDS.items():
+            env_key = f"VPS_{field_name.upper()}_{suffix}"
+            raw = os.getenv(env_key)
+            if raw is None or not raw.strip():
+                continue
+            cur = getattr(base, field_name)
+            overrides[field_name] = int(parse_env_float(
+                raw, float(cur), field_name=env_key, minimum=floor))
+        if not overrides:
+            return base
+        import dataclasses
+        return dataclasses.replace(base, **overrides)
 
 
 @dataclass(frozen=True)
@@ -819,7 +856,7 @@ def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSign
 
 
 def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
-    """放量突破检测：close >= 过去 N 日 high 最大值（shift(1) 不含当日）且 rel_vol >= 阈值。
+    """放量突破检测：close >= 过去 N 根 high 最大值（shift(1) 不含当日）且 rel_vol >= 阈值。
 
     ATR 预计算优化：atr(prim, config.atr_period) 在循环外统一计算一次（O(n)），
     循环内通过 atr_series.iloc[i] 取当 bar 的 ATR 值。
@@ -853,7 +890,7 @@ def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
                 confidence="high",
                 is_daily_approx=True,
                 is_anomalous=False,
-                reason=f"放量突破近{config.breakout_window}日高点（不含当日）[量能形态:{vol_pattern}]",
+                reason=f"放量突破近{config.breakout_window}根高点（不含当日）[量能形态:{vol_pattern}]",
                 threshold=float(pm),
                 observed_value=float(rv),
             ))
@@ -1415,7 +1452,7 @@ def _detect_breakouts_rows(prim: pd.DataFrame, config: VPSConfig) -> list[tuple[
                 timestamp=_to_epoch_ms_shanghai(date_s.iloc[i]), price=float(close.iloc[i]),
                 anchor="close", direction="bullish", signal_type="volume_breakout", confidence="high",
                 is_daily_approx=True, is_anomalous=False,
-                reason=f"放量突破近{config.breakout_window}日高点（不含当日）[量能形态:{vp}]",
+                reason=f"放量突破近{config.breakout_window}根高点（不含当日）[量能形态:{vp}]",
                 threshold=float(pm), observed_value=float(rv))))
     return out
 
