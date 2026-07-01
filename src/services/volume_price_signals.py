@@ -856,7 +856,7 @@ def _detect_obv_divergence(prim: pd.DataFrame, config: VPSConfig) -> list[VPSign
 
 
 def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
-    """放量突破检测：close >= 过去 N 日 high 最大值（shift(1) 不含当日）且 rel_vol >= 阈值。
+    """放量突破检测：close >= 过去 N 根 high 最大值（shift(1) 不含当日）且 rel_vol >= 阈值。
 
     ATR 预计算优化：atr(prim, config.atr_period) 在循环外统一计算一次（O(n)），
     循环内通过 atr_series.iloc[i] 取当 bar 的 ATR 值。
@@ -890,7 +890,7 @@ def _detect_breakouts(prim: pd.DataFrame, config: VPSConfig) -> list[VPSignal]:
                 confidence="high",
                 is_daily_approx=True,
                 is_anomalous=False,
-                reason=f"放量突破近{config.breakout_window}日高点（不含当日）[量能形态:{vol_pattern}]",
+                reason=f"放量突破近{config.breakout_window}根高点（不含当日）[量能形态:{vol_pattern}]",
                 threshold=float(pm),
                 observed_value=float(rv),
             ))
@@ -1452,7 +1452,7 @@ def _detect_breakouts_rows(prim: pd.DataFrame, config: VPSConfig) -> list[tuple[
                 timestamp=_to_epoch_ms_shanghai(date_s.iloc[i]), price=float(close.iloc[i]),
                 anchor="close", direction="bullish", signal_type="volume_breakout", confidence="high",
                 is_daily_approx=True, is_anomalous=False,
-                reason=f"放量突破近{config.breakout_window}日高点（不含当日）[量能形态:{vp}]",
+                reason=f"放量突破近{config.breakout_window}根高点（不含当日）[量能形态:{vp}]",
                 threshold=float(pm), observed_value=float(rv))))
     return out
 
