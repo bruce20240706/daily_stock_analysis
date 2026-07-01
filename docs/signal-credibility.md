@@ -309,7 +309,7 @@ python main.py --signal-backtest --signal-backtest-interval 5m
 
 ### 11.5 限制
 
-- VPS 阈值为**日线调参**，分钟下直接复用属 best-effort，未单独为分钟标定（crypto 旁路阈值除外）。
+- 已提供 interval 维度**窗口**覆盖通道（`VPS_<窗口>_<interval>`，默认不配=复用日线值，仅 4 个 window 字段，见 `docs/volume-price-signals.md` §7.3）；具体分钟定值仍待真实数据标定（crypto 旁路阈值除外）。
 - 分钟批量取数受各源**限频**约束；自选池较大时分钟批作业耗时显著高于日线。
 - 美股 `1m`、A股 `1m`（无 Tushare token 时）按各自数据源限制 **fail-closed**，不静默回退日线。
 - 分钟桶需**先跑** `--signal-backtest-interval <粒度>` 才有数据；未跑时 `?interval=` 读出回落 all-None（与"无样本"路径一致）。
@@ -321,7 +321,7 @@ python main.py --signal-backtest --signal-backtest-interval 5m
 - **逐 bar 全量重跑成本**：当前回测按每根 bar 因果重跑信号规则，时间复杂度 O(n²)，受自选池股票数和历史 bar 数影响；默认拉取 365 日日线（`_FETCH_DAYS`），限自选池离线运行可接受，不适用于全市场在线实时触发。
 - **仅覆盖自选池**：`signal_stats` 仅对 `STOCK_LIST` 自选池有数据，非自选池股票命中率回退 all-None。
 - **换手率与 A 股资金面**：当前三重门仅用 OHLCV 推导价位，未接入换手率、主力资金、北向资金等 A 股流动性指标，留待 M4 补充。
-- **盘中/分钟级**：已支持分钟粒度信号可信度回测（见 §11）；VPS 阈值仍为日线调参，分钟下为 best-effort。
+- **盘中/分钟级**：已支持分钟粒度信号可信度回测（见 §11）；已提供 interval 维度窗口覆盖通道（默认不配=复用日线值，仅 4 个 window 字段），具体分钟定值仍待真实数据标定。
 - **`expired` 不计入胜率**：到期未触门的样本被排除在 `sample` 分母外，胜率是条件性胜率（非全样本命中率），需理解定义差异。
 - **horizon 读取语义与旧桶残留**：`resolve_marker_hit_fields` 按当前 `SIGNAL_BACKTEST_HORIZON_BARS` 配置的 `horizon` 精确读取 `signal_stats` 桶；变更 horizon 配置后，旧 horizon 的桶行不会被自动删除而是被忽略（按精确 horizon 读取，不会误用），属无害累积，如需清理可重跑批作业或手动清桶。
 - **小样本展示口径**：`sample < SIGNAL_HIT_VERIFIED_MIN_SAMPLE`（缺省回落 `BACKTEST_EVAL_WINDOW_DAYS`）时回填全 null（前端显示「样本不足」），不展示不可信的胜率/CI/超额（对齐本文 §5 与 spec §4.1）。

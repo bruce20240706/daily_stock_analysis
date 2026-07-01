@@ -4,6 +4,9 @@ TDD tests for Task A4: SIGNAL_BACKTEST_* config fields and VPS_CRYPTO_* bypass t
 Config factory: Config._load_from_env() (singleton reset not needed for env reads;
 the brief's Config.from_env() is an alias — actual method is _load_from_env).
 """
+import re
+from pathlib import Path
+
 import pytest
 from src.config import Config
 from src.services.volume_price_signals import VPSConfig, _INTERVAL_OVERRIDE_FIELDS  # noqa: F401
@@ -138,3 +141,35 @@ def test_for_market_interval_warmup_gate_coupling(monkeypatch):
     monkeypatch.setenv("VPS_ATR_PERIOD_5M", "4")
     cfg2 = VPSConfig.for_market_interval("cn", "5m")
     assert max(cfg2.vol_ma_window, cfg2.atr_period, cfg2.breakout_window) == 6
+
+
+def _interval_override_keys():
+    from src.core.intraday_backtest import INTRADAY_INTERVAL_MINUTES
+    return {
+        f"VPS_{field.upper()}_{interval.upper()}"
+        for interval in INTRADAY_INTERVAL_MINUTES
+        for field in _INTERVAL_OVERRIDE_FIELDS
+    }
+
+
+def _env_example_path():
+    return Path(__file__).resolve().parents[1] / ".env.example"
+
+
+def test_env_example_documents_all_interval_override_keys():
+    # 防漂移闭环（I1）：canonical 每个分钟 interval × 4 字段，均须在 .env.example 有注释行。
+    # 中心给 INTRADAY_INTERVAL_MINUTES 加新 interval（如 30m）→ 此测试 RED → 强制补文档。
+    text = _env_example_path().read_text(encoding="utf-8")
+    missing = sorted(k for k in _interval_override_keys() if f"# {k}=" not in text)
+    assert missing == [], f"缺注释行的 interval 覆盖键: {missing}"
+
+
+def test_interval_override_keys_only_commented_in_env_example():
+    # I2：16 键严禁裸 KEY= 活动行（否则 RED env-example 覆盖门）。
+    keys = _interval_override_keys()
+    active = set()
+    for line in _env_example_path().read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^([A-Z][A-Z0-9_]*)=", line.strip())
+        if m and m.group(1) in keys:
+            active.add(m.group(1))
+    assert active == set(), f"这些键必须为注释行、不得为活动赋值: {sorted(active)}"

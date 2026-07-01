@@ -224,6 +224,17 @@ B 类信号（VSA Upthrust / Spring / No Demand / No Supply）受以下约束：
 
 > **注意**：量基准口径（20 日）与 `_analyze_volume` 的 `VolumeStatus`（5 日）刻意分离，两者并存不互替。
 
+### 7.3 interval 维度窗口阈值覆盖（仅链路B 分钟回测）
+
+`VPSConfig.for_market_interval(market, interval)` 支持按分钟粒度覆盖 4 个 window 类参数，键命名 `VPS_<FIELD>_<INTERVAL 大写>`（`FIELD ∈ {VOL_MA_WINDOW, BREAKOUT_WINDOW, ATR_PERIOD, SWING_K}`，`INTERVAL ∈ {1M, 5M, 15M, 1H}`，共 16 键，见 `.env.example` 对应注释块）。
+
+- **优先级**：interval 覆盖 > crypto 旁路（`VPS_CRYPTO_*`，见 §7.2）> 日线默认（§7.1）。
+- **默认不配 = 复用日线值**：全部 16 键默认不设置，行为与不加本通道前字节一致。
+- **interval-only**：仅在传入非日线 `interval`（如 `5m`/`15m`/`1h`）时生效；`interval=None` 或 `1d` 走既有 `for_market()` 路径，不受影响。
+- **仅覆盖这 4 个 window 字段，通道存在明显部分性**：`ma5`/`ma20`、背离窗口（`_DIV_CMF_WINDOW`/`_DIV_MFI_WINDOW`，均为 14）、价位窗口（`_PRICE_LEVEL_WINDOW`，20）仍为日线硬编码常量，不受本通道影响，分钟粒度下这些窗口的语义仍按"根数"而非"日"解释。
+- **warmup 门耦合**：warmup 判定 `min_bars = max(vol_ma_window, atr_period, breakout_window) + 1`，仅调小 `VPS_BREAKOUT_WINDOW_<interval>` 或 `VPS_ATR_PERIOD_<interval>` 未必缩短 warmup（若 `VPS_VOL_MA_WINDOW_<interval>` 仍为默认 20 会继续主导三者 max）；需要真正缩短分钟 warmup 须一并设置 `VPS_VOL_MA_WINDOW_<interval>`。
+- **本期不做经验定值**：16 键均以注释形式出现在 `.env.example`，不预置分钟专用默认值；具体分钟窗口的合理取值待真实数据标定后再补。
+
 ---
 
 ## 8. 回滚方式
