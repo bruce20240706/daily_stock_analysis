@@ -60,10 +60,16 @@ def test_maxdd_ordering_determinism_and_reject_oracle():
     assert maxdd_by_input_naive != pytest.approx(maxdd_by_date, abs=1e-6)  # 乱序确会变(非 tautology)
     assert _rm(input_order)["max_drawdown_pct"] == pytest.approx(maxdd_by_date, abs=1e-4)
     assert _rm(date_order)["max_drawdown_pct"] == pytest.approx(maxdd_by_date, abs=1e-4)
-    # overall 同日并列:同 date 不同 code,按 code 确定;打乱输入 original_index 不改结果
-    a = [_R(10, d=d1, code="AAA"), _R(-20, d=d1, code="BBB")]
-    b = [_R(-20, d=d1, code="BBB"), _R(10, d=d1, code="AAA")]
-    assert _rm(a)["max_drawdown_pct"] == _rm(b)["max_drawdown_pct"]
+    # overall 同日并列:同 date 不同 code 须按 code 排序(非输入序/非 index 回退)才得正确 maxDD。
+    # 3 行同日:code 升序 A,B,C=[+100,-50,-50]→maxDD 75;输入/index 序 C,A,B=[-50,+100,-50]→50。
+    same_date_input = [_R(-50, d=d1, code="C"), _R(100, d=d1, code="A"), _R(-50, d=d1, code="B")]
+    maxdd_code_order = _naive_input_order_maxdd([100, -50, -50])    # 75.0(按 code 升序 A,B,C)
+    maxdd_index_order = _naive_input_order_maxdd([-50, 100, -50])   # 50.0(按输入/index 序 C,A,B)
+    assert maxdd_code_order != pytest.approx(maxdd_index_order, abs=1e-6)  # 两序确不同(非 tautology)
+    assert _rm(same_date_input)["max_drawdown_pct"] == pytest.approx(maxdd_code_order, abs=1e-4)
+    # 打乱输入,同一 (date,code) 集合 → 结果不变(determinism)
+    same_date_shuffled = [_R(100, d=d1, code="A"), _R(-50, d=d1, code="C"), _R(-50, d=d1, code="B")]
+    assert _rm(same_date_input)["max_drawdown_pct"] == _rm(same_date_shuffled)["max_drawdown_pct"]
 
 
 def _naive_input_order_maxdd(returns):
