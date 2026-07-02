@@ -211,10 +211,39 @@ function phaseBreakdownText(metrics: PerformanceMetrics): string | null {
   return parts;
 }
 
+// ============ Risk Metrics(Inc 1b:渲染链路A 已落库的风险画像)============
+
+interface RiskMetricsView {
+  sharpe: number | null;
+  sortino: number | null;
+  maxDrawdownPct: number | null;
+  worstSingleReturnPct: number | null;
+  sample: number;
+  note: string | null;
+}
+
+function riskMetricsView(metrics: PerformanceMetrics): RiskMetricsView | null {
+  const rm = metrics.diagnostics?.riskMetrics;
+  if (!rm || typeof rm !== 'object') return null;          // legacy 行:无该键 → 整段不渲染
+  const item = rm as Record<string, unknown>;
+  const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const sample = num(item.sample) ?? 0;
+  if (sample === 0) return null;                            // 无非 cash 完成样本 → 不渲染
+  return {
+    sharpe: num(item.sharpe),
+    sortino: num(item.sortino),
+    maxDrawdownPct: num(item.maxDrawdownPct),
+    worstSingleReturnPct: num(item.worstSingleReturnPct),
+    sample,
+    note: typeof item.note === 'string' ? item.note : null,
+  };
+}
+
 // ============ Performance Card ============
 
 const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string }> = ({ metrics, title }) => {
   const phaseText = phaseBreakdownText(metrics);
+  const risk = riskMetricsView(metrics);
   return (
     <Card variant="gradient" padding="md" className="animate-fade-in">
       <div className="mb-3">
@@ -246,6 +275,18 @@ const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string }> 
       {phaseText ? (
         <div className="mt-3 border-t border-white/10 pt-2 text-xs text-muted-text">
           阶段分布：{phaseText}
+        </div>
+      ) : null}
+      {risk ? (
+        <div className="mt-3 border-t border-white/10 pt-2" data-testid="risk-metrics-section">
+          <div className="mb-1 text-xs text-muted-text">风险画像(信号流,{risk.sample} 笔)</div>
+          <MetricRow label="Sharpe(不年化)" value={risk.sharpe != null ? risk.sharpe.toFixed(2) : '--'} />
+          <MetricRow label="Sortino(不年化)" value={risk.sortino != null ? risk.sortino.toFixed(2) : '--'} />
+          <MetricRow label="最大回撤" value={pct(risk.maxDrawdownPct)} />
+          <MetricRow label="最差单笔" value={pct(risk.worstSingleReturnPct)} />
+          {risk.note ? (
+            <div className="mt-1 text-xs text-muted-text" data-testid="risk-metrics-note">{risk.note}</div>
+          ) : null}
         </div>
       ) : null}
     </Card>
