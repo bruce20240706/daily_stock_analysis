@@ -135,6 +135,8 @@ class BacktestServiceTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         DatabaseManager.reset_instance()
+        Config._instance = None
+        os.environ.pop("BACKTEST_EVAL_WINDOW_DAYS", None)
         self._temp_dir.cleanup()
 
     def _count_results(self) -> int:

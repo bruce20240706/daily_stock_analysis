@@ -90,6 +90,8 @@ excess = ci_low - baseline_win_rate
 | `ci_high` | `float \| None` | Wilson 95% CI 上界 |
 | `baseline_win_rate` | `float \| None` | 同市场全体 bar 基准胜率 |
 | `excess` | `float \| None` | 超额 = ci_low - baseline_win_rate |
+| `ci_low_corrected` | `float \| None` | family-wise（Bonferroni-CI）校正后 Wilson 下界；`family_size <= 1` 时等于 `ci_low`；`sample == 0` 时为 `None`（详见 §5.1） |
+| `family_size` | `int` | 本次聚合中可检验格子数 N（同批 `sample >= min_sample` 的 `(signal_type × market)` 格子数） |
 
 ---
 
@@ -109,6 +111,20 @@ verified = (
 其中 `min_sample` 优先读取 `SIGNAL_HIT_VERIFIED_MIN_SAMPLE` 配置（默认 `0`，即读 `backtest_eval_window_days` 作为兜底）。
 
 **语义**：样本足（统计可信）且置信下界超过基准（有超额优势）。
+
+> 自 Inc 1c 起，判据中的置信下界改为 family-wise 校正后的 `ci_low_corrected`（上式中的 `stat.ci_low` 实际读取 `ci_low_corrected`，老行 NULL 回退 raw `ci_low`），完整语义见 §5.1。
+
+---
+
+## 5.1 Inc 1c：family-wise（Bonferroni-CI）多重检验校正
+
+单次 `--signal-backtest` 批作业会同时对多个 `(signal_type × market)` 格子做显著性判定；格子数越多，仅凭运气出现"raw `ci_low` > 基准"的组合概率越高。Inc 1c 引入 family-wise Bonferroni-CI 校正收紧判据，抑制这类偶然命中被误标为 `verified`：
+
+- **校正判定语义**：`verified` 的置信下界判据由 raw `ci_low` 改为**校正后下界** `ci_low_corrected`（即 `resolve_marker_hit_fields` 判据变为 `stat.sample >= min_sample AND stat.ci_low_corrected > stat.baseline_win_rate`）。`ci_low_corrected` 由 `wilson_ci(win, sample, z_corr)` 算出，其中 `z_corr = bonferroni_z(family_size, fwer_alpha)`；当 `family_size <= 1`（family 内仅此一个可检验格子）时 `z_corr` 取字面量 `1.96`，`ci_low_corrected == ci_low`，判定与升级前完全一致，不引入变化。
+- **family 口径**：family 为单次 `--signal-backtest`（或 `--signal-backtest-interval`）批作业聚合出的、`sample >= min_sample` 的 `(signal_type × market)` 格子集合；`family_size` 即该集合的大小。**跨 run、跨 interval、跨 horizon 的格子互不合并校正**——每次批作业独立成 family，不同 interval/horizon 桶各自的 `family_size` 互不影响。
+- **写时快照与老行回退**：`ci_low_corrected` / `family_size` 在批作业写入 `signal_stats` 时按当次 family 计算并落库为快照；此后单独调整 `SIGNAL_HIT_VERIFIED_MIN_SAMPLE` 或 `SIGNAL_BACKTEST_FWER_ALPHA` 不会自动重算已落库的行，需重跑批作业才能刷新。升级前写入的老行 `ci_low_corrected` / `family_size` 为 `NULL`（legacy），读路径 `resolve_marker_hit_fields` 检测到 `NULL` 时回退用 raw `ci_low` 判定 `verified`（即升级前行为），不因缺列而误判或报错。
+- **alpha 配置（双尾口径）**：`SIGNAL_BACKTEST_FWER_ALPHA`（默认 `0.05`，域 `[0.0001, 0.05]`，函数内钳制、仅可更严不可更松）控制的是**双尾**族错误率；`verified` 是单尾判据（只看下界一侧是否超基准），因此等价单尾族错误率约为 `alpha / 2`。
+- **诚实边界**：`baseline_win_rate`（见 §3）为**每市场共享**、按**已知常量**参与比较的全体 bar 入场基准，本身不参与 family-wise 校正、不随 family 收紧。也就是说，本次校正只收紧了信号胜率一侧的置信下界，**不包含 baseline 自身的估计误差**，两侧比较仍是"校正后的信号置信区间 vs 未加误差带的基准点估计"，理解本节局限时需注意这一边界。
 
 ---
 
@@ -184,6 +200,8 @@ verified = (
 | `ci_high` | FLOAT | CI 上界 |
 | `baseline_win_rate` | FLOAT | 基准胜率 |
 | `excess` | FLOAT | 超额 |
+| `ci_low_corrected` | FLOAT | family-wise 校正后 CI 下界（Inc 1c）；`NULL`=legacy 行（升级前写入，未重跑） |
+| `family_size` | INTEGER | 写时 family 可检验格子数 N（Inc 1c）；`NULL`=legacy 行 |
 | `computed_at` | DATETIME | 最后计算时间 |
 
 读写接口：`src/repositories/signal_stats_repo.py` → `SignalStatsRepository`（`get` / `save_batch`）。
@@ -232,6 +250,7 @@ watchlist 来源与看板完全一致：读取 `SystemConfigService` 的 `STOCK_
 | `SIGNAL_BACKTEST_ENABLED` | `false` | 是否启用信号回测批作业（设为 `true` 后 `--signal-backtest` CLI 才触发写入） |
 | `SIGNAL_BACKTEST_HORIZON_BARS` | `10` | 三重门前瞻 bar 数（日线数），决定评估周期 |
 | `SIGNAL_HIT_VERIFIED_MIN_SAMPLE` | `0`（读 `backtest_eval_window_days` 作兜底） | verified 所需最小样本数 |
+| `SIGNAL_BACKTEST_FWER_ALPHA` | `0.05` | family-wise（Bonferroni-CI）多重检验校正的双尾族错误率（Inc 1c）；域 `[0.0001, 0.05]`，函数内钳制、仅可更严不可更松；详见 §5.1 |
 
 ---
 
@@ -243,6 +262,7 @@ M3-A6 改源后，`resolve_marker_hit_fields(signal_type, code, *, interval='1d'
 
 - **改变**：命中率不再按个股历史分析记录聚合，而是按信号类型跨自选池横截面统计。
 - **不变**：`/signals` 端点 marker 的 6 个字段键名（`hit_rate / hit_sample / verified / ci_low / ci_high / baseline_excess`）兼容保留，缺桶时回落 all-None（与旧"无样本"路径行为一致）。
+- **新增（Inc 1c）**：追加 `ci_low_corrected` / `family_size` 两个可选透明字段（详见 §5.1），随原 6 字段一并透出；老行/缺桶同样回落 `None`，不破坏既有 6 字段契约。
 - **旧路径**：`backfill_signal_hit_rate` 仍保留，供 per-code 场景或历史兼容使用。
 
 ---
@@ -256,11 +276,12 @@ M3-A6 改源后，`resolve_marker_hit_fields(signal_type, code, *, interval='1d'
 | `formatCi({ ciLow, ciHigh })` | `{ ciLow: 0.55, ciHigh: 0.75 }` | `"[55%–75%]"` |
 | `formatExcess(baselineExcess)` | `0.08` | `"超额 +8pp"` |
 | `verifiedLabel(verified)` | `true` | `"已验证"` |
+| `unverifiedExcessNote({ verified, baselineExcess, ciLowCorrected, familySize })`（Inc 1c） | `verified=false` 但 raw 超额为正 | `"20 组同检校正后下界 48%,未超基准"`（消解"有超额却未验证"的矛盾展示；legacy 行 `ciLowCorrected=null` 时不注解） |
 
 展示位置：
 1. **K 线钻取面板**（`KLineChartPanel` 信号详情）：CI 区间 + 样本数 + 基准超额 + verified 标识
 2. **工作台信号 tab**（`StockWorkstationPage` signals tab）：同上，per-signal 行展示
-3. **信号看板行**（`SignalBoardPage`）：`BoardEntry` 级别的 `ciLow / ciHigh / baselineExcess / verified` 字段
+3. **信号看板行**（`SignalBoardPage`）：`BoardEntry` 级别的 `ciLow / ciHigh / baselineExcess / verified` 字段，以及 Inc 1c 新增的 `ciLowCorrected / familySize`（老行/legacy 载荷缺字段时为 `null`）
 
 ---
 

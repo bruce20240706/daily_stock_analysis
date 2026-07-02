@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 链路B 信号"已验证"标记增加 family-wise(Bonferroni-CI)多重检验校正:一次批跑同检的 (信号类型×市场) 组合按 family 规模收紧置信下界,防止纯靠运气的组合被标"已验证";新增 ci_low_corrected/family_size 透明字段全栈透出(API+看板+前端注解),老统计行自动回退原判定,单组合场景行为与之前完全一致;新配置 SIGNAL_BACKTEST_FWER_ALPHA(默认 0.05,仅可更严)
 - [新功能] 链路A 回测诊断新增不年化事件序列风险画像(diagnostics.risk_metrics:Sharpe/Sortino/最大回撤[复利事件净值峰谷]/worst_single/equity_final/mean/std);总体=已完成且非 cash 的评估、单笔收益下钳≥-100(补 L=1 perp 未 floor);Sharpe 用原始样本 std、Sortino downside_dev=sqrt(Σ_{r<0}r²/n)、maxDD 按 analysis_date→code→原序复利,均 round4、除零/未定义返 None;折进现有 diagnostics_json 落库,零 schema/service/repo 改动、现有 summary 字段与 avg_simulated_return_pct 字节级不变;note 内嵌"信号流风险画像、非真实组合 maxDD、单笔=-100 会饱和 100%"口径提醒
 - [新功能] VPS 量价信号引擎新增 interval 维度窗口阈值覆盖通道（VPS_<vol_ma_window|breakout_window|atr_period|swing_k>_<1m|5m|15m|1h>，默认不配=复用日线值，仅链路B 分钟回测生效，不进 Web 设置）；放量突破 reason 文案由"近N日高点"泛化为"近N根高点"
 - [新功能] 港股盘中回测双边印花税 knob(HK_INTRADAY_BACKTEST_STAMP_DUTY_BPS,opt-in 默认0,HK 现行10bps买卖双边对称×2,区别于A股单边;apply_round_trip_cost 加 both_side_bps;market==hk+确有成交门控不限long;Web 设置页可改;cash 豁免、cn/us/crypto/日线不征)
