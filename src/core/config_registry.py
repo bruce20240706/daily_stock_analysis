@@ -3301,6 +3301,32 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "SIGNAL_BACKTEST_FWER_ALPHA": {
+        "title": "Signal Backtest FWER Alpha",
+        "description": "Family-wise error rate (two-sided) for the Bonferroni-CI multiple-testing correction on signal 'verified' (Inc 1c). Smaller = stricter. Capped at 0.05 so the correction can only tighten; one-sided equivalent is about alpha/2.",
+        "category": "backtest",
+        "data_type": "number",
+        "ui_control": "number",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "0.05",
+        "options": [],
+        "validation": {"min": 0.0001, "max": 0.05},
+        "display_order": 71,
+        "help_key": "settings.backtest.SIGNAL_BACKTEST_FWER_ALPHA",
+        "examples": [
+            "SIGNAL_BACKTEST_FWER_ALPHA=0.05",
+            "SIGNAL_BACKTEST_FWER_ALPHA=0.01",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：回测配置",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#回测功能",
+            },
+        ],
+        "warning_codes": [],
+    },
     "CRYPTO_INTRADAY_BACKTEST_INTERVAL": {
         "title": "Intraday Backtest Interval",
         "description": "盘中回测默认 bar 粒度(crypto;允许 1m/5m/15m/1h)。",

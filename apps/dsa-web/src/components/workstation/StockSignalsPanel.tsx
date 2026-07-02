@@ -5,7 +5,7 @@ import { stocksApi } from '../../api/stocks';
 import type { SignalsResponse } from '../../types/kline';
 import { Loading } from '../common';
 import { cn } from '../../utils/cn';
-import { formatCi, formatExcess, formatHitRate, verifiedLabel } from '../../utils/credibility';
+import { formatCi, formatExcess, formatHitRate, unverifiedExcessNote, verifiedLabel } from '../../utils/credibility';
 
 const consistencyLabel: Record<string, string> = {
   consistent: '一致', divergent: '分歧', conflict: '冲突', unknown: '未知', stale: '过期',
@@ -39,7 +39,12 @@ export const StockSignalsPanel: React.FC<{ code: string }> = ({ code }) => {
       <table className="w-full">
         <thead><tr className="text-xs text-secondary-text"><th className="text-left">信号</th><th>方向</th><th>来源</th><th>命中率</th></tr></thead>
         <tbody>
-          {data.markers.map((m, i) => (
+          {data.markers.map((m, i) => {
+            const note = unverifiedExcessNote({
+              verified: m.verified, baselineExcess: m.baselineExcess,
+              ciLowCorrected: m.ciLowCorrected, familySize: m.familySize,
+            });
+            return (
             <tr key={`${m.signalType}-${m.timestamp}-${i}`} className="border-t border-border/60">
               <td className="py-1 text-left">{m.signalType}</td>
               <td className={cn(m.direction === 'bullish' && 'text-danger', m.direction === 'bearish' && 'text-success')}>{dirLabel[m.direction]}</td>
@@ -59,9 +64,15 @@ export const StockSignalsPanel: React.FC<{ code: string }> = ({ code }) => {
                   data-testid="signals-verified"
                   className={cn('ml-1', m.verified ? 'text-success' : 'text-secondary-text')}
                 >{verifiedLabel(m.verified)}</span>
+                {note && (
+                  <span data-testid="signals-corrected-note" className="ml-1 text-secondary-text">
+                    ({note})
+                  </span>
+                )}
               </td>
             </tr>
-          ))}
+            );
+          })}
           {data.markers.length === 0 && <tr><td colSpan={4} className="py-2 text-secondary-text">暂无量价信号</td></tr>}
         </tbody>
       </table>

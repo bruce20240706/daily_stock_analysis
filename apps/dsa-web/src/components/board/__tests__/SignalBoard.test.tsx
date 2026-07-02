@@ -19,6 +19,7 @@ const mk = (over: Partial<BoardEntry>): BoardEntry => ({
   priceLines: { entry: 1700, stop: 1620, target: 1850 }, latestClose: 1660,
   hitRate: 0.62, hitSample: 18, verified: true,
   ciLow: null, ciHigh: null, baselineExcess: null,
+  ciLowCorrected: null, familySize: null,
   status: 'ok', degradedReason: null, resonance: 'none',
   horizonBars: null, signalStatus: null, planQuality: null,
   ...over,
@@ -117,6 +118,36 @@ describe('SignalBoard', () => {
     );
     expect(screen.queryByTestId('board-ci')).not.toBeInTheDocument();
     expect(screen.queryByTestId('board-excess')).not.toBeInTheDocument();
+  });
+
+  it('shows the corrected-note for a contradiction row (unverified with positive raw excess and a correction)', () => {
+    render(
+      <MemoryRouter>
+        <SignalBoard
+          entries={[mk({
+            code: '600519', name: '贵州茅台', verified: false,
+            baselineExcess: 0.05, ciLowCorrected: 0.48, familySize: 20,
+          })]}
+          onRowClick={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('board-corrected-note')).toHaveTextContent('校正后下界 48%');
+  });
+
+  it('omits the corrected-note for a legacy row (no ciLowCorrected/familySize)', () => {
+    render(
+      <MemoryRouter>
+        <SignalBoard
+          entries={[mk({
+            code: '600519', name: '贵州茅台', verified: false,
+            baselineExcess: 0.05, ciLowCorrected: null, familySize: null,
+          })]}
+          onRowClick={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('board-corrected-note')).not.toBeInTheDocument();
   });
 
   it('encodes crypto code (containing /) in workstation navigate call', () => {

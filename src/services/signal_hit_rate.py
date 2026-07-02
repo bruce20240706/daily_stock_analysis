@@ -9,6 +9,9 @@ M3-A6 改源：resolve_marker_hit_fields 改读 signal_stats 表（聚合源变�
 (signal_type, market)），verified 增加 ci_low > baseline_win_rate 的超额判定，
 同时透传 ci_low / ci_high / baseline_excess 字段到 marker 契约。
 
+verified 自 Inc 1c 起用 family-wise 校正下界（ci_low_corrected，老行回退 raw
+ci_low）；详见 docs/superpowers/specs/2026-07-01-chainb-multiple-testing-design.md。
+
 聚合口径严格对齐 src/core/backtest_engine.py 的现有规约：
   分母 = direction_correct is not None 的样本数
   分子 = direction_correct is True 的样本数
@@ -70,41 +73,57 @@ def backfill_signal_hit_rate(signal_type: str, code: str) -> HitRate:
     return HitRate(hit_rate=round(correct / sample, 4), hit_sample=sample)
 
 
+def resolve_verified_min_sample(cfg) -> int:
+    """verified 判定与 family N 共用的 min_sample 解析(读写路径唯一真源,spec §4.7)。
+
+    = signal_hit_verified_min_sample(>0 时优先)否则 backtest_eval_window_days(默认 10)。
+    """
+    return int(getattr(cfg, "signal_hit_verified_min_sample", 0) or 0) \
+        or int(getattr(cfg, "backtest_eval_window_days", 10))
+
+
 def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1d") -> dict:
-    """把命中率聚合结果映射为 SignalMarker 的 6 个 hit 字段（M3-A6 改源）。
+    """把命中率聚合结果映射为 SignalMarker 的 hit 字段（M3-A6 改源）。
 
     M3-A6 改源：读 signal_stats 表 by (signal_type, market(code), interval)，
-    verified = sample >= min_sample AND ci_low > baseline_win_rate（超额判定）。
-    缺桶/无样本时返回全 None 的 all-None dict（与 M2c 旧"无样本"路径表现一致）。
+    verified = sample >= min_sample AND effective_low > baseline_win_rate（超额判定，
+    effective_low 见 Inc 1c 说明）。缺桶/无样本时返回全 None 的 all-None dict
+    （与 M2c 旧"无样本"路径表现一致）。
 
     Args:
         interval: 信号桶粒度；默认 '1d'（日线，行为不变）；分钟（1m/5m/15m/1h）读对应
                   分钟桶的可信度（需先跑 --signal-backtest-interval 落库）。
 
-    返回 keys: hit_rate, hit_sample, verified, ci_low, ci_high, baseline_excess, horizon。
-    （horizon = 命中桶时的 signal_backtest_horizon_bars；无桶/无样本时为 None，由 M3.1 透出。）
+    返回 keys: hit_rate, hit_sample, verified, ci_low, ci_high, baseline_excess, horizon,
+    ci_low_corrected, family_size。
+    （horizon = 命中桶时的 signal_backtest_horizon_bars；无桶/无样本时为 None，由 M3.1 透出。
+    ci_low_corrected/family_size 见 Inc 1c；老行为 None。）
     """
     _none = {"hit_rate": None, "hit_sample": None, "verified": False,
-             "ci_low": None, "ci_high": None, "baseline_excess": None, "horizon": None}
+             "ci_low": None, "ci_high": None, "baseline_excess": None, "horizon": None,
+             "ci_low_corrected": None, "family_size": None}
 
     market = get_market_for_stock(code)
     if market is None:
         return dict(_none)
 
     cfg = get_config()
-    min_sample = int(getattr(cfg, "signal_hit_verified_min_sample", 0) or 0) \
-        or int(getattr(cfg, "backtest_eval_window_days", 10))
+    min_sample = resolve_verified_min_sample(cfg)
     horizon = int(getattr(cfg, "signal_backtest_horizon_bars", 10))
 
     stat = SignalStatsRepository().get(signal_type, market, interval=interval, horizon=horizon)
     if stat is None or (stat.sample or 0) < min_sample:
         return dict(_none)
 
+    # Inc 1c: verified 改用 family-wise 校正下界;老行(migration 前)NULL → 回退 raw ci_low
+    # getattr 容错非 ORM 桩缺属性(MagicMock 桩必须显式补属性,否则子 mock 比较 TypeError)
+    _corr = getattr(stat, "ci_low_corrected", None)
+    effective_low = _corr if _corr is not None else stat.ci_low
     verified = bool(
         stat.sample >= min_sample
-        and stat.ci_low is not None
+        and effective_low is not None
         and stat.baseline_win_rate is not None
-        and stat.ci_low > stat.baseline_win_rate
+        and effective_low > stat.baseline_win_rate
     )
     return {
         "hit_rate": stat.win_rate,
@@ -114,4 +133,6 @@ def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1
         "ci_high": stat.ci_high,
         "baseline_excess": stat.excess,
         "horizon": horizon,
+        "ci_low_corrected": _corr,
+        "family_size": getattr(stat, "family_size", None),
     }

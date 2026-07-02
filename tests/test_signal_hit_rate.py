@@ -202,6 +202,8 @@ class ResolveMarkerHitFieldsTestCase(unittest.TestCase):
         m.ci_high = ci_high
         m.baseline_win_rate = baseline_win_rate
         m.excess = excess if excess is not None else (ci_low - baseline_win_rate)
+        m.ci_low_corrected = ci_low
+        m.family_size = 1
         return m
 
     def test_sample_at_threshold_sets_verified_true(self) -> None:
@@ -374,6 +376,8 @@ def _stat(**kw):
     d = dict(sample=20, win_rate=0.68, ci_low=0.55, ci_high=0.80,
              baseline_win_rate=0.50, excess=0.05)
     d.update(kw)
+    d.setdefault("ci_low_corrected", d["ci_low"])
+    d.setdefault("family_size", 1)
     for k, v in d.items():
         setattr(m, k, v)
     return m
@@ -404,7 +408,7 @@ def test_resolve_missing_bucket_is_sample_insufficient():
         f = resolve_marker_hit_fields("x", "600519")
         assert f == {"hit_rate": None, "hit_sample": None, "verified": False,
                      "ci_low": None, "ci_high": None, "baseline_excess": None,
-                     "horizon": None}
+                     "horizon": None, "ci_low_corrected": None, "family_size": None}
 
 
 def test_resolve_stat_with_zero_sample_returns_all_none():
@@ -423,7 +427,7 @@ def test_resolve_stat_with_zero_sample_returns_all_none():
         f = resolve_marker_hit_fields("volume_breakout", "600519")
         assert f == {"hit_rate": None, "hit_sample": None, "verified": False,
                      "ci_low": None, "ci_high": None, "baseline_excess": None,
-                     "horizon": None}
+                     "horizon": None, "ci_low_corrected": None, "family_size": None}
 
 
 def test_resolve_marker_hit_fields_real_repo_roundtrip(tmp_path):
@@ -466,6 +470,8 @@ def test_resolve_marker_hit_fields_real_repo_roundtrip(tmp_path):
             ci_high=0.82,
             baseline_win_rate=0.50,
             excess=0.10,
+            ci_low_corrected=0.55,
+            family_size=20,
         )
         repo.save_batch([row])
 
@@ -491,6 +497,8 @@ def test_resolve_marker_hit_fields_real_repo_roundtrip(tmp_path):
         assert fields["ci_high"] == 0.82, f"ci_high mismatch: {fields['ci_high']}"
         assert abs(fields["baseline_excess"] - 0.10) < 1e-9, \
             f"baseline_excess mismatch: {fields['baseline_excess']}"
+        assert fields["ci_low_corrected"] == 0.55
+        assert fields["family_size"] == 20
     finally:
         DatabaseManager.reset_instance()
         Config._instance = None
@@ -510,7 +518,8 @@ def test_resolve_marker_hit_fields_passes_interval(monkeypatch):
         def get(self, signal_type, market, *, interval="1d", horizon=None):
             seen.update(interval=interval, horizon=horizon)
             return SimpleNamespace(sample=999, win_rate=0.6, ci_low=0.55,
-                                   ci_high=0.7, baseline_win_rate=0.5, excess=0.05)
+                                   ci_high=0.7, baseline_win_rate=0.5, excess=0.05,
+                                   ci_low_corrected=None, family_size=None)
 
     monkeypatch.setattr(shr, "SignalStatsRepository", lambda *a, **k: _Repo())
     monkeypatch.setattr(shr, "get_market_for_stock", lambda code: "crypto")
@@ -519,3 +528,58 @@ def test_resolve_marker_hit_fields_passes_interval(monkeypatch):
     assert seen["interval"] == "5m"
     shr.resolve_marker_hit_fields("vps_x", "BTC/USDT")     # 默认
     assert seen["interval"] == "1d"
+
+
+# --- Inc 1c: verified 改用校正下界 + 老行回退(spec §4.5/§7.6) ---
+
+def test_verified_uses_corrected_low_when_present():
+    """校正下界驱动 verified:raw ci_low>baseline 但校正后≤baseline → False。"""
+    with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+         patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+        Repo.return_value.get.return_value = _stat(
+            ci_low=0.55, ci_low_corrected=0.48, family_size=20)  # baseline=0.50
+        f = resolve_marker_hit_fields("volume_breakout", "600519")
+        assert f["verified"] is False          # 0.48 <= 0.50,尽管 raw 0.55 > 0.50
+        assert f["ci_low"] == 0.55             # raw 展示不变
+        assert f["ci_low_corrected"] == 0.48
+        assert f["family_size"] == 20
+
+
+def test_verified_true_when_corrected_still_above_baseline():
+    with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+         patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+        Repo.return_value.get.return_value = _stat(
+            ci_low=0.60, ci_low_corrected=0.52, family_size=20)
+        assert resolve_marker_hit_fields("volume_breakout", "600519")["verified"] is True
+
+
+def test_legacy_row_null_corrected_falls_back_to_raw():
+    """§7.6 老行回退:ci_low_corrected=None → verified 用 raw ci_low(升级前行为)。"""
+    with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+         patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+        Repo.return_value.get.return_value = _stat(
+            ci_low=0.55, ci_low_corrected=None, family_size=None)
+        f = resolve_marker_hit_fields("volume_breakout", "600519")
+        assert f["verified"] is True           # 回退 raw 0.55 > 0.50
+        assert f["ci_low_corrected"] is None
+        assert f["family_size"] is None
+
+
+def test_magicmock_stub_missing_attr_would_typeerror_documented():
+    """§4.5 Blocker 回归锚:桩缺 ci_low_corrected 时 getattr(MagicMock) 返回子 mock,
+    verified 比较会 TypeError——证桩必须显式补属性(_make_stat/_stat 已补)。"""
+    from unittest.mock import MagicMock
+    bare = MagicMock()
+    bare.sample = 20
+    bare.win_rate = 0.68
+    bare.ci_low = 0.55
+    bare.ci_high = 0.80
+    bare.baseline_win_rate = 0.50
+    bare.excess = 0.05
+    # 不给 ci_low_corrected → 自动子 mock,> 比较抛 TypeError
+    import pytest as _pytest
+    with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+         patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+        Repo.return_value.get.return_value = bare
+        with _pytest.raises(TypeError):
+            resolve_marker_hit_fields("volume_breakout", "600519")

@@ -113,6 +113,31 @@ describe('stocksApi.getSignals', () => {
     expect(res.markers[0].baselineExcess).toBe(0.05);
   });
 
+  it('maps ci_low_corrected/family_size to camelCase, null when absent', async () => {
+    get.mockResolvedValueOnce({ data: { status: 'ok', consistency: 'consistent', degraded_reason: null,
+      price_lines: { entry: 1, stop: 0.9, target: 1.2 },
+      markers: [{ timestamp: 1, price: 1, anchor: 'low', direction: 'bullish', signal_type: 'volume_breakout',
+        source: 'rule', confidence: 'high', is_daily_approx: false, is_anomalous: false, reason: 'x',
+        threshold: null, observed_value: null, hit_rate: 0.68, hit_sample: 20, verified: false, as_of: null,
+        ci_low: 0.55, ci_high: 0.8, baseline_excess: 0.05,
+        ci_low_corrected: 0.48, family_size: 20 }] } });
+    const res = await stocksApi.getSignals('600519');
+    expect(res.markers[0].ciLowCorrected).toBe(0.48);
+    expect(res.markers[0].familySize).toBe(20);
+  });
+
+  it('defaults ci_low_corrected/family_size to null for legacy backend payloads without the fields', async () => {
+    get.mockResolvedValueOnce({ data: { status: 'ok', consistency: 'consistent', degraded_reason: null,
+      price_lines: { entry: 1, stop: 0.9, target: 1.2 },
+      markers: [{ timestamp: 1, price: 1, anchor: 'low', direction: 'bullish', signal_type: 'volume_breakout',
+        source: 'rule', confidence: 'high', is_daily_approx: false, is_anomalous: false, reason: 'x',
+        threshold: null, observed_value: null, hit_rate: 0.68, hit_sample: 20, verified: true, as_of: null,
+        ci_low: 0.55, ci_high: 0.8, baseline_excess: 0.05 }] } });
+    const res = await stocksApi.getSignals('600519');
+    expect(res.markers[0].ciLowCorrected).toBeNull();
+    expect(res.markers[0].familySize).toBeNull();
+  });
+
   it('maps resonance, defaulting to none when absent', async () => {
     get.mockResolvedValueOnce({ data: { status: 'ok', consistency: 'consistent', degraded_reason: null,
       price_lines: { entry: 1700, stop: 1620, target: 1850 }, markers: [],

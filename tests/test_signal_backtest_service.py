@@ -353,3 +353,59 @@ def test_run_interval_5m_passthrough_uses_for_market_interval(monkeypatch):
     cn_sig = next(c for c in captured if c[0] == "sig" and c[1] == "cn")
     assert cn_sig[2] is not None
     assert cn_sig[2].breakout_window == 9
+
+
+def test_run_passes_fwer_alpha_and_min_sample_to_aggregate():
+    """Inc 1c: run() 把 config 的 fwer_alpha 与共享 min_sample 显式传给 aggregate(spec §4.7)。"""
+    captured = {}
+
+    def _fake_aggregate(sig, base, *, horizon, interval="1d", fwer_alpha=None, min_sample=None):
+        captured.update(fwer_alpha=fwer_alpha, min_sample=min_sample)
+        return []
+
+    with patch(
+        "src.services.signal_backtest_service._read_watchlist_codes", return_value=[],
+    ), patch(
+        "src.services.signal_backtest_service.StockService"
+    ), patch(
+        "src.services.signal_backtest_service.aggregate_signal_stats",
+        side_effect=_fake_aggregate,
+    ), patch(
+        "src.services.signal_backtest_service.SignalStatsRepository"
+    ) as Repo:
+        Repo.return_value.save_batch.return_value = 0
+        SignalBacktestService().run(horizon=10)
+    # 未配 SIGNAL_BACKTEST_FWER_ALPHA 时默认 0.05;min_sample 走 resolve_verified_min_sample(默认 10)
+    assert captured["fwer_alpha"] == 0.05
+    assert captured["min_sample"] == 10
+
+
+def test_run_persists_corrected_fields_to_orm_rows():
+    """Inc 1c: SignalStatRow 构造带 ci_low_corrected/family_size(spec §4.4)。"""
+    with patch(
+        "src.services.signal_backtest_service._read_watchlist_codes",
+        return_value=["600519", "600036"],
+    ), patch(
+        "src.services.signal_backtest_service.StockService"
+    ) as SS, patch(
+        "src.services.signal_backtest_service.get_market_for_stock",
+        side_effect=["cn", "cn"],
+    ), patch(
+        "src.services.signal_backtest_service.evaluate_signal_outcomes",
+        return_value=[SignalOutcome("volume_breakout", "cn", "win")] * 6
+        + [SignalOutcome("volume_breakout", "cn", "loss")] * 6,
+    ), patch(
+        "src.services.signal_backtest_service.evaluate_baseline_outcomes",
+        return_value=[SignalOutcome("__baseline__", "cn", "win")] * 5
+        + [SignalOutcome("__baseline__", "cn", "loss")] * 5,
+    ), patch(
+        "src.services.signal_backtest_service.SignalStatsRepository"
+    ) as Repo:
+        SS.return_value.get_history_data.return_value = _hist()
+        Repo.return_value.save_batch.return_value = 1
+        SignalBacktestService().run(horizon=10)
+        rows = Repo.return_value.save_batch.call_args[0][0]
+        assert rows, "应有落库行"
+        # evaluate mock 每股返回同批 outcome,聚合成单格(sample=24>=10 → N=1)
+        assert rows[0].family_size == 1
+        assert rows[0].ci_low_corrected == rows[0].ci_low   # N=1 恒等

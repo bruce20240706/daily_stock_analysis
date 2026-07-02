@@ -22,6 +22,8 @@ const ruleMarker: SignalMarker = {
   ciLow: null,
   ciHigh: null,
   baselineExcess: null,
+  ciLowCorrected: null,
+  familySize: null,
   asOf: null,
   horizonBars: null,
   status: null,

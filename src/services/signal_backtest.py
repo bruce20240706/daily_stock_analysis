@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
+from statistics import NormalDist
 from typing import List, Optional
 
 import pandas as pd
@@ -227,6 +228,8 @@ class SignalStat:
         ci_high:            Wilson 95% CI 上界；sample == 0 时为 None。
         baseline_win_rate:  同市场全体 bar 基准胜率；无基准数据时为 None。
         excess:             超额 = ci_low - baseline_win_rate；任一为 None 时为 None。
+        ci_low_corrected:   family-wise 校正后 Wilson 下界；N<=1 时==ci_low；sample==0 时 None。
+        family_size:        本次聚合可检验格子数 N(sample>=min_sample 的格子数)。
     """
 
     signal_type: str
@@ -241,6 +244,8 @@ class SignalStat:
     ci_high: Optional[float]
     baseline_win_rate: Optional[float]
     excess: Optional[float]
+    ci_low_corrected: Optional[float] = None
+    family_size: int = 0
 
 
 def wilson_ci(wins: int, n: int, z: float = 1.96) -> tuple:
@@ -263,6 +268,22 @@ def wilson_ci(wins: int, n: int, z: float = 1.96) -> tuple:
     return (max(0.0, center - half), min(1.0, center + half))
 
 
+def bonferroni_z(family_n: int, fwer_alpha: float = 0.05) -> float:
+    """family-wise Bonferroni 校正后的 Wilson z 值。
+
+    N<=1 返回字面量 1.96(与 wilson_ci 默认 z 逐字节一致,保证退化恒等;
+    不得改用 NormalDist().inv_cdf(0.975)=1.95996…,razor-edge 下会翻 verified)。
+    N>=2 按双尾族水平 alpha 均摊:z = inv_cdf(1 - (alpha/2)/N)。
+    alpha 在函数内钳制到 [0.0001, 0.05]:上限 0.05 保证 z >= 2.2414 > 1.96
+    ("校正只收紧"不可绕过);下限 0.0001 防 inv_cdf(1.0) StatisticsError。
+    注意 alpha 是双尾口径,等价单尾族错误率约 alpha/2(verified 为单尾判据)。
+    """
+    if family_n <= 1:
+        return 1.96
+    alpha = min(max(float(fwer_alpha), 0.0001), 0.05)
+    return NormalDist().inv_cdf(1.0 - (alpha / 2.0) / family_n)
+
+
 def _winrate(wins: int, n: int) -> Optional[float]:
     """返回 wins/n（保留 4 位小数），n == 0 时返回 None（避免 ZeroDivisionError）。"""
     return round(wins / n, 4) if n > 0 else None
@@ -274,6 +295,8 @@ def aggregate_signal_stats(
     *,
     horizon: int,
     interval: str = "1d",
+    fwer_alpha: float = 0.05,
+    min_sample: int = 10,
 ) -> List[SignalStat]:
     """按 (signal_type × market) 聚合回测结果，附 Wilson CI 与基准超额。
 
@@ -283,6 +306,12 @@ def aggregate_signal_stats(
                            signal_type 应为 BASELINE_SIGNAL_TYPE（'__baseline__'）。
         horizon:           前瞻 bar 数，透传至 SignalStat.horizon。
         interval:          K 线周期标识，透传至 SignalStat.interval，默认 '1d'。
+        fwer_alpha:        family-wise 双尾族水平(Bonferroni-CI 校正),函数内钳制到
+                           [0.0001, 0.05]。默认 0.05 仅供纯函数独测;生产路径必须显式传
+                           config.signal_backtest_fwer_alpha。
+        min_sample:        可检验格子的最小样本阈值(family N 的口径)。默认 10 仅供独测;
+                           生产路径必须显式传 resolve_verified_min_sample(cfg),
+                           否则 N 与读路径 verified 判据漂移。
 
     Returns:
         每个 (signal_type × market) 对应一个 SignalStat 的列表。
@@ -306,17 +335,27 @@ def aggregate_signal_stats(
             continue
         buckets[(o.signal_type, o.market)][o.outcome] += 1
 
-    # Step 3: 构造 SignalStat 列表
-    stats: List[SignalStat] = []
+    # Step 3a: 先算各格 win/loss/sample(第一遍,确定 family N)
+    cells = []
     for (sig_type, market), wl in buckets.items():
         win = wl["win"]
         loss = wl["loss"]
-        sample = win + loss
+        cells.append((sig_type, market, win, loss, win + loss))
+
+    # Step 3b: family N = sample >= min_sample 的格子数;z_corr 每 family 只算一次
+    family_n = sum(1 for _, _, _, _, sample in cells if sample >= min_sample)
+    z_corr = bonferroni_z(family_n, fwer_alpha)
+
+    # Step 3c: 构造 SignalStat(第二遍;raw ci_low/ci_high/excess 计算与现状逐字节一致)
+    stats: List[SignalStat] = []
+    for sig_type, market, win, loss, sample in cells:
         wr = _winrate(win, sample)
         if sample > 0:
             ci_low, ci_high = wilson_ci(win, sample)
+            ci_low_corrected: Optional[float] = wilson_ci(win, sample, z_corr)[0]
         else:
             ci_low, ci_high = None, None
+            ci_low_corrected = None
         base = baseline_rate.get(market)
         if ci_low is not None and base is not None:
             excess: Optional[float] = round(ci_low - base, 4)
@@ -336,6 +375,8 @@ def aggregate_signal_stats(
                 ci_high=ci_high,
                 baseline_win_rate=base,
                 excess=excess,
+                ci_low_corrected=ci_low_corrected,
+                family_size=family_n,
             )
         )
     return stats

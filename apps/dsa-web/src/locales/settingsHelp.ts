@@ -899,6 +899,18 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响 signal_stats 中 win/loss/sample 统计和 Wilson CI 宽窄。'],
     notes: ['修改后需重新运行 --signal-backtest 才会更新 signal_stats。'],
   },
+  'settings.backtest.SIGNAL_BACKTEST_FWER_ALPHA': {
+    title: '信号验证多重检验族水平',
+    summary: '对信号"已验证"标记做 family-wise(Bonferroni-CI)多重检验校正的族水平(双尾口径;等价单尾假验证率约为该值的一半)。',
+    usage: '默认 0.05(沿用现有 95% CI 水平)。一次批跑同时检验多个(信号类型×市场)组合时,按组合数收紧每格的置信下界,防止纯靠运气的组合被标"已验证"。越小越严。',
+    valueNotes: [
+      '域 [0.0001, 0.05]:越界值钳制到边界,非数字回退默认 0.05。',
+      '上限 0.05 保证校正只会比未校正更严,绝不更宽松。',
+      '单一组合(family=1)时无多重检验,行为与未校正完全一致。',
+    ],
+    impact: ['影响 signal_stats 中 ci_low_corrected 与前端"已验证"标识;family_size 字段透出同检组合数。'],
+    notes: ['修改后需重新运行 --signal-backtest 才会按新族水平重算校正列。'],
+  },
   'settings.backtest.CRYPTO_INTRADAY_BACKTEST_INTERVAL': {
     title: '盘中回测 Bar 粒度',
     summary: '盘中/分钟级回测所用的 K 线粒度（crypto MVP），支持 1m/5m/15m/1h。',

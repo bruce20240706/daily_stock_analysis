@@ -197,11 +197,14 @@ def _hit_fields_from_markers(markers: list) -> dict:
                 "ci_low": m.get("ci_low"),
                 "ci_high": m.get("ci_high"),
                 "baseline_excess": m.get("baseline_excess"),
+                "ci_low_corrected": m.get("ci_low_corrected"),
+                "family_size": m.get("family_size"),
                 "horizon_bars": m.get("horizon_bars"),
                 "signal_status": m.get("status"),
             }
     return {"hit_rate": None, "hit_sample": None, "verified": False,
             "ci_low": None, "ci_high": None, "baseline_excess": None,
+            "ci_low_corrected": None, "family_size": None,
             "horizon_bars": None, "signal_status": None}
 
 
@@ -232,6 +235,7 @@ def _degraded_entry(code: str, reason: str) -> dict:
         "price_lines": {"entry": None, "stop": None, "target": None},
         "latest_close": None, "hit_rate": None, "hit_sample": None, "verified": False,
         "ci_low": None, "ci_high": None, "baseline_excess": None,
+        "ci_low_corrected": None, "family_size": None,
         "resonance": "none",
         "status": "degraded", "degraded_reason": reason,
     }

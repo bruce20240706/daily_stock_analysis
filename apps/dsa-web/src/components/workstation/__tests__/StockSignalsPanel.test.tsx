@@ -8,7 +8,7 @@ import { StockSignalsPanel } from '../StockSignalsPanel';
 const baseMarkerFull = { timestamp: 1, price: 1700, anchor: 'low', direction: 'bullish', signalType: 'volume_breakout',
   source: 'rule', confidence: 'high', isDailyApprox: false, isAnomalous: false, reason: '放量突破',
   threshold: null, observedValue: null, hitRate: 0.62, hitSample: 18, verified: true,
-  ciLow: null, ciHigh: null, baselineExcess: null, asOf: null };
+  ciLow: null, ciHigh: null, baselineExcess: null, ciLowCorrected: null, familySize: null, asOf: null };
 
 const sig = (over = {}) => ({ status: 'ok', consistency: 'consistent', degradedReason: null,
   priceLines: { entry: 1700, stop: 1620, target: 1850 },

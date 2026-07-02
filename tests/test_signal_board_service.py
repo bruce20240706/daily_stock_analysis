@@ -274,3 +274,24 @@ def test_b4_board_engine_uses_for_market_config(monkeypatch):
     assert len(captured) == 1
     assert captured[0] is not None
     assert captured[0].breakout_window == VPSConfig.for_market("cn").breakout_window
+
+
+# --- Inc 1c: board 层透传 ci_low_corrected/family_size(spec §4.6-2) ---
+from src.services.signal_board_service import _hit_fields_from_markers, _degraded_entry
+
+
+def test_hit_fields_from_markers_carries_corrected_fields():
+    marker = {"source": "rule", "hit_rate": 0.6, "hit_sample": 30, "verified": False,
+              "ci_low": 0.55, "ci_high": 0.7, "baseline_excess": 0.05,
+              "horizon_bars": 10, "status": "active",
+              "ci_low_corrected": 0.48, "family_size": 20}
+    f = _hit_fields_from_markers([marker])
+    assert f["ci_low_corrected"] == 0.48 and f["family_size"] == 20
+    # 无 rule marker 的 fallback 分支同样含两键(键集一致)
+    empty = _hit_fields_from_markers([])
+    assert empty["ci_low_corrected"] is None and empty["family_size"] is None
+
+
+def test_degraded_entry_contains_corrected_keys():
+    e = _degraded_entry("600519", "信号计算失败")
+    assert e["ci_low_corrected"] is None and e["family_size"] is None

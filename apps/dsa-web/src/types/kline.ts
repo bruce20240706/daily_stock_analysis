@@ -45,6 +45,8 @@ export interface SignalMarker {
   ciLow: number | null;
   ciHigh: number | null;
   baselineExcess: number | null;
+  ciLowCorrected: number | null;   // family-wise 校正后 CI 下界(Inc 1c);null=legacy/无样本
+  familySize: number | null;       // 同检格子数 N(Inc 1c);null=legacy
   asOf: number | null; // epoch ms, llm only
   horizonBars: number | null;
   status: 'active' | 'aging' | 'expired' | null;
@@ -87,6 +89,8 @@ export interface BoardEntry {
   ciLow: number | null;
   ciHigh: number | null;
   baselineExcess: number | null;
+  ciLowCorrected: number | null;   // family-wise 校正后 CI 下界(Inc 1c);null=legacy/无样本
+  familySize: number | null;       // 同检格子数 N(Inc 1c);null=legacy
   status: 'ok' | 'degraded';
   degradedReason: string | null;
   resonance: ResonanceLevel;
