@@ -89,7 +89,8 @@ def test_resolver_returns_horizon_key(monkeypatch):
     from src.services import signal_hit_rate as shr
     monkeypatch.setattr(shr, "get_market_for_stock", lambda code: "A")
     stat = _types.SimpleNamespace(win_rate=0.6, sample=99, ci_low=0.55,
-                                  ci_high=0.7, baseline_win_rate=0.5, excess=0.05)
+                                  ci_high=0.7, baseline_win_rate=0.5, excess=0.05,
+                                  ci_low_corrected=None, family_size=None)
     monkeypatch.setattr(shr.SignalStatsRepository, "get",
                         lambda self, st, mkt, *, interval="1d", horizon=None: stat)
     out = shr.resolve_marker_hit_fields("volume_breakout", "600519")
