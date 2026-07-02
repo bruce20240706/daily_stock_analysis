@@ -99,3 +99,38 @@ def test_board_endpoint_rejects_bad_interval(monkeypatch):
     with pytest.raises(HTTPException) as ei:
         board_ep.get_signals_board(days=120, refresh=False, interval="2h", service=_Svc(["AAA"]))
     assert ei.value.status_code == 422
+
+
+# --- Inc 1c: Pydantic 层保留两新字段 + verified 描述订正(spec §4.6-3/4) ---
+from api.v1.schemas.stocks import BoardEntry, SignalMarker
+
+
+def test_board_entry_pydantic_preserves_corrected_fields():
+    """schema 未声明字段会被 Pydantic 静默丢弃——本测试锁死声明存在。"""
+    entry = BoardEntry(
+        code="600519", action_group="buy", consistency="consistent",
+        price_lines={"entry": None, "stop": None, "target": None},
+        status="ok", ci_low_corrected=0.48, family_size=20,
+    )
+    dumped = entry.model_dump()
+    assert dumped["ci_low_corrected"] == 0.48
+    assert dumped["family_size"] == 20
+
+
+def test_signal_marker_pydantic_preserves_corrected_fields():
+    m = SignalMarker(
+        timestamp=1, price=1.0, anchor="low", direction="bullish",
+        signal_type="x", source="rule", confidence="low",
+        is_daily_approx=False, is_anomalous=False, reason="r",
+        ci_low_corrected=0.48, family_size=20,
+    )
+    dumped = m.model_dump()
+    assert dumped["ci_low_corrected"] == 0.48
+    assert dumped["family_size"] == 20
+
+
+def test_verified_description_mentions_correction():
+    """§4.6-4 防文档假话:verified 描述须写明校正后下界口径。"""
+    for model in (SignalMarker, BoardEntry):
+        desc = model.model_fields["verified"].description
+        assert "校正" in desc, f"{model.__name__}.verified 描述未订正: {desc}"

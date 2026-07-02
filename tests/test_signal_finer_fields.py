@@ -353,3 +353,30 @@ def test_d7_entry_plan_quality_none_when_missing_from_payload():
     assert entry["plan_quality"] is None
     assert entry["horizon_bars"] is None
     assert entry["signal_status"] is None
+
+
+# --- Inc 1c: ci_low_corrected/family_size 过 marker 白名单一跳(spec §4.6-1) ---
+
+def test_marker_from_vpsignal_carries_corrected_fields():
+    sig = _types.SimpleNamespace(
+        timestamp=1000, price=10.0, anchor="low", direction="bullish",
+        signal_type="volume_breakout", confidence="high",
+        is_daily_approx=False, is_anomalous=False, reason="x",
+        threshold=None, observed_value=None,
+    )
+    resolver = lambda st, code: {"hit_rate": 0.6, "hit_sample": 30, "verified": False,
+                                 "ci_low": 0.55, "ci_high": 0.7, "baseline_excess": 0.05,
+                                 "horizon": 10, "ci_low_corrected": 0.48, "family_size": 20}
+    m = _ss._marker_from_vpsignal(sig, code="600519", hit_fields_resolver=resolver)
+    assert m["ci_low_corrected"] == 0.48
+    assert m["family_size"] == 20
+
+
+def test_marker_from_vpsignal_no_resolver_corrected_none():
+    sig = _types.SimpleNamespace(
+        timestamp=1, price=1.0, anchor="low", direction="bullish",
+        signal_type="x", confidence="low", is_daily_approx=False,
+        is_anomalous=False, reason="r", threshold=None, observed_value=None,
+    )
+    m = _ss._marker_from_vpsignal(sig)
+    assert m["ci_low_corrected"] is None and m["family_size"] is None
