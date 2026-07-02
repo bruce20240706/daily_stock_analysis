@@ -27,6 +27,7 @@ from typing import List, Optional
 
 import pandas as pd
 
+from src.core.backtest_engine import risk_metrics_from_returns
 from src.services.volume_price_signals import (
     VPSConfig,
     compute_signals_for_all_bars,
@@ -34,6 +35,13 @@ from src.services.volume_price_signals import (
 )
 
 BASELINE_SIGNAL_TYPE = "__baseline__"
+
+SIGNAL_RISK_NOTE = (
+    "信号流三重门事件序列(毛收益,保守跳空感知:win按target/loss按min(open,stop)/"
+    "expired按窗末close;entry=触发bar close;target<=entry 失真形态整层剔除计excluded;"
+    "非组合回撤;不年化;窗口可重叠自相关;描述性统计无CI未经多重检验校正)"
+)
+# 注:此常量不进 per-cell dict(D5),供 Task 6 的 Field description 与 Task 7 文档引用——单一真源放数据模块。
 
 
 @dataclass(frozen=True)
@@ -43,11 +51,17 @@ class SignalOutcome:
     signal_type  信号类型（与 VPSignal.signal_type 对应；baseline 固定 '__baseline__'）
     market       市场标识（'cn' / 'hk' / 'us' 等，透传自调用方）
     outcome      'win' | 'loss' | 'expired'
+    return_pct   保守跳空感知毛收益(%，见 classify_triple_barrier_with_return)；
+                 失真形态/无效数据为 None。默认 None（末尾字段，legacy 三参构造零破坏）。
+    date         触发 bar 的日期字符串；用于 aggregate 阶段按时序排序计算 maxDD。
+                 默认 None（末尾字段，legacy 三参构造零破坏）。
     """
 
     signal_type: str
     market: str
     outcome: str
+    return_pct: Optional[float] = None
+    date: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -155,15 +169,18 @@ def _eval(
         fwd = _bars_as_dicts(df.iloc[t + 1 : t + 1 + horizon])
         if not fwd:
             continue
+        entry = float(df.iloc[t]["close"])
+        date = str(df.iloc[t]["date"])
+        r = classify_triple_barrier_with_return(fwd, stop=lv.stop, target=lv.target, entry=entry)
         if all_bars:
             out.append(SignalOutcome(
                 signal_type=BASELINE_SIGNAL_TYPE, market=market,
-                outcome=classify_triple_barrier(fwd, stop=lv.stop, target=lv.target)))
+                outcome=r.outcome, return_pct=r.return_pct, date=date))
         else:
-            for sig_type in sig_by_bar.get(t, ()):                         # O(1) 查表
+            for sig_type in sig_by_bar.get(t, ()):                         # O(1) 查表；同 bar 多信号共享同一 r（顺带 O(信号数) 优化，classify 只算一次，行为等价）
                 out.append(SignalOutcome(
                     signal_type=sig_type, market=market,
-                    outcome=classify_triple_barrier(fwd, stop=lv.stop, target=lv.target)))
+                    outcome=r.outcome, return_pct=r.return_pct, date=date))
     return out
 
 
@@ -257,6 +274,11 @@ class SignalStat:
         excess:             超额 = ci_low - baseline_win_rate；任一为 None 时为 None。
         ci_low_corrected:   family-wise 校正后 Wilson 下界；N<=1 时==ci_low；sample==0 时 None。
         family_size:        本次聚合可检验格子数 N(sample>=min_sample 的格子数)。
+        risk_metrics:       本格收益序列的不年化风险指标 dict(risk_metrics_from_returns 8 键 +
+                             excluded/interval/horizon 三键，恒为全键 dict，不为 None；末尾字段，
+                             legacy 位置构造零破坏。注意：值为 dict（可变/不可哈希），虽 frozen=True，
+                             但自动生成的 __hash__ 因此字段实际不可调用（hash(instance) 会
+                             TypeError），当前代码库无处依赖 SignalStat 可哈希，非回归）。
     """
 
     signal_type: str
@@ -273,6 +295,7 @@ class SignalStat:
     excess: Optional[float]
     ci_low_corrected: Optional[float] = None
     family_size: int = 0
+    risk_metrics: Optional[dict] = None
 
 
 def wilson_ci(wins: int, n: int, z: float = 1.96) -> tuple:
@@ -355,12 +378,16 @@ def aggregate_signal_stats(
             base_w[o.market] += 1
     baseline_rate = {m: _winrate(base_w[m], base_n[m]) for m in base_n}
 
-    # Step 2: 按 (signal_type, market) 分桶统计（expired 及未知 outcome 排除在分母外）
+    # Step 2: 按 (signal_type, market) 分桶统计 + 顺路收集收益序列（D8:expired 计入）
     buckets: dict = defaultdict(lambda: {"win": 0, "loss": 0})
-    for o in outcomes:
-        if o.outcome not in ("win", "loss"):
-            continue
-        buckets[(o.signal_type, o.market)][o.outcome] += 1
+    cell_events: dict = defaultdict(list)      # (sig_type, market) -> [(date, idx, return_pct)]
+    for idx, o in enumerate(outcomes):
+        if o.outcome in ("win", "loss"):
+            buckets[(o.signal_type, o.market)][o.outcome] += 1
+        if o.outcome in ("win", "loss", "expired"):
+            cell_events[(o.signal_type, o.market)].append((o.date, idx, o.return_pct))
+    # 注意：纯 expired 格子会进 cell_events 但不进 buckets → 不产 SignalStat 行——保持
+    # “格子=有 win/loss” 现语义，cell_events 只为已有格子供数；Step 3c 用 .get(...) 取值。
 
     # Step 3a: 先算各格 win/loss/sample(第一遍,确定 family N)
     cells = []
@@ -388,6 +415,16 @@ def aggregate_signal_stats(
             excess: Optional[float] = round(ci_low - base, 4)
         else:
             excess = None
+
+        events = cell_events.get((sig_type, market), [])
+        returns_in = [ret for _, _, ret in events if ret is not None]
+        sort_keys_in = [(d is None, d or "", i) for d, i, ret in events if ret is not None]
+        excluded = sum(1 for _, _, ret in events if ret is None)
+        rm = risk_metrics_from_returns(returns_in, sort_keys=sort_keys_in)
+        rm["excluded"] = excluded
+        rm["interval"] = interval
+        rm["horizon"] = horizon
+
         stats.append(
             SignalStat(
                 signal_type=sig_type,
@@ -404,6 +441,7 @@ def aggregate_signal_stats(
                 excess=excess,
                 ci_low_corrected=ci_low_corrected,
                 family_size=family_n,
+                risk_metrics=rm,
             )
         )
     return stats

@@ -365,3 +365,21 @@ def test_wrapper_equals_core_outcome():
     ]
     for fwd, stop, target in cases:
         assert classify_triple_barrier(fwd, stop=stop, target=target) == _classify_core(fwd, stop=stop, target=target)[0]
+
+
+def test_eval_produces_outcomes_with_return_and_date():
+    import pandas as pd
+    from src.services.signal_backtest import evaluate_baseline_outcomes
+    n = 80
+    df = pd.DataFrame({
+        "date": [f"2026-03-{(i % 28) + 1:02d}" for i in range(n)],
+        "open": [100.0 + i * 0.1 for i in range(n)],
+        "high": [101.0 + i * 0.1 for i in range(n)],
+        "low": [99.0 + i * 0.1 for i in range(n)],
+        "close": [100.5 + i * 0.1 for i in range(n)],
+        "volume": [1_000_000] * n,
+    })
+    outs = evaluate_baseline_outcomes(df, market="cn", horizon=10)
+    assert outs, "应产出 baseline outcome"
+    assert all(o.date is not None for o in outs)
+    assert any(o.return_pct is not None for o in outs)
