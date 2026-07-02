@@ -19,6 +19,7 @@ ci_low）；详见 docs/superpowers/specs/2026-07-01-chainb-multiple-testing-des
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Optional
 
@@ -95,13 +96,14 @@ def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1
                   分钟桶的可信度（需先跑 --signal-backtest-interval 落库）。
 
     返回 keys: hit_rate, hit_sample, verified, ci_low, ci_high, baseline_excess, horizon,
-    ci_low_corrected, family_size。
+    ci_low_corrected, family_size, risk_metrics。
     （horizon = 命中桶时的 signal_backtest_horizon_bars；无桶/无样本时为 None，由 M3.1 透出。
-    ci_low_corrected/family_size 见 Inc 1c；老行为 None。）
+    ci_low_corrected/family_size 见 Inc 1c；老行为 None。risk_metrics 见链路B 风险画像
+    （spec §4.5）：该格收益序列的不年化风险指标 dict；坏 JSON/非 dict/老行一律 None。）
     """
     _none = {"hit_rate": None, "hit_sample": None, "verified": False,
              "ci_low": None, "ci_high": None, "baseline_excess": None, "horizon": None,
-             "ci_low_corrected": None, "family_size": None}
+             "ci_low_corrected": None, "family_size": None, "risk_metrics": None}
 
     market = get_market_for_stock(code)
     if market is None:
@@ -125,6 +127,20 @@ def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1
         and stat.baseline_win_rate is not None
         and effective_low > stat.baseline_win_rate
     )
+
+    # 链路B 风险画像:resolver 透出 risk_metrics(spec §4.5)。getattr 容错非 ORM 桩
+    # 缺属性（同上 ci_low_corrected 注释：MagicMock 桩必须显式补属性，否则子 mock
+    # 非字符串传入 json.loads 会 TypeError，仍会被下方 except 兜底降级为 None）。
+    _rm_raw = getattr(stat, "risk_metrics_json", None)
+    risk_metrics = None
+    if _rm_raw:
+        try:
+            _parsed = json.loads(_rm_raw)
+            if isinstance(_parsed, dict):
+                risk_metrics = _parsed
+        except (TypeError, ValueError):
+            risk_metrics = None
+
     return {
         "hit_rate": stat.win_rate,
         "hit_sample": stat.sample,
@@ -135,4 +151,5 @@ def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1
         "horizon": horizon,
         "ci_low_corrected": _corr,
         "family_size": getattr(stat, "family_size", None),
+        "risk_metrics": risk_metrics,
     }

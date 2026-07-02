@@ -6,6 +6,7 @@ watchlist 来源与看板完全一致：读取 SystemConfigService 的 STOCK_LIS
 因为导入该端点模块会触发 FastAPI/Starlette 全量初始化（耗时 ~10s，引入 58 个重模块），
 CLI/批作业路径不应承担此代价。等价逻辑在本模块内独立实现，数据源相同。
 """
+import json
 import logging
 from datetime import date, timedelta
 from typing import List, Optional
@@ -95,6 +96,23 @@ def _read_watchlist_codes(service: SystemConfigService) -> list:
             stock_list_str = str(item.get("value", ""))
             break
     return [c.strip() for c in stock_list_str.split(",") if c.strip()]
+
+
+def _serialize_risk_metrics(risk_metrics: Optional[dict]) -> Optional[str]:
+    """把单格风险画像 dict 序列化为落库 JSON;None 直接透传（无风险画像/legacy）。
+
+    allow_nan=False fail-closed：risk_metrics_from_returns 已按契约保证不产出
+    inf/NaN（非有限值成对剔除），故 ValueError 理论不可达；此处仍用 try/except
+    兜底并单格降级为 None（NULL=legacy），而非让单格异常拖垮整批落库——与本文件
+    既有"单股失败不拖垮整批"风格一致（see 上方 evaluate 循环 `except Exception`）。
+    """
+    if risk_metrics is None:
+        return None
+    try:
+        return json.dumps(risk_metrics, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        logger.warning("risk_metrics 序列化失败，该格降级为 legacy(NULL): %s", exc)
+        return None
 
 
 class SignalBacktestService:
@@ -188,6 +206,7 @@ class SignalBacktestService:
                 excess=s.excess,
                 ci_low_corrected=s.ci_low_corrected,
                 family_size=s.family_size,
+                risk_metrics_json=_serialize_risk_metrics(s.risk_metrics),
             )
             for s in stats
         ]

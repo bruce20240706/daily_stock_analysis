@@ -433,6 +433,7 @@ class SignalStatRow(Base):
     excess = Column(Float)
     ci_low_corrected = Column(Float)   # family-wise 校正后 Wilson 下界;NULL=legacy 行(未重跑)
     family_size = Column(Integer)      # 写时 family 可检验格子数 N;NULL=legacy 行
+    risk_metrics_json = Column(Text)   # 该格风险画像 JSON;NULL=legacy 行(未重跑)
     computed_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (
@@ -946,9 +947,9 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             logger.warning("补全 backtest_results 盘中列失败: %s", exc)
 
     def _ensure_signal_stats_columns(self) -> None:
-        """幂等补列:老库的 signal_stats 缺 ci_low_corrected/family_size 时 ALTER 补上。
+        """幂等补列:老库的 signal_stats 缺 ci_low_corrected/family_size/risk_metrics_json 时 ALTER 补上。
 
-        与 _ensure_backtest_intraday_columns 同款守卫;两列 plain nullable 无 DEFAULT
+        与 _ensure_backtest_intraday_columns 同款守卫;三列 plain nullable 无 DEFAULT
         (SQLite 对已填充表加 NOT NULL 列须带 DEFAULT,nullable 规避且 NULL=legacy 哨兵)。
         """
         try:
@@ -966,6 +967,10 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 if "family_size" not in existing:
                     conn.execute(text(
                         "ALTER TABLE signal_stats ADD COLUMN family_size INTEGER"
+                    ))
+                if "risk_metrics_json" not in existing:
+                    conn.execute(text(
+                        "ALTER TABLE signal_stats ADD COLUMN risk_metrics_json TEXT"
                     ))
         except Exception as exc:
             logger.warning("补全 signal_stats 校正列失败: %s", exc)
