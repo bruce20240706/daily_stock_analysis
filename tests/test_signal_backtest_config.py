@@ -173,3 +173,18 @@ def test_interval_override_keys_only_commented_in_env_example():
         if m and m.group(1) in keys:
             active.add(m.group(1))
     assert active == set(), f"这些键必须为注释行、不得为活动赋值: {sorted(active)}"
+
+
+def test_resolve_verified_min_sample_shared_helper(monkeypatch):
+    """Inc 1c: 读写共用 min_sample 解析(spec §4.7);显式设 SIGNAL_HIT_VERIFIED_MIN_SAMPLE 优先。"""
+    from src.services.signal_hit_rate import resolve_verified_min_sample
+    monkeypatch.delenv("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", raising=False)
+    monkeypatch.delenv("BACKTEST_EVAL_WINDOW_DAYS", raising=False)
+    c = Config._load_from_env()
+    # 未显式设置时 loader 已把 signal_hit_verified_min_sample 回落为 eval_window(=10)
+    assert resolve_verified_min_sample(c) == 10
+    monkeypatch.setenv("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", "3")
+    assert resolve_verified_min_sample(Config._load_from_env()) == 3
+    monkeypatch.delenv("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", raising=False)
+    monkeypatch.setenv("BACKTEST_EVAL_WINDOW_DAYS", "15")
+    assert resolve_verified_min_sample(Config._load_from_env()) == 15

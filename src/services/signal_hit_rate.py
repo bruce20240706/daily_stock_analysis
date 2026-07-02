@@ -70,6 +70,15 @@ def backfill_signal_hit_rate(signal_type: str, code: str) -> HitRate:
     return HitRate(hit_rate=round(correct / sample, 4), hit_sample=sample)
 
 
+def resolve_verified_min_sample(cfg) -> int:
+    """verified 判定与 family N 共用的 min_sample 解析(读写路径唯一真源,spec §4.7)。
+
+    = signal_hit_verified_min_sample(>0 时优先)否则 backtest_eval_window_days(默认 10)。
+    """
+    return int(getattr(cfg, "signal_hit_verified_min_sample", 0) or 0) \
+        or int(getattr(cfg, "backtest_eval_window_days", 10))
+
+
 def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1d") -> dict:
     """把命中率聚合结果映射为 SignalMarker 的 6 个 hit 字段（M3-A6 改源）。
 
@@ -92,8 +101,7 @@ def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1
         return dict(_none)
 
     cfg = get_config()
-    min_sample = int(getattr(cfg, "signal_hit_verified_min_sample", 0) or 0) \
-        or int(getattr(cfg, "backtest_eval_window_days", 10))
+    min_sample = resolve_verified_min_sample(cfg)
     horizon = int(getattr(cfg, "signal_backtest_horizon_bars", 10))
 
     stat = SignalStatsRepository().get(signal_type, market, interval=interval, horizon=horizon)

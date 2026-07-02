@@ -21,6 +21,7 @@ from src.services.signal_backtest import (
     evaluate_baseline_outcomes,
     evaluate_signal_outcomes,
 )
+from src.services.signal_hit_rate import resolve_verified_min_sample
 from src.services.volume_price_signals import VPSConfig
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
@@ -164,7 +165,11 @@ class SignalBacktestService:
                 logger.warning("信号回测跳过 %s: %s", code, exc)
 
         # 聚合所有股票的结果（一次调用）
-        stats = aggregate_signal_stats(all_sig, all_base, horizon=hz, interval=interval)
+        stats = aggregate_signal_stats(
+            all_sig, all_base, horizon=hz, interval=interval,
+            fwer_alpha=float(getattr(cfg, "signal_backtest_fwer_alpha", 0.05)),
+            min_sample=resolve_verified_min_sample(cfg),
+        )
 
         # 构造 ORM 行并落库
         orm_rows = [
@@ -181,6 +186,8 @@ class SignalBacktestService:
                 ci_high=s.ci_high,
                 baseline_win_rate=s.baseline_win_rate,
                 excess=s.excess,
+                ci_low_corrected=s.ci_low_corrected,
+                family_size=s.family_size,
             )
             for s in stats
         ]

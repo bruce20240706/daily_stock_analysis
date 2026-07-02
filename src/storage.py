@@ -431,6 +431,8 @@ class SignalStatRow(Base):
     ci_high = Column(Float)
     baseline_win_rate = Column(Float)
     excess = Column(Float)
+    ci_low_corrected = Column(Float)   # family-wise 校正后 Wilson 下界;NULL=legacy 行(未重跑)
+    family_size = Column(Integer)      # 写时 family 可检验格子数 N;NULL=legacy 行
     computed_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (
@@ -897,6 +899,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             # 创建所有表
             Base.metadata.create_all(self._engine)
             self._ensure_backtest_intraday_columns()
+            self._ensure_signal_stats_columns()
             self._ensure_schema_migration_record()
 
             self._initialized = True
@@ -941,6 +944,31 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     ))
         except Exception as exc:
             logger.warning("补全 backtest_results 盘中列失败: %s", exc)
+
+    def _ensure_signal_stats_columns(self) -> None:
+        """幂等补列:老库的 signal_stats 缺 ci_low_corrected/family_size 时 ALTER 补上。
+
+        与 _ensure_backtest_intraday_columns 同款守卫;两列 plain nullable 无 DEFAULT
+        (SQLite 对已填充表加 NOT NULL 列须带 DEFAULT,nullable 规避且 NULL=legacy 哨兵)。
+        """
+        try:
+            with self._engine.begin() as conn:
+                from sqlalchemy import text
+                existing = {
+                    r[1] for r in conn.execute(text("PRAGMA table_info(signal_stats)"))
+                }
+                if not existing:
+                    return  # 表尚未建(理论上 create_all 已建);留给 create_all
+                if "ci_low_corrected" not in existing:
+                    conn.execute(text(
+                        "ALTER TABLE signal_stats ADD COLUMN ci_low_corrected FLOAT"
+                    ))
+                if "family_size" not in existing:
+                    conn.execute(text(
+                        "ALTER TABLE signal_stats ADD COLUMN family_size INTEGER"
+                    ))
+        except Exception as exc:
+            logger.warning("补全 signal_stats 校正列失败: %s", exc)
 
     def _ensure_schema_migration_record(self) -> None:
         session = self._SessionLocal()
