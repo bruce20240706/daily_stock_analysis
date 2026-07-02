@@ -50,43 +50,65 @@ class SignalOutcome:
     outcome: str
 
 
-def classify_triple_barrier(
-    forward_bars: List[dict],
-    *,
-    stop: float,
-    target: float,
-) -> str:
-    """三重门分类：逐根前瞻判断止盈/止损/到期。
+@dataclass(frozen=True)
+class TripleBarrierResult:
+    outcome: str                      # 'win' | 'loss' | 'expired'
+    return_pct: Optional[float]       # 保守跳空感知收益(%);失真形态/无效数据为 None
 
-    规则（长仓视角）：
-    - 同根 bar 同时触及 target 和 stop → 保守判 loss
-    - 先触 target（high >= target）→ win
-    - 先破 stop（low <= stop）→ loss
-    - 到期未触任何门 → expired
 
-    Args:
-        forward_bars: 触发 bar 之后的前瞻数据，每个元素须含 'high'/'low'/'close'。
-        stop:         止损价（long 仓 low <= stop 触发）。
-        target:       止盈价（long 仓 high >= target 触发）。
-
-    Returns:
-        'win' | 'loss' | 'expired'
-    """
-    for bar in forward_bars:
+def _classify_core(forward_bars, *, stop, target):
+    """共核:返回 (outcome, hit_idx);hit_idx=触障 bar 下标,expired 为 None。"""
+    for i, bar in enumerate(forward_bars):
         hit_target = bar["high"] >= target
         hit_stop = bar["low"] <= stop
         if hit_target and hit_stop:
-            return "loss"   # 同 bar 两触：保守判 loss
+            return "loss", i     # 同 bar 两触:保守判 loss(语义不变)
         if hit_stop:
-            return "loss"
+            return "loss", i
         if hit_target:
-            return "win"
-    return "expired"
+            return "win", i
+    return "expired", None
+
+
+def classify_triple_barrier(forward_bars, *, stop, target) -> str:
+    """(既有签名/语义零变,变薄 wrapper)"""
+    return _classify_core(forward_bars, stop=stop, target=target)[0]
+
+
+def classify_triple_barrier_with_return(forward_bars, *, stop, target, entry) -> TripleBarrierResult:
+    """三重门分类 + 保守跳空感知收益(D1 用户拍板 + 形态级失真守卫)。
+
+    失真守卫(outcome 无关,round2 Blocker 修正):target <= entry(触发 close 已越过回踩锚
+    target 的动量/突破形态)→ 不论 win/loss/expired 一律 return_pct=None——win-only 剔除会
+    单边截断(赢的不计、输的全计),整层剔除才保收益序列无选择偏差。
+
+    win:     exit = target(跳空高开不多计盈利)
+    loss:    exit = min(触障 bar open, stop)(跳空低开按更差的 open;open 非有限或 <=0 回退 stop,
+             0.0 哨兵/NaN 不产假 -100;含 open>=target 高开双杀子案,同取保守,见 §6)
+    expired: exit = forward_bars[-1]['close'](窗末平仓,D8:计入收益序列)
+    return_pct = (exit - entry)/entry*100,下钳 >= -100;
+    entry/exit 非有限或 (==0) → None(防御,outcome 分类不受影响)。
+    """
+    outcome, hit_idx = _classify_core(forward_bars, stop=stop, target=target)
+    if entry is None or not math.isfinite(entry) or entry <= 0 or not forward_bars:
+        return TripleBarrierResult(outcome, None)
+    if target <= entry:                        # 形态级失真守卫(D1,outcome 之外)
+        return TripleBarrierResult(outcome, None)
+    if outcome == "win":
+        exit_price = target
+    elif outcome == "loss":
+        o = forward_bars[hit_idx]["open"]
+        exit_price = min(o, stop) if (isinstance(o, (int, float)) and math.isfinite(o) and o > 0) else stop
+    else:
+        exit_price = forward_bars[-1]["close"]
+    if not (isinstance(exit_price, (int, float)) and math.isfinite(exit_price) and exit_price != 0.0):
+        return TripleBarrierResult(outcome, None)   # 终门:NaN/0 哨兵一律 None,绝不毒化聚合
+    return TripleBarrierResult(outcome, max((exit_price - entry) / entry * 100.0, -100.0))
 
 
 def _bars_as_dicts(df: pd.DataFrame) -> List[dict]:
     """将 DataFrame 子集转为 classify_triple_barrier 所需的 dict list。"""
-    return df[["high", "low", "close"]].to_dict("records")
+    return df[["open", "high", "low", "close"]].to_dict("records")
 
 
 def _eval(
