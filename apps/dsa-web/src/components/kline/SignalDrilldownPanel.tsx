@@ -1,7 +1,7 @@
 import type React from 'react';
 import type { ResonanceLevel, SignalMarker } from '../../types/kline';
 import { cn } from '../../utils/cn';
-import { formatCi, formatExcess, formatHitRate, formatHorizon, markerStatusLabel, verifiedLabel } from '../../utils/credibility';
+import { formatCi, formatExcess, formatHitRate, formatHorizon, markerStatusLabel, unverifiedExcessNote, verifiedLabel } from '../../utils/credibility';
 import { resonanceLabel, resonanceTooltip } from '../../utils/resonance';
 
 interface SignalDrilldownPanelProps {
@@ -26,6 +26,10 @@ const directionLabel: Record<SignalMarker['direction'], string> = {
 
 const MarkerCard: React.FC<{ marker: SignalMarker }> = ({ marker }) => {
   const isRule = marker.source === 'rule';
+  const note = unverifiedExcessNote({
+    verified: marker.verified, baselineExcess: marker.baselineExcess,
+    ciLowCorrected: marker.ciLowCorrected, familySize: marker.familySize,
+  });
   return (
     <div
       data-testid="drilldown-marker"
@@ -79,6 +83,11 @@ const MarkerCard: React.FC<{ marker: SignalMarker }> = ({ marker }) => {
         >
           {verifiedLabel(marker.verified)}
         </span>
+        {note && (
+          <span data-testid="drilldown-corrected-note" className="text-secondary-text">
+            ({note})
+          </span>
+        )}
       </div>
       {marker.horizonBars != null && (
         <span data-testid="drilldown-horizon">{formatHorizon(marker.horizonBars)}</span>

@@ -38,6 +38,8 @@ type RawSignalMarker = {
   ci_low: number | null;
   ci_high: number | null;
   baseline_excess: number | null;
+  ci_low_corrected?: number | null;
+  family_size?: number | null;
   as_of: number | null;
   horizon_bars?: number | null;
   status?: 'active' | 'aging' | 'expired' | null;
@@ -72,6 +74,8 @@ const mapSignalMarker = (raw: RawSignalMarker): SignalMarker => ({
   ciLow: raw.ci_low ?? null,
   ciHigh: raw.ci_high ?? null,
   baselineExcess: raw.baseline_excess ?? null,
+  ciLowCorrected: raw.ci_low_corrected ?? null,
+  familySize: raw.family_size ?? null,
   asOf: raw.as_of ?? null,
   horizonBars: raw.horizon_bars ?? null,
   status: raw.status ?? null,
@@ -85,6 +89,8 @@ type RawBoardEntry = {
   price_lines: { entry: number | null; stop: number | null; target: number | null };
   latest_close: number | null; hit_rate: number | null; hit_sample: number | null;
   verified: boolean; ci_low: number | null; ci_high: number | null; baseline_excess: number | null;
+  ci_low_corrected?: number | null;
+  family_size?: number | null;
   status: BoardEntry['status']; degraded_reason: string | null;
   resonance?: ResonanceLevel | null;
   horizon_bars?: number | null;
@@ -104,6 +110,8 @@ const mapBoardEntry = (r: RawBoardEntry): BoardEntry => ({
   priceLines: { entry: r.price_lines?.entry ?? null, stop: r.price_lines?.stop ?? null, target: r.price_lines?.target ?? null },
   latestClose: r.latest_close ?? null, hitRate: r.hit_rate ?? null, hitSample: r.hit_sample ?? null,
   verified: r.verified, ciLow: r.ci_low ?? null, ciHigh: r.ci_high ?? null, baselineExcess: r.baseline_excess ?? null,
+  ciLowCorrected: r.ci_low_corrected ?? null,
+  familySize: r.family_size ?? null,
   status: r.status, degradedReason: r.degraded_reason ?? null,
   resonance: r.resonance ?? 'none',
   horizonBars: r.horizon_bars ?? null,

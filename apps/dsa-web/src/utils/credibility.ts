@@ -56,3 +56,24 @@ const _PLAN_QUALITY_LABEL: Record<string, string> = { high: '高', medium: '中'
 export function planQualityLabel(planQuality: 'high' | 'medium' | 'low' | null): string | null {
   return planQuality == null ? null : (_PLAN_QUALITY_LABEL[planQuality] ?? null);
 }
+
+interface UnverifiedExcessInput {
+  verified: boolean;
+  baselineExcess: number | null;
+  ciLowCorrected: number | null;
+  familySize: number | null;
+}
+
+/**
+ * 矛盾消解说明(Inc 1c):raw 超额为正但 verified=false 时,用校正下界解释原因。
+ * legacy 行(ciLowCorrected=null,未重跑)不注解——维持升级前展示,不显示"N=0"。
+ * 其余情形(已验证/无超额/数据缺失)返回 null。
+ */
+export function unverifiedExcessNote(input: UnverifiedExcessInput): string | null {
+  if (input.verified) return null;
+  if (input.baselineExcess === null || input.baselineExcess <= 0) return null;
+  if (input.ciLowCorrected === null) return null;
+  const corr = `${Math.round(input.ciLowCorrected * 100)}%`;
+  const fam = input.familySize != null ? `${input.familySize} 组同检校正后` : '多重检验校正后';
+  return `${fam}下界 ${corr},未超基准`;
+}

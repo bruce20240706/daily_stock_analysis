@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatHitRate, formatCi, formatExcess, verifiedLabel, formatHorizon, markerStatusLabel, planQualityLabel } from '../credibility';
+import { formatHitRate, formatCi, formatExcess, verifiedLabel, formatHorizon, markerStatusLabel, planQualityLabel, unverifiedExcessNote } from '../credibility';
 
 describe('credibility format', () => {
   it('formats hit rate with sample, empty when no sample', () => {
@@ -33,5 +33,29 @@ describe('credibility format', () => {
     expect(planQualityLabel('medium')).toBe('中');
     expect(planQualityLabel('low')).toBe('低');
     expect(planQualityLabel(null)).toBeNull();
+  });
+  it('unverified excess note explains correction, silent for legacy/verified', () => {
+    // 矛盾态:raw 超额>0 但 verified=false 且有校正值 → 给出数字解释
+    expect(unverifiedExcessNote({
+      verified: false, baselineExcess: 0.05, ciLowCorrected: 0.48, familySize: 20,
+    })).toBe('20 组同检校正后下界 48%,未超基准');
+    // familySize 缺失但有校正值 → 泛化措辞
+    expect(unverifiedExcessNote({
+      verified: false, baselineExcess: 0.05, ciLowCorrected: 0.48, familySize: null,
+    })).toBe('多重检验校正后下界 48%,未超基准');
+    // legacy 行(无校正值)→ 不注解,维持升级前展示(M-5:不显示 N=0)
+    expect(unverifiedExcessNote({
+      verified: false, baselineExcess: 0.05, ciLowCorrected: null, familySize: null,
+    })).toBeNull();
+    // verified=true / 无超额 / excess 缺失 → 无矛盾,不注解
+    expect(unverifiedExcessNote({
+      verified: true, baselineExcess: 0.05, ciLowCorrected: 0.52, familySize: 20,
+    })).toBeNull();
+    expect(unverifiedExcessNote({
+      verified: false, baselineExcess: -0.02, ciLowCorrected: 0.4, familySize: 5,
+    })).toBeNull();
+    expect(unverifiedExcessNote({
+      verified: false, baselineExcess: null, ciLowCorrected: 0.4, familySize: 5,
+    })).toBeNull();
   });
 });

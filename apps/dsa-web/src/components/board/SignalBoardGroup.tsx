@@ -2,7 +2,7 @@ import type React from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { BoardEntry } from '../../types/kline';
 import { cn } from '../../utils/cn';
-import { formatCi, formatExcess, formatHitRate, formatHorizon, markerStatusLabel, planQualityLabel, verifiedLabel } from '../../utils/credibility';
+import { formatCi, formatExcess, formatHitRate, formatHorizon, markerStatusLabel, planQualityLabel, unverifiedExcessNote, verifiedLabel } from '../../utils/credibility';
 import { resonanceLabel, resonanceTooltip } from '../../utils/resonance';
 
 const dirLabel: Record<string, string> = { bullish: '看多', bearish: '看空', neutral: '中性' };
@@ -30,7 +30,12 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
           </tr>
         </thead>
         <tbody>
-          {sorted.map((e) => (
+          {sorted.map((e) => {
+            const note = unverifiedExcessNote({
+              verified: e.verified, baselineExcess: e.baselineExcess,
+              ciLowCorrected: e.ciLowCorrected, familySize: e.familySize,
+            });
+            return (
             <tr key={e.code} data-testid="board-row"
                 onClick={() => onRowClick(e.code, e.name ?? undefined)}
                 className="cursor-pointer border-t border-border/60 hover:bg-hover">
@@ -57,6 +62,11 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
                   >{formatExcess(e.baselineExcess)}</span>
                 )}
                 <span className={cn(e.verified ? 'text-success' : 'text-secondary-text')}>{verifiedLabel(e.verified)}</span>
+                {note && (
+                  <span data-testid="board-corrected-note" className="ml-1 text-secondary-text">
+                    ({note})
+                  </span>
+                )}
                 {resonanceLabel(e.resonance) && (
                   <span
                     data-testid="board-resonance"
@@ -86,7 +96,8 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
                 </button>
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </section>

@@ -79,6 +79,41 @@ describe('stocksApi.getBoard', () => {
     expect(res.entries[0].planQuality).toBe('high');
   });
 
+  it('maps ci_low_corrected/family_size to camelCase, null when absent', async () => {
+    get.mockResolvedValueOnce({ data: {
+      as_of: 444, counts: { buy: 1, hold: 0, sell: 0, unavailable: 0 }, degraded_codes: [],
+      entries: [
+        { code: '600519', name: '贵州茅台', market: 'CN', action_group: 'buy',
+          rule_direction: 'bullish', llm_direction: 'bullish', consistency: 'consistent',
+          key_signals: ['volume_breakout'], price_lines: { entry: 1700, stop: 1620, target: 1850 },
+          latest_close: 1660, hit_rate: 0.68, hit_sample: 20, verified: false,
+          ci_low: 0.55, ci_high: 0.8, baseline_excess: 0.05,
+          ci_low_corrected: 0.48, family_size: 20,
+          status: 'ok', degraded_reason: null },
+      ],
+    }});
+    const res = await stocksApi.getBoard(120);
+    expect(res.entries[0].ciLowCorrected).toBe(0.48);
+    expect(res.entries[0].familySize).toBe(20);
+  });
+
+  it('defaults ci_low_corrected/family_size to null for legacy backend payloads without the fields', async () => {
+    get.mockResolvedValueOnce({ data: {
+      as_of: 555, counts: { buy: 1, hold: 0, sell: 0, unavailable: 0 }, degraded_codes: [],
+      entries: [
+        { code: '600519', name: '贵州茅台', market: 'CN', action_group: 'buy',
+          rule_direction: 'bullish', llm_direction: 'bullish', consistency: 'consistent',
+          key_signals: ['volume_breakout'], price_lines: { entry: 1700, stop: 1620, target: 1850 },
+          latest_close: 1660, hit_rate: 0.68, hit_sample: 20, verified: true,
+          ci_low: 0.55, ci_high: 0.8, baseline_excess: 0.05,
+          status: 'ok', degraded_reason: null },
+      ],
+    }});
+    const res = await stocksApi.getBoard(120);
+    expect(res.entries[0].ciLowCorrected).toBeNull();
+    expect(res.entries[0].familySize).toBeNull();
+  });
+
   it('maps resonance, defaulting to none when absent', async () => {
     get.mockResolvedValueOnce({ data: {
       as_of: 333, counts: { buy: 1, hold: 0, sell: 0, unavailable: 1 }, degraded_codes: [],
