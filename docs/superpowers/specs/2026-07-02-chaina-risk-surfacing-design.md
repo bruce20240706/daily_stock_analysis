@@ -98,7 +98,7 @@ function riskMetricsView(metrics: PerformanceMetrics): RiskMetricsView | null {
 - `const risk = riskMetricsView(metrics);` 在 `PerformanceCard` 组件体内与 `phaseText` 并列。
 - 复用既有 `MetricRow`(`:192-197`)与既有 `border-t` 小节样式——零新样式类。
 - **note 必渲染**(D3):后端 note 即防误读说明;标题行"(信号流,N 笔)"再加一层口径提示。
-- **百分比格式已拍板(对抗审查 F1,原条件句歧义已消)**:最大回撤/最差单笔两行用页内既有 `pct()` helper(**已核 `BacktestPage.tsx:40-43` = `value == null ? '--' : value.toFixed(1)+'%'`,一位小数、null 内建 '--'**)——与卡内全部既有百分比行(`:223-228` 均经 pct(),全文件零处 toFixed(2))一致,一致性优先于精度;Sharpe/Sortino 是比率无 `%` 后缀,`pct()` 不适用,维持 `toFixed(2)`(一位小数会损失比率分辨率)。§7 测试锚值随之为一位小数(如 maxDD `-12.3%`)。
+- **百分比格式已拍板(对抗审查 F1,原条件句歧义已消)**:最大回撤/最差单笔两行用页内既有 `pct()` helper(**已核 `BacktestPage.tsx:40-43` = `value == null ? '--' : value.toFixed(1)+'%'`,一位小数、null 内建 '--'**)——与卡内全部既有百分比行(`:223-228` 均经 pct(),全文件零处 toFixed(2))一致,一致性优先于精度;Sharpe/Sortino 是比率无 `%` 后缀,`pct()` 不适用,维持 `toFixed(2)`(一位小数会损失比率分辨率)。§7 测试锚值随之为一位小数(如 maxDD `12.3%`——后端 maxDD 为正数幅度)。
 - **分隔线预期声明(对抗审查 F3)**:「最差单笔」行因后随 note div 非 `:last-child`(`.backtest-metric-row:last-child` 豁免 @`index.css:2623-2625` 不生效),会保留底部分隔线——与主卡各行观感一致(主卡末行同样后随 footer div,该豁免今天也从不生效),属预期渲染,实现/review 不必当 bug 修。
 
 ### 4.3 触达面
@@ -127,7 +127,7 @@ function riskMetricsView(metrics: PerformanceMetrics): RiskMetricsView | null {
 
 **fixture 硬规则(对抗审查 F3'):**(a)**禁止改动共享 `basePerformance`**(`:26-49`,其 `diagnostics: {}` 被全部 14 个既有 it 经 beforeEach 共享)——每个新测试内用 `mockGetOverallPerformance.mockResolvedValue({ ...basePerformance, diagnostics: { riskMetrics: {...} } })` per-test 覆盖;(b)数值断言一律 `within(screen.getByTestId('risk-metrics-section'))` 圈定,防与卡内其他数值撞串(pct() 一位小数格式与既有行同型,裸 getByText 有多匹配隐患);(c)默认仅渲染一张总体卡——若测试同时给个股 performance 喂带 `sample>0` 的 riskMetrics,两卡各出一个 section,须 `getAllByTestId` 或 `within(个股卡)`。
 
-1. **完整渲染**:per-test 覆盖 `diagnostics.riskMetrics` 全字段(camelCase)→ within(section) 断言 4 行数值(锚一位小数如 maxDD `-12.3%`、Sharpe `0.85`)、标题含样本数、note 文本可见。
+1. **完整渲染**:per-test 覆盖 `diagnostics.riskMetrics` 全字段(camelCase)→ within(section) 断言 4 行数值(锚一位小数如 maxDD `12.3%`(正数幅度)、Sharpe `0.85`)、标题含样本数、note 文本可见。
 2. **legacy 不渲染**:diagnostics 无 `riskMetrics` 键(即共享 basePerformance 原样)→ `queryByTestId('risk-metrics-section')` 为 null(缺席断言先例:`SignalBoard.test.tsx:86-87`)。
 3. **sample=0 不渲染**:`riskMetrics.sample=0`(数值全 null)→ 同上不渲染。
 4. **字段级 null 降级**:`sharpe=null` 其余有值 → Sharpe 行 `'--'`,其余行正常数值(within 圈定)。
