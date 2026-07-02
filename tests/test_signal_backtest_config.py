@@ -188,3 +188,22 @@ def test_resolve_verified_min_sample_shared_helper(monkeypatch):
     monkeypatch.delenv("SIGNAL_HIT_VERIFIED_MIN_SAMPLE", raising=False)
     monkeypatch.setenv("BACKTEST_EVAL_WINDOW_DAYS", "15")
     assert resolve_verified_min_sample(Config._load_from_env()) == 15
+
+
+def test_fwer_alpha_default(monkeypatch):
+    monkeypatch.delenv("SIGNAL_BACKTEST_FWER_ALPHA", raising=False)
+    assert Config._load_from_env().signal_backtest_fwer_alpha == 0.05
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("0.01", 0.01),        # 域内原样
+    ("0.9", 0.05),         # 超上限 → 钳 0.05(保"只收紧")
+    ("0", 0.0001),         # 0 → 钳下限(防 inv_cdf(1.0) 崩溃)
+    ("-1", 0.0001),        # 负 → 钳下限
+    ("1e-100", 0.0001),    # 极小 → 钳下限,不崩
+    ("abc", 0.05),         # 非数字 → 回退默认
+])
+def test_fwer_alpha_clamped_not_fallback(monkeypatch, raw, expected):
+    """spec §4.7: 钳制(clamp)非回退;仅非数字才回退默认。"""
+    monkeypatch.setenv("SIGNAL_BACKTEST_FWER_ALPHA", raw)
+    assert Config._load_from_env().signal_backtest_fwer_alpha == expected
