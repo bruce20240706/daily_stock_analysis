@@ -202,7 +202,7 @@ def risk_metrics_from_returns(returns: List[float], sort_keys=None) -> Dict[str,
 ## 7. 测试(离线确定性)
 
 1. **classify wrapper 零回归**:既有测试不改一字全绿;新增 wrapper == `_classify_core[0]` 逐 case。
-2. **收益口径逐分支锁定**(直调纯函数,手算 pin):win 无跳空;**失真守卫三态**(target<=entry 的 win/loss/expired 各 → None,outcome 不变——round2 Blocker 回归锚);loss 跳空按 open/无跳空按 stop;双触三变体(open<stop→open;stop<open<target→stop;open>=target→loss@stop pin 符号);expired 计收益(D8);守卫全套(entry NaN/<=0、open NaN/0 回退 stop、exit NaN/0→None);-100 钳位(非物理构造,防御性)。
+2. **收益口径逐分支锁定**(直调纯函数,手算 pin):win 无跳空;**失真守卫三态**(target<=entry 的 win/loss/expired 各 → None,outcome 不变——round2 Blocker 回归锚);loss 跳空按 open/无跳空按 stop;双触三变体(open<stop→open;stop<open<target→stop;open>=target→loss@stop pin 符号);expired 计收益(D8);守卫全套(entry NaN/<=0、open NaN/0 回退 stop、exit NaN/0→None);负 exit(非物理)→ 终门拦截返 None;钳位保留为与链路A 对齐的防御,long 语义下不可达。
 3. **_eval 贯通**:信号/baseline 模式产出带 return_pct/date。
 4. **共享数学 golden 全等**:固定+seed 固定随机样本,旧实现快照 == 新实现 + json.dumps 键序全等;链路A Inc 1a 测试不改一字全绿;直调单测(空/单元素/pin 手算/**成对过滤**:含 NaN 项剔除后 returns 与 sort_keys 仍对齐,maxDD 正确/sort_keys 只影响 maxDD 不影响 mean)。
 5. **聚合**:混合格 risk_metrics 独立;**expired 计入收益序列**(pin 含 expired 的 sharpe);excluded 覆盖失真三态(构造 1 失真 win + 1 失真 loss 断言 excluded=2);**全剔格落全键 dict**(sample=0/数值 None/excluded=N——非 None,round2 NEW-4 回归锚);dict 含 interval/horizon 键。

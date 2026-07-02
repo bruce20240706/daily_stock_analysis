@@ -87,7 +87,7 @@ def classify_triple_barrier_with_return(forward_bars, *, stop, target, entry) ->
              0.0 哨兵/NaN 不产假 -100;含 open>=target 高开双杀子案,同取保守,见 §6)
     expired: exit = forward_bars[-1]['close'](窗末平仓,D8:计入收益序列)
     return_pct = (exit - entry)/entry*100,下钳 >= -100;
-    entry/exit 非有限或 (==0) → None(防御,outcome 分类不受影响)。
+    entry 非有限或 <=0、exit_price 非有限或 <=0 → None(防御,outcome 分类不受影响)。
     """
     outcome, hit_idx = _classify_core(forward_bars, stop=stop, target=target)
     if entry is None or not math.isfinite(entry) or entry <= 0 or not forward_bars:
@@ -101,13 +101,18 @@ def classify_triple_barrier_with_return(forward_bars, *, stop, target, entry) ->
         exit_price = min(o, stop) if (isinstance(o, (int, float)) and math.isfinite(o) and o > 0) else stop
     else:
         exit_price = forward_bars[-1]["close"]
-    if not (isinstance(exit_price, (int, float)) and math.isfinite(exit_price) and exit_price != 0.0):
-        return TripleBarrierResult(outcome, None)   # 终门:NaN/0 哨兵一律 None,绝不毒化聚合
+    if not (isinstance(exit_price, (int, float)) and math.isfinite(exit_price) and exit_price > 0):
+        return TripleBarrierResult(outcome, None)   # 终门:NaN/0 哨兵/负价一律 None,绝不毒化聚合
+    # 钳位保留为与链路A 表达式对齐的防御;经终门 exit>0 且 entry>0 后 (exit-entry)/entry*100 > -100,long 语义下数学不可达触发
     return TripleBarrierResult(outcome, max((exit_price - entry) / entry * 100.0, -100.0))
 
 
 def _bars_as_dicts(df: pd.DataFrame) -> List[dict]:
-    """将 DataFrame 子集转为 classify_triple_barrier 所需的 dict list。"""
+    """将 DataFrame 子集转为 classify_* 所需的 dict list。
+
+    open 供 classify_triple_barrier_with_return 的 loss 分支取跳空感知 exit
+    (min(open, stop));high/low/close 供三重门判定与 expired 窗末平仓。
+    """
     return df[["open", "high", "low", "close"]].to_dict("records")
 
 

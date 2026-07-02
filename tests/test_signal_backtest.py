@@ -348,11 +348,12 @@ def test_defensive_guards_return_none_not_poison():
     assert r_badc.outcome == "expired" and r_badc.return_pct is None
 
 
-def test_clamp_at_minus_100_defensive():
-    # 非物理构造(负 stop 强制 exit<0 → 收益 <-100):防御性钳位,真实 long OHLCV 不可达
+def test_negative_exit_rejected_by_final_gate():
+    # 非物理构造(负 stop 强制 exit<0):数据有效性终门优先(exit_price>0),拦截返 None 而非钳位放行;
+    # 钳位 max(...,-100.0) 保留为与链路A 对齐的防御,long 语义下经终门后数学不可达
     r = classify_triple_barrier_with_return([_bar_ohlc(-150.0, 96, -160.0, 90)], stop=-140.0, target=110.0, entry=100.0)
     assert r.outcome == "loss"
-    assert r.return_pct == -100.0
+    assert r.return_pct is None
 
 
 def test_wrapper_equals_core_outcome():
