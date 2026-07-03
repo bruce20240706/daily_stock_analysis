@@ -3327,6 +3327,32 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "SIGNAL_BACKTEST_OOS_FRACTION": {
+        "title": "Signal Backtest OOS Fraction",
+        "description": "Out-of-sample holdout fraction of the per-market trading-date grid for chain-B signal stats (Inc 1e). 0 disables (default, behavior unchanged). Descriptive disclosure only - the verified badge and win-rate stay full-sample.",
+        "category": "backtest",
+        "data_type": "number",
+        "ui_control": "number",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "0.0",
+        "options": [],
+        "validation": {"min": 0.0, "max": 0.5},
+        "display_order": 72,
+        "help_key": "settings.backtest.SIGNAL_BACKTEST_OOS_FRACTION",
+        "examples": [
+            "SIGNAL_BACKTEST_OOS_FRACTION=0.0",
+            "SIGNAL_BACKTEST_OOS_FRACTION=0.3",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：回测配置",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#回测功能",
+            },
+        ],
+        "warning_codes": [],
+    },
     "CRYPTO_INTRADAY_BACKTEST_INTERVAL": {
         "title": "Intraday Backtest Interval",
         "description": "盘中回测默认 bar 粒度(crypto;允许 1m/5m/15m/1h)。",

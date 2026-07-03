@@ -207,3 +207,17 @@ def test_fwer_alpha_clamped_not_fallback(monkeypatch, raw, expected):
     """spec §4.7: 钳制(clamp)非回退;仅非数字才回退默认。"""
     monkeypatch.setenv("SIGNAL_BACKTEST_FWER_ALPHA", raw)
     assert Config._load_from_env().signal_backtest_fwer_alpha == expected
+
+
+def test_oos_fraction_default_zero(monkeypatch):
+    monkeypatch.delenv("SIGNAL_BACKTEST_OOS_FRACTION", raising=False)
+    assert Config._load_from_env().signal_backtest_oos_fraction == 0.0
+
+
+def test_oos_fraction_clamped(monkeypatch):
+    monkeypatch.setenv("SIGNAL_BACKTEST_OOS_FRACTION", "0.9")
+    assert Config._load_from_env().signal_backtest_oos_fraction == 0.5
+    monkeypatch.setenv("SIGNAL_BACKTEST_OOS_FRACTION", "-0.1")
+    assert Config._load_from_env().signal_backtest_oos_fraction == 0.0
+    monkeypatch.setenv("SIGNAL_BACKTEST_OOS_FRACTION", "0.3")
+    assert Config._load_from_env().signal_backtest_oos_fraction == 0.3
