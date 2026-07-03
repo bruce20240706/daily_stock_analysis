@@ -370,4 +370,71 @@ describe('BacktestPage', () => {
     expect(await screen.findByText('做多')).toBeInTheDocument();
     expect(screen.getByText('同日触双线(按止损)')).toBeInTheDocument();  // 引擎同根K线双触SL/TP（保守按止损）
   });
+
+  // ===== Inc 1b: 风险画像段(spec §7;fixture 一律 camelCase——mock 的是 backtestApi 已转换层)=====
+
+  const riskMetricsFixture = {
+    sample: 12,
+    meanReturnPct: 1.83,
+    returnStdPct: 4.51,
+    sharpe: 0.8523,
+    sortino: 1.2371,
+    maxDrawdownPct: 12.34,
+    worstSingleReturnPct: -8.6,
+    note: '风险画像基于信号流事件序列,非真实组合回撤;单笔收益下钳 -100%',
+  };
+
+  it('renders risk metrics section with values and note when riskMetrics present', async () => {
+    mockGetOverallPerformance.mockResolvedValue({
+      ...basePerformance,
+      diagnostics: { riskMetrics: riskMetricsFixture },
+    });
+    render(<BacktestPage />);
+    const section = await waitFor(() => screen.getByTestId('risk-metrics-section'));
+    const s = within(section);
+    expect(s.getByText('风险画像(信号流,12 笔)')).toBeInTheDocument();
+    expect(s.getByText('0.85')).toBeInTheDocument();       // sharpe toFixed(2)
+    expect(s.getByText('1.24')).toBeInTheDocument();       // sortino toFixed(2)
+    expect(s.getByText('12.3%')).toBeInTheDocument();      // maxDD 经 pct() 一位小数
+    expect(s.getByText('-8.6%')).toBeInTheDocument();      // worst 经 pct()
+    expect(s.getByTestId('risk-metrics-note')).toHaveTextContent(
+      '风险画像基于信号流事件序列,非真实组合回撤;单笔收益下钳 -100%',
+    );
+  });
+
+  it('renders no risk section for legacy rows without riskMetrics key', async () => {
+    // 共享 basePerformance 原样(diagnostics: {})——缺席断言先例:SignalBoard.test.tsx:86-87
+    render(<BacktestPage />);
+    await waitFor(() => screen.getByText('方向准确率'));
+    expect(screen.queryByTestId('risk-metrics-section')).toBeNull();
+  });
+
+  it('renders no risk section when sample is zero', async () => {
+    mockGetOverallPerformance.mockResolvedValue({
+      ...basePerformance,
+      diagnostics: {
+        riskMetrics: {
+          sample: 0, meanReturnPct: null, returnStdPct: null, sharpe: null,
+          sortino: null, maxDrawdownPct: null, worstSingleReturnPct: null,
+          note: '风险画像基于信号流事件序列,非真实组合回撤;单笔收益下钳 -100%',
+        },
+      },
+    });
+    render(<BacktestPage />);
+    await waitFor(() => screen.getByText('方向准确率'));
+    expect(screen.queryByTestId('risk-metrics-section')).toBeNull();
+  });
+
+  it('degrades a null field to -- while other rows keep values', async () => {
+    mockGetOverallPerformance.mockResolvedValue({
+      ...basePerformance,
+      diagnostics: { riskMetrics: { ...riskMetricsFixture, sharpe: null } },
+    });
+    render(<BacktestPage />);
+    const section = await waitFor(() => screen.getByTestId('risk-metrics-section'));
+    const s = within(section);
+    expect(s.getByText('--')).toBeInTheDocument();          // 仅 Sharpe 行降级,section 内唯一 '--'
+    expect(s.getByText('1.24')).toBeInTheDocument();
+    expect(s.getByText('12.3%')).toBeInTheDocument();
+  });
 });
