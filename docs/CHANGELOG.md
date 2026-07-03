@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 链路B 信号统计新增样本外 holdout 切分披露(opt-in SIGNAL_BACKTEST_OOS_FRACTION,默认 0 关闭且行为不变;per-market 交易日期格点分位切点,train/OOS 两段胜率/基准/超额并排披露,跨切点窗口 embargo 防泄漏剔除;落库 signal_stats.oos_json,API 经 /signals 顶层 map 与看板行透出;描述性统计不影响 verified 徽章)
 - [新功能] 链路B 信号回测新增 per-(信号类型×市场) 风险画像:不年化 Sharpe/Sortino/事件净值最大回撤/最差单笔(毛收益保守跳空感知口径,expired 窗末平仓计入,失真形态整层剔除并以 excluded 计数披露);落库 signal_stats.risk_metrics_json(历史行为 null,重跑 --signal-backtest 生效),API 经 /signals 顶层 map 与看板行透出;描述性统计无置信区间,不得作为跨格子挑选依据
 - [修复] 信号 resolver 单次调用缓存键由 code 改为 (signal_type, code):修复同股多信号类型时非首个类型的 hit_rate/verified/置信区间等字段错挂第一个类型数值的缺陷
 - [改进] 回测页绩效卡新增"风险画像"段:渲染链路A 已落库的不年化 Sharpe/Sortino/最大回撤/最差单笔(信号流事件序列口径,含防误读说明;历史未刷新统计不显示,重跑回测后出现)

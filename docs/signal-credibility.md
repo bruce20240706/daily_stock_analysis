@@ -130,6 +130,44 @@ excess = ci_low - baseline_win_rate
 
 ---
 
+### 4.5 样本外 holdout 切分（`oos`，Inc 1e 增量）
+
+`aggregate_signal_stats` 在计算全样本胜率/CI/风险画像之外，可选（`oos_fraction > 0`）为每个格子额外算一份**样本外 holdout 切分报告**，写入 `SignalStat.oos`（dict，最终落库为 `signal_stats.oos_json`）。目的：暴露"格子的历史超额是否集中在早段行情"这一时间稳健性问题——Inc 1c 解决的是跨格子的 data-snooping，本增量解决跨时间的持续性。
+
+**纯披露，不动 `verified`**：全样本口径的 `win_rate`/`ci_low`/`ci_low_corrected`/`verified` 保持字节级不变；`oos` 是纯新增的描述性统计维度，不参与、不影响 `verified` 判定。
+
+**切点口径（per-market 交易日期格点分位）**：每个市场独立推导切点——把该市场全部 baseline（全体 bar 入场基准）事件的 distinct 触发日期字符串按字典序升序排成"日期网格"，取 `sorted_dates[floor((1-f)×(len-1))]` 作为该市场 cutoff（`f` 为钳后 `oos_fraction`，域 `[0.0, 0.5]`）。**这是交易日期格点分位，不是日历分位、也不是事件配额分位**：切的是时间轴本身。信号触发在时间上分布不均匀，且 embargo 还会再剔一块，因此 `oos.sample` 不必约等于 `fraction × sample`。同一市场的所有格子共用该市场的 cutoff；不同市场各自独立推导（详见下方"跨市场不可比"）。
+
+**分类宇宙与 expired 口径差异**：三分逻辑仅作用于 `outcome ∈ {win, loss}` 的事件，`expired` 不参与任何 OOS 计数——与 `SignalStat.sample = win + loss` 一致。这与 §4.4 风险画像的口径**不同**：风险画像的收益序列**含** expired（按窗末平仓价计入），OOS 切分**不含** expired；两个口径独立统计，不可混用对照。
+
+**embargo 语义（防泄漏）**：每个 win/loss 事件按以下谓词（按序短路，undated 优先）三分：
+- undated：触发日期缺失（legacy 手工构造数据才会出现）
+- train：前瞻窗末日期（`window_end_date`）不晚于 cutoff
+- OOS：触发日期晚于 cutoff
+- embargo：其余——即前瞻窗跨越 cutoff（触发日期 ≤ cutoff < 窗末日期），或窗末日期缺失但触发日期 ≤ cutoff（保守按 embargo 处理，不算 train）
+
+跨切点窗口的事件两边都不计入 train 或 OOS，只计入 embargo 计数——这是 purge/embargo 防泄漏的核心：避免一笔评估结果的前瞻窗横跨切点，同时"沾"到 train 与 OOS 两侧统计。
+
+**守恒恒等式**：每个格子精确满足 `train.sample + oos.sample + embargoed + undated == SignalStat.sample`（四类对 win/loss 事件构成精确划分，无遗漏无重复）。
+
+**两段子统计与 excess 口径**：`train`/`oos` 各自独立报 `win_rate`（0 样本→`None`）、`sample`、`baseline_win_rate`（该段同市场 baseline 事件同式计算）、`excess`（= `win_rate - baseline_win_rate`，任一为 `None` 则 `None`；均 `round4`）。**`excess` 是胜率点估计差**，与既有 `SignalStat.excess`（= `ci_low - baseline_win_rate` 的保守口径）**不是同一名义域**——两者不可直接比较，不应混用作判据。
+
+**baseline 侧 undated 与 cell 侧口径不对称**：cell（信号）侧的 undated 事件有显式计数，披露在 `oos_json.undated`；baseline 侧的 undated 事件（生产路径不可达，仅 legacy 手工构造测试桩会出现）从两段 `baseline_win_rate` 分母中**静默剔除、不计数**——两侧对 undated 的处理不对称，理解数据时以此为准。
+
+**退化情形**：若某市场 distinct 触发日期数 `< 2`（无法切出有意义的分位点），该市场的全部格子落"退化 dict"：`{"cutoff_date": None, "fraction": f, "degenerate": true}`（**不是** `NULL`——`None` 单独表示"未启用"，退化是启用后的一种特殊结果）。同一批跑中其他市场若日期数充足，仍正常切分，互不影响。
+
+**生效前提**：OOS 切分随 `aggregate_signal_stats` 一并计算，仅当 `SIGNAL_BACKTEST_OOS_FRACTION` 配置 `> 0` 且**重新执行** `python main.py --signal-backtest`（或 `--signal-backtest-interval <粒度>`）批作业时才会写入；默认值 `0.0` 下整条切分逻辑早退（`aggregate_signal_stats` 返回值与关闭前逐字段字节级相等），`oos_json` 恒为 `NULL`。
+
+**legacy NULL 语义**：`signal_stats.oos_json` 为幂等补列（`_ensure_signal_stats_columns`，与 `risk_metrics_json`/`ci_low_corrected`/`family_size` 同款迁移守卫）；升级前写入的老行、以及配置未启用（`f=0`）时新写入的行，该列均为 `NULL`；`resolve_marker_hit_fields` 读到 `NULL`（或非法 JSON、非 dict 内容）一律返回 `oos: None`，不报错、不假造数据。
+
+**写时快照，随批跑滑动**：`cutoff_date` 与两段统计在每次批作业写入时按**当次**数据窗（锚点=当天）计算并落库为快照；两次批跑之间若数据窗滑动（新增交易日、自选池变化等），`cutoff_date` 与 OOS 集合会不同——`oos_json` 不是"固定切点"，而是"最近一次批跑时的切分快照"。
+
+**跨市场、跨 interval 不可比**：cutoff 按市场独立推导，不同市场的 train/OOS 段覆盖的日历区间本就不同（回看深度不同），`oos_json` 只能与**同市场**格子横比。同风险画像（§4.4），不同 `interval`（如 `1d` vs `5m`）下 OOS 段覆盖的实际时间跨度不同，跨 interval 比较无意义。
+
+**诚实边界**：OOS 段是纯描述性统计——无置信区间、未经 §5.1 的多重检验（family-wise）校正、默认自选池下样本量常为个位数，不得单独作为格子取舍依据；它只回答"超额是否集中在早段"这一个问题。§4.4 已述的窗口重叠自相关、跨标的混流等局限在两段内部依旧存在。
+
+---
+
 ## 5. `verified` 口径
 
 `resolve_marker_hit_fields` 中的 `verified` 由以下条件同时满足：
@@ -238,6 +276,7 @@ verified = (
 | `ci_low_corrected` | FLOAT | family-wise 校正后 CI 下界（Inc 1c）；`NULL`=legacy 行（升级前写入，未重跑） |
 | `family_size` | INTEGER | 写时 family 可检验格子数 N（Inc 1c）；`NULL`=legacy 行 |
 | `risk_metrics_json` | TEXT | 该格不年化风险画像 JSON（见 §4.4）；`NULL`=legacy 行（升级前写入，未重跑） |
+| `oos_json` | TEXT | 该格样本外 holdout 切分报告 JSON（见 §4.5，Inc 1e）；`NULL`=legacy 行或 `SIGNAL_BACKTEST_OOS_FRACTION=0`（未启用） |
 | `computed_at` | DATETIME | 最后计算时间 |
 
 读写接口：`src/repositories/signal_stats_repo.py` → `SignalStatsRepository`（`get` / `save_batch`）。
@@ -287,6 +326,7 @@ watchlist 来源与看板完全一致：读取 `SystemConfigService` 的 `STOCK_
 | `SIGNAL_BACKTEST_HORIZON_BARS` | `10` | 三重门前瞻 bar 数（日线数），决定评估周期 |
 | `SIGNAL_HIT_VERIFIED_MIN_SAMPLE` | `0`（读 `backtest_eval_window_days` 作兜底） | verified 所需最小样本数 |
 | `SIGNAL_BACKTEST_FWER_ALPHA` | `0.05` | family-wise（Bonferroni-CI）多重检验校正的双尾族错误率（Inc 1c）；域 `[0.0001, 0.05]`，函数内钳制、仅可更严不可更松；详见 §5.1 |
+| `SIGNAL_BACKTEST_OOS_FRACTION` | `0.0`（关闭） | 样本外 holdout 切分比例（Inc 1e）；域 `[0.0, 0.5]`，函数内钳制；启用后仅新增 `oos_json` 披露，不影响 `verified`/胜率口径；详见 §4.5 |
 
 ---
 
