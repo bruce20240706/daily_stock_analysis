@@ -201,11 +201,12 @@ def _hit_fields_from_markers(markers: list) -> dict:
                 "family_size": m.get("family_size"),
                 "horizon_bars": m.get("horizon_bars"),
                 "signal_status": m.get("status"),
+                "risk_metrics": m.get("risk_metrics"),
             }
     return {"hit_rate": None, "hit_sample": None, "verified": False,
             "ci_low": None, "ci_high": None, "baseline_excess": None,
             "ci_low_corrected": None, "family_size": None,
-            "horizon_bars": None, "signal_status": None}
+            "horizon_bars": None, "signal_status": None, "risk_metrics": None}
 
 
 def _entry_from_board_signals(code: str, bs: "BoardSignals") -> dict:
@@ -238,6 +239,7 @@ def _degraded_entry(code: str, reason: str) -> dict:
         "ci_low_corrected": None, "family_size": None,
         "resonance": "none",
         "status": "degraded", "degraded_reason": reason,
+        "risk_metrics": None,
     }
 
 

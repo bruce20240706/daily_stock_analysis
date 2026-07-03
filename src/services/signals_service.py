@@ -157,6 +157,7 @@ def _marker_from_vpsignal(
         "family_size": None,
         "horizon_bars": None,
         "status": None,
+        "risk_metrics": None,
     }
     if hit_fields_resolver is not None and code:
         try:
@@ -170,6 +171,7 @@ def _marker_from_vpsignal(
             marker["horizon_bars"] = fields.get("horizon")
             marker["ci_low_corrected"] = fields.get("ci_low_corrected")
             marker["family_size"] = fields.get("family_size")
+            marker["risk_metrics"] = fields.get("risk_metrics")
         except Exception:
             logger.warning(
                 "resolve_marker_hit_fields 失败，跳过回填 signal_type=%s code=%s",
@@ -217,6 +219,7 @@ def _llm_marker(
         "as_of": as_of,
         "horizon_bars": None,
         "status": None,
+        "risk_metrics": None,
     }
 
 
@@ -286,20 +289,21 @@ def build_signals_payload(
     - consistency：用收敛后的单个 BuySignal 与 LLM 最新结论计算。
     - status/degraded_reason：透传引擎结果。
     """
-    # 终审#9：按 code 复用 resolver，避免 N 个 rule marker 触发 N 个相同 SELECT。
-    # resolve_marker_hit_fields 的聚合源只取决于 code，signal_type 不改变聚合源
-    # （见其 docstring），故同一 code 的查询结果可复用。缓存仅存活于本次调用，
-    # 不用 module-level/lru_cache（否则会跨请求返回陈旧回测数据）。保留
-    # (signal_type, code) 调用签名以便后续按 signal_type 细分时前向兼容。
+    # 终审#9 + D7 修正：按 (signal_type, code) 复用 resolver，避免同键重复 SELECT。
+    # M3-A6 起 resolve_marker_hit_fields 按 (signal_type, market) 查 signal_stats，
+    # signal_type 改变聚合源——曾按 code-only 缓存导致同股非首个 signal_type 的
+    # marker 错挂第一个 signal_type 的 hit_rate/verified 等全部字段（现役 bug，已修）。
+    # 缓存仅存活于本次调用，不用 module-level/lru_cache（防跨请求陈旧数据）。
     effective_resolver = hit_fields_resolver
     if hit_fields_resolver is not None and code:
         _per_call_cache: dict = {}
 
         def effective_resolver(signal_type: str, resolver_code: str) -> dict:
-            if resolver_code in _per_call_cache:
-                return _per_call_cache[resolver_code]
+            cache_key = (signal_type, resolver_code)
+            if cache_key in _per_call_cache:
+                return _per_call_cache[cache_key]
             fields = hit_fields_resolver(signal_type, resolver_code)
-            _per_call_cache[resolver_code] = fields
+            _per_call_cache[cache_key] = fields
             return fields
 
     markers: List[dict] = [
@@ -329,10 +333,20 @@ def build_signals_payload(
         stale_threshold=stale_threshold,
     )
 
+    # 按 signal_type 收敛风险画像：O(K) 而非逐 bar marker 携带（防载荷膨胀，D5）。
+    # 首个非 None dict 者胜出（同型多 marker 的画像本就相同，取首条足够）。
+    risk_by_type: dict = {}
+    for m in markers:
+        rm = m.get("risk_metrics")
+        st = m.get("signal_type")
+        if isinstance(rm, dict) and st and st not in risk_by_type:
+            risk_by_type[st] = rm
+
     return {
         "status": engine_result.status,
         "markers": markers,
         "price_lines": {"entry": None, "stop": None, "target": None},
         "consistency": consistency,
         "degraded_reason": engine_result.degraded_reason,
+        "risk_metrics_by_signal_type": risk_by_type,
     }

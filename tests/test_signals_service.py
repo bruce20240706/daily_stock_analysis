@@ -294,9 +294,10 @@ def test_build_payload_without_resolver_keeps_m2a_defaults():
 
 
 def test_build_payload_memoizes_resolver_per_code_across_markers():
-    """终审#9：signal_type 不改变命中率聚合源（统一取该 code 的 completed
-    BacktestResult）。多个 rule marker 时，单次 build_signals_payload 内对同一 code
-    的 resolver 只应调用一次（按 code 复用），避免 N+1 个相同 SELECT。"""
+    """D7 修正：M3-A6 起 resolve_marker_hit_fields 按 (signal_type, market) 查
+    signal_stats，signal_type 改变聚合源，故缓存键须是 (signal_type, code)。多个
+    rule marker 时，同一 (signal_type, code) 的 resolver 只应调用一次（按需复用），
+    不同 signal_type 各查各的，避免同键重复 SELECT 的同时不再跨 signal_type 错挂字段。"""
     # 三个 rule marker，signal_type 各异，但 code 相同
     engine = _engine_result([
         _vpsignal(date_str_to_epoch_ms("2026-06-10"), signal_type="volume_breakout"),
@@ -320,9 +321,10 @@ def test_build_payload_memoizes_resolver_per_code_across_markers():
         hit_fields_resolver=_resolver,
     )
 
-    # 同一 code 只查一次，即便有 3 个 rule marker
-    assert len(calls) == 1
-    assert calls[0][1] == "600519"
+    # 同一 (signal_type, code) 只查一次：2 个不同 signal_type → 2 次调用
+    # （非修复前的 1 次 code-only 缓存，也非无缓存时的 3 次）
+    assert len(calls) == 2
+    assert sorted(calls) == [("upthrust", "600519"), ("volume_breakout", "600519")]
 
     # 所有 rule marker 仍都被回填
     rule_markers = [m for m in payload["markers"] if m["source"] == "rule"]
@@ -367,3 +369,37 @@ def test_marker_carries_ci_fields_from_resolver():
     )
     m = next(x for x in payload["markers"] if x["source"] == "rule")
     assert m["ci_low"] == 0.55 and m["ci_high"] == 0.80 and m["baseline_excess"] == 0.05
+
+
+# ---------------------------------------------------------------------------
+# D7: per-call resolver cache 曾按 code-only 缓存,跨 signal_type 错挂 stats(现役 bug 修复)
+# ---------------------------------------------------------------------------
+
+def test_resolver_cache_keyed_by_signal_type_and_code():
+    """同股两个不同 signal_type 的 marker 必须各拿各的 resolver fields。
+
+    修复前:cache 键=code,第二个 signal_type 拿到第一个的 fields(hit_rate/verified 全错挂)。
+    """
+    calls = []
+
+    def resolver(signal_type, code):
+        calls.append(signal_type)
+        return {"hit_rate": 0.9 if signal_type == "volume_breakout" else 0.1,
+                "hit_sample": 30, "verified": signal_type == "volume_breakout",
+                "ci_low": None, "ci_high": None, "baseline_excess": None, "horizon": 10,
+                "ci_low_corrected": None, "family_size": None}
+
+    engine = _engine_result([
+        _vpsignal(date_str_to_epoch_ms("2026-06-01"), signal_type="volume_breakout"),
+        _vpsignal(date_str_to_epoch_ms("2026-06-01"), signal_type="obv_top_divergence"),
+    ])
+    payload = build_signals_payload(
+        engine_result=engine, rule_signal=None, llm_record=None,
+        latest_bar_date="2026-06-01", latest_close=10.0,
+        trading_days_elapsed=0, code="600519", hit_fields_resolver=resolver,
+    )
+    m1, m2 = payload["markers"][0], payload["markers"][1]
+    assert m1["hit_rate"] == 0.9 and m1["verified"] is True
+    assert m2["hit_rate"] == 0.1 and m2["verified"] is False      # 修复前=0.9/True(错挂)
+    # 缓存仍有效:每 signal_type 恰好一次 resolver 调用
+    assert sorted(calls) == ["obv_top_divergence", "volume_breakout"]

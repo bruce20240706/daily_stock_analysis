@@ -27,6 +27,7 @@ from typing import List, Optional
 
 import pandas as pd
 
+from src.core.backtest_engine import risk_metrics_from_returns
 from src.services.volume_price_signals import (
     VPSConfig,
     compute_signals_for_all_bars,
@@ -34,6 +35,14 @@ from src.services.volume_price_signals import (
 )
 
 BASELINE_SIGNAL_TYPE = "__baseline__"
+
+SIGNAL_RISK_NOTE = (
+    "信号流三重门事件序列(毛收益,保守跳空感知:win按target/loss按min(open,stop)/"
+    "expired按窗末close;entry=触发bar close;target<=entry 失真形态整层剔除计excluded;"
+    "非组合回撤;不年化;窗口可重叠自相关;描述性统计无CI未经多重检验校正)"
+)
+# 注:此常量不进 per-cell dict(D5)。API Field description 与 docs/signal-credibility.md 的口径散文
+# 系与其保持一致的手写副本(未 import 引用);修改口径时三处需同步。
 
 
 @dataclass(frozen=True)
@@ -43,50 +52,83 @@ class SignalOutcome:
     signal_type  信号类型（与 VPSignal.signal_type 对应；baseline 固定 '__baseline__'）
     market       市场标识（'cn' / 'hk' / 'us' 等，透传自调用方）
     outcome      'win' | 'loss' | 'expired'
+    return_pct   保守跳空感知毛收益(%，见 classify_triple_barrier_with_return)；
+                 失真形态/无效数据为 None。默认 None（末尾字段，legacy 三参构造零破坏）。
+    date         触发 bar 的日期字符串；用于 aggregate 阶段按时序排序计算 maxDD。
+                 默认 None（末尾字段，legacy 三参构造零破坏）。
     """
 
     signal_type: str
     market: str
     outcome: str
+    return_pct: Optional[float] = None
+    date: Optional[str] = None
 
 
-def classify_triple_barrier(
-    forward_bars: List[dict],
-    *,
-    stop: float,
-    target: float,
-) -> str:
-    """三重门分类：逐根前瞻判断止盈/止损/到期。
+@dataclass(frozen=True)
+class TripleBarrierResult:
+    outcome: str                      # 'win' | 'loss' | 'expired'
+    return_pct: Optional[float]       # 保守跳空感知收益(%);失真形态/无效数据为 None
 
-    规则（长仓视角）：
-    - 同根 bar 同时触及 target 和 stop → 保守判 loss
-    - 先触 target（high >= target）→ win
-    - 先破 stop（low <= stop）→ loss
-    - 到期未触任何门 → expired
 
-    Args:
-        forward_bars: 触发 bar 之后的前瞻数据，每个元素须含 'high'/'low'/'close'。
-        stop:         止损价（long 仓 low <= stop 触发）。
-        target:       止盈价（long 仓 high >= target 触发）。
-
-    Returns:
-        'win' | 'loss' | 'expired'
-    """
-    for bar in forward_bars:
+def _classify_core(forward_bars, *, stop, target):
+    """共核:返回 (outcome, hit_idx);hit_idx=触障 bar 下标,expired 为 None。"""
+    for i, bar in enumerate(forward_bars):
         hit_target = bar["high"] >= target
         hit_stop = bar["low"] <= stop
         if hit_target and hit_stop:
-            return "loss"   # 同 bar 两触：保守判 loss
+            return "loss", i     # 同 bar 两触:保守判 loss(语义不变)
         if hit_stop:
-            return "loss"
+            return "loss", i
         if hit_target:
-            return "win"
-    return "expired"
+            return "win", i
+    return "expired", None
+
+
+def classify_triple_barrier(forward_bars, *, stop, target) -> str:
+    """(既有签名/语义零变,变薄 wrapper)"""
+    return _classify_core(forward_bars, stop=stop, target=target)[0]
+
+
+def classify_triple_barrier_with_return(forward_bars, *, stop, target, entry) -> TripleBarrierResult:
+    """三重门分类 + 保守跳空感知收益(D1 用户拍板 + 形态级失真守卫)。
+
+    失真守卫(outcome 无关,round2 Blocker 修正):target <= entry(触发 close 已越过回踩锚
+    target 的动量/突破形态)→ 不论 win/loss/expired 一律 return_pct=None——win-only 剔除会
+    单边截断(赢的不计、输的全计),整层剔除才保收益序列无选择偏差。
+
+    win:     exit = target(跳空高开不多计盈利)
+    loss:    exit = min(触障 bar open, stop)(跳空低开按更差的 open;open 非有限或 <=0 回退 stop,
+             0.0 哨兵/NaN 不产假 -100;含 open>=target 高开双杀子案,同取保守,见 §6)
+    expired: exit = forward_bars[-1]['close'](窗末平仓,D8:计入收益序列)
+    return_pct = (exit - entry)/entry*100,下钳 >= -100;
+    entry 非有限或 <=0、exit_price 非有限或 <=0 → None(防御,outcome 分类不受影响)。
+    """
+    outcome, hit_idx = _classify_core(forward_bars, stop=stop, target=target)
+    if entry is None or not math.isfinite(entry) or entry <= 0 or not forward_bars:
+        return TripleBarrierResult(outcome, None)
+    if target <= entry:                        # 形态级失真守卫(D1,outcome 之外)
+        return TripleBarrierResult(outcome, None)
+    if outcome == "win":
+        exit_price = target
+    elif outcome == "loss":
+        o = forward_bars[hit_idx]["open"]
+        exit_price = min(o, stop) if (isinstance(o, (int, float)) and math.isfinite(o) and o > 0) else stop
+    else:
+        exit_price = forward_bars[-1]["close"]
+    if not (isinstance(exit_price, (int, float)) and math.isfinite(exit_price) and exit_price > 0):
+        return TripleBarrierResult(outcome, None)   # 终门:NaN/0 哨兵/负价一律 None,绝不毒化聚合
+    # 钳位保留为与链路A 表达式对齐的防御;经终门 exit>0 且 entry>0 后 (exit-entry)/entry*100 > -100,long 语义下数学不可达触发
+    return TripleBarrierResult(outcome, max((exit_price - entry) / entry * 100.0, -100.0))
 
 
 def _bars_as_dicts(df: pd.DataFrame) -> List[dict]:
-    """将 DataFrame 子集转为 classify_triple_barrier 所需的 dict list。"""
-    return df[["high", "low", "close"]].to_dict("records")
+    """将 DataFrame 子集转为 classify_* 所需的 dict list。
+
+    open 供 classify_triple_barrier_with_return 的 loss 分支取跳空感知 exit
+    (min(open, stop));high/low/close 供三重门判定与 expired 窗末平仓。
+    """
+    return df[["open", "high", "low", "close"]].to_dict("records")
 
 
 def _eval(
@@ -128,15 +170,18 @@ def _eval(
         fwd = _bars_as_dicts(df.iloc[t + 1 : t + 1 + horizon])
         if not fwd:
             continue
+        entry = float(df.iloc[t]["close"])
+        date = str(df.iloc[t]["date"])
+        r = classify_triple_barrier_with_return(fwd, stop=lv.stop, target=lv.target, entry=entry)
         if all_bars:
             out.append(SignalOutcome(
                 signal_type=BASELINE_SIGNAL_TYPE, market=market,
-                outcome=classify_triple_barrier(fwd, stop=lv.stop, target=lv.target)))
+                outcome=r.outcome, return_pct=r.return_pct, date=date))
         else:
-            for sig_type in sig_by_bar.get(t, ()):                         # O(1) 查表
+            for sig_type in sig_by_bar.get(t, ()):                         # O(1) 查表；同 bar 多信号共享同一 r（顺带 O(信号数) 优化，classify 只算一次，行为等价）
                 out.append(SignalOutcome(
                     signal_type=sig_type, market=market,
-                    outcome=classify_triple_barrier(fwd, stop=lv.stop, target=lv.target)))
+                    outcome=r.outcome, return_pct=r.return_pct, date=date))
     return out
 
 
@@ -230,6 +275,11 @@ class SignalStat:
         excess:             超额 = ci_low - baseline_win_rate；任一为 None 时为 None。
         ci_low_corrected:   family-wise 校正后 Wilson 下界；N<=1 时==ci_low；sample==0 时 None。
         family_size:        本次聚合可检验格子数 N(sample>=min_sample 的格子数)。
+        risk_metrics:       本格收益序列的不年化风险指标 dict(risk_metrics_from_returns 8 键 +
+                             excluded/interval/horizon 三键，恒为全键 dict，不为 None；末尾字段，
+                             legacy 位置构造零破坏。注意：值为 dict（可变/不可哈希），虽 frozen=True，
+                             但自动生成的 __hash__ 因此字段实际不可调用（hash(instance) 会
+                             TypeError），当前代码库无处依赖 SignalStat 可哈希，非回归）。
     """
 
     signal_type: str
@@ -246,6 +296,7 @@ class SignalStat:
     excess: Optional[float]
     ci_low_corrected: Optional[float] = None
     family_size: int = 0
+    risk_metrics: Optional[dict] = None
 
 
 def wilson_ci(wins: int, n: int, z: float = 1.96) -> tuple:
@@ -328,12 +379,16 @@ def aggregate_signal_stats(
             base_w[o.market] += 1
     baseline_rate = {m: _winrate(base_w[m], base_n[m]) for m in base_n}
 
-    # Step 2: 按 (signal_type, market) 分桶统计（expired 及未知 outcome 排除在分母外）
+    # Step 2: 按 (signal_type, market) 分桶统计 + 顺路收集收益序列（D8:expired 计入）
     buckets: dict = defaultdict(lambda: {"win": 0, "loss": 0})
-    for o in outcomes:
-        if o.outcome not in ("win", "loss"):
-            continue
-        buckets[(o.signal_type, o.market)][o.outcome] += 1
+    cell_events: dict = defaultdict(list)      # (sig_type, market) -> [(date, idx, return_pct)]
+    for idx, o in enumerate(outcomes):
+        if o.outcome in ("win", "loss"):
+            buckets[(o.signal_type, o.market)][o.outcome] += 1
+        if o.outcome in ("win", "loss", "expired"):
+            cell_events[(o.signal_type, o.market)].append((o.date, idx, o.return_pct))
+    # 注意：纯 expired 格子会进 cell_events 但不进 buckets → 不产 SignalStat 行——保持
+    # “格子=有 win/loss” 现语义，cell_events 只为已有格子供数；Step 3c 用 .get(...) 取值。
 
     # Step 3a: 先算各格 win/loss/sample(第一遍,确定 family N)
     cells = []
@@ -361,6 +416,16 @@ def aggregate_signal_stats(
             excess: Optional[float] = round(ci_low - base, 4)
         else:
             excess = None
+
+        events = cell_events.get((sig_type, market), [])
+        returns_in = [ret for _, _, ret in events if ret is not None]
+        sort_keys_in = [(d is None, d or "", i) for d, i, ret in events if ret is not None]
+        excluded = sum(1 for _, _, ret in events if ret is None)
+        rm = risk_metrics_from_returns(returns_in, sort_keys=sort_keys_in)
+        rm["excluded"] = excluded
+        rm["interval"] = interval
+        rm["horizon"] = horizon
+
         stats.append(
             SignalStat(
                 signal_type=sig_type,
@@ -377,6 +442,7 @@ def aggregate_signal_stats(
                 excess=excess,
                 ci_low_corrected=ci_low_corrected,
                 family_size=family_n,
+                risk_metrics=rm,
             )
         )
     return stats

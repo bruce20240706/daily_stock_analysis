@@ -50,6 +50,61 @@ class EvaluationConfig:
     engine_version: str = "v1"
 
 
+def risk_metrics_from_returns(returns, sort_keys=None):
+    """不年化风险指标共享纯函数(链路A/链路B 共用;数学与原 _compute_risk_metrics 逐行等价)。
+
+    Args:
+        returns:   已下钳(>=-100)收益列表(百分比数值);moment 统计(mean/std/sharpe/sortino)
+                   按**输入序**求和——与链路A 重构前逐行等价。
+        sort_keys: 与 returns 等长的排序键列表;仅 maxDD/equity 按 sorted(zip(sort_keys, ...))
+                   的序遍历;None=输入序。非有限值(inf/NaN)按 (return, key) **成对剔除**
+                   (单侧过滤会致索引错位、maxDD 排序静默错配)。
+
+    Returns:
+        dict:sample/mean_return_pct/return_std_pct/sharpe/sortino/max_drawdown_pct/
+        equity_final_pct/worst_single_return_pct(不含 note——调用方按语境追加);
+        round4;除零/未定义返 None,绝不 inf/NaN。
+    """
+    if sort_keys is None:
+        pairs = [(i, r) for i, r in enumerate(returns)]
+    else:
+        pairs = list(zip(sort_keys, returns))
+    pairs = [(k, r) for k, r in pairs if isinstance(r, (int, float)) and math.isfinite(r)]
+    clean = [r for _, r in pairs]                     # 输入序(过滤后)
+    n = len(clean)
+    if n == 0:
+        return {
+            "sample": 0, "mean_return_pct": None, "return_std_pct": None,
+            "sharpe": None, "sortino": None, "max_drawdown_pct": None,
+            "equity_final_pct": None, "worst_single_return_pct": None,
+        }
+
+    mean_r = sum(clean) / n
+    std_r = statistics.stdev(clean) if n >= 2 else None        # 样本 ddof=1
+    sharpe = round(mean_r / std_r, 4) if (std_r is not None and std_r > 0) else None
+
+    downside_sq = sum(x * x for x in clean if x < 0)
+    downside_dev = math.sqrt(downside_sq / n)
+    sortino = round(mean_r / downside_dev, 4) if (n >= 2 and downside_dev > 0) else None
+
+    equity, peak, maxdd = 1.0, 1.0, 0.0
+    for _key, ri in sorted(pairs, key=lambda t: t[0]):
+        equity *= (1 + ri / 100.0)
+        peak = max(peak, equity)
+        maxdd = max(maxdd, (peak - equity) / peak)
+
+    return {
+        "sample": n,
+        "mean_return_pct": round(mean_r, 4),
+        "return_std_pct": round(std_r, 4) if std_r is not None else None,
+        "sharpe": sharpe,
+        "sortino": sortino,
+        "max_drawdown_pct": round(maxdd * 100, 4),
+        "equity_final_pct": round((equity - 1.0) * 100, 4),
+        "worst_single_return_pct": round(min(clean), 4),
+    }
+
+
 class BacktestEngine:
     """Long-only daily-bar backtesting engine."""
 
@@ -768,8 +823,8 @@ class BacktestEngine:
     def _compute_risk_metrics(cls, completed: List[BacktestResultLike]) -> Dict[str, Any]:
         """信号收益序列的风险画像:不年化 Sharpe/Sortino + 事件净值 maxDD。
 
-        总体=已完成、非 cash、有 simulated_return_pct 的评估;收益下钳 ≥ -100
-        (单笔不可亏超本金;补 engine L=1 perp 未 floor)。全部 round 4;除零/未定义 → None。
+        总体=已完成、非 cash、有 simulated_return_pct 的评估;收益下钳 ≥ -100。
+        数学委托 risk_metrics_from_returns(输出与历史逐位一致,golden 测试锁全等)。
         详见 docs/superpowers/specs/2026-07-01-chaina-risk-metrics-design.md。
         """
         rows = [
@@ -777,52 +832,19 @@ class BacktestEngine:
             if (getattr(r, "position_recommendation", None) or "") != "cash"
             and getattr(r, "simulated_return_pct", None) is not None
         ]
-        n = len(rows)
-        if n == 0:
-            return {
-                "sample": 0, "mean_return_pct": None, "return_std_pct": None,
-                "sharpe": None, "sortino": None, "max_drawdown_pct": None,
-                "equity_final_pct": None, "worst_single_return_pct": None,
-                "note": cls._RISK_NOTE,
-            }
-
         returns = [max(float(r.simulated_return_pct), -100.0) for r in rows]
-        mean_r = sum(returns) / n
-        std_r = statistics.stdev(returns) if n >= 2 else None        # 样本 ddof=1
-        sharpe = round(mean_r / std_r, 4) if (std_r is not None and std_r > 0) else None
-
-        downside_sq = sum(x * x for x in returns if x < 0)
-        downside_dev = math.sqrt(downside_sq / n)
-        sortino = round(mean_r / downside_dev, 4) if (n >= 2 and downside_dev > 0) else None
-
-        # maxDD:按 analysis_date→code→原序 复利事件净值(getattr 容错)
-        ordered = sorted(
-            enumerate(rows),
-            key=lambda t: (
-                getattr(t[1], "analysis_date", None) is None,
-                getattr(t[1], "analysis_date", None),
-                getattr(t[1], "code", "") or "",
-                t[0],
-            ),
-        )
-        equity, peak, maxdd = 1.0, 1.0, 0.0
-        for _idx, r in ordered:
-            ri = max(float(r.simulated_return_pct), -100.0)
-            equity *= (1 + ri / 100.0)
-            peak = max(peak, equity)
-            maxdd = max(maxdd, (peak - equity) / peak)
-
-        return {
-            "sample": n,
-            "mean_return_pct": round(mean_r, 4),
-            "return_std_pct": round(std_r, 4) if std_r is not None else None,
-            "sharpe": sharpe,
-            "sortino": sortino,
-            "max_drawdown_pct": round(maxdd * 100, 4),
-            "equity_final_pct": round((equity - 1.0) * 100, 4),
-            "worst_single_return_pct": round(min(returns), 4),
-            "note": cls._RISK_NOTE,
-        }
+        sort_keys = [
+            (
+                getattr(r, "analysis_date", None) is None,
+                getattr(r, "analysis_date", None) or "",
+                getattr(r, "code", "") or "",
+                i,
+            )
+            for i, r in enumerate(rows)
+        ]
+        metrics = risk_metrics_from_returns(returns, sort_keys=sort_keys)
+        metrics["note"] = cls._RISK_NOTE
+        return metrics
 
     @staticmethod
     def _compute_diagnostics(results: List[BacktestResultLike]) -> Dict[str, Any]:

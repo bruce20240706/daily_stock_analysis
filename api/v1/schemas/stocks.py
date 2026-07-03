@@ -9,7 +9,7 @@
 2. 定义历史 K 线数据模型
 """
 
-from typing import Literal, List, Optional
+from typing import Literal, List, Optional, Dict, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -158,6 +158,10 @@ class SignalsResponse(BaseModel):
         "none", description="多周期共振档位（M4-A）：高周期趋势与日线信号同向"
     )
     plan_quality: Optional[Literal["high", "medium", "low"]] = Field(None, description="交易计划质量:price_lines 完整度 + consistency;无 price_lines→null")
+    risk_metrics_by_signal_type: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="各信号型所在 (signal_type×market) 格子的风险画像(不年化 Sharpe/Sortino/maxDD/worst,毛收益保守跳空感知口径,expired 计入,excluded=失真/无效剔除数,含 interval/horizon 自描述)。描述性统计:无置信区间、未经多重检验校正,不得作为跨格子挑选依据(verified 才是校正后判据)。空 dict=无格子或 legacy 未重跑。",
+    )
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -168,6 +172,7 @@ class SignalsResponse(BaseModel):
             "degraded_reason": None,
             "resonance": "none",
             "plan_quality": None,
+            "risk_metrics_by_signal_type": {},
         }
     })
 
@@ -209,6 +214,7 @@ class BoardEntry(BaseModel):
     horizon_bars: Optional[int] = Field(None, description="代表信号的验证前看窗口(bar 数),与本行 hit_rate 同源")
     signal_status: Optional[Literal["active", "aging", "expired"]] = Field(None, description="代表信号的生命周期(区别于 status 的 ok/degraded)")
     plan_quality: Optional[Literal["high", "medium", "low"]] = Field(None, description="交易计划质量(该股响应级)")
+    risk_metrics: Optional[Dict[str, Any]] = Field(None, description="代表信号格子的风险画像(口径同 SignalsResponse.risk_metrics_by_signal_type);null=legacy 未重跑。描述性统计,不得作为跨格子挑选依据。")
 
 
 class BoardCounts(BaseModel):

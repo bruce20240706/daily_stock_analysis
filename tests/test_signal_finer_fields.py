@@ -90,7 +90,8 @@ def test_resolver_returns_horizon_key(monkeypatch):
     monkeypatch.setattr(shr, "get_market_for_stock", lambda code: "A")
     stat = _types.SimpleNamespace(win_rate=0.6, sample=99, ci_low=0.55,
                                   ci_high=0.7, baseline_win_rate=0.5, excess=0.05,
-                                  ci_low_corrected=None, family_size=None)
+                                  ci_low_corrected=None, family_size=None,
+                                  risk_metrics_json=None)
     monkeypatch.setattr(shr.SignalStatsRepository, "get",
                         lambda self, st, mkt, *, interval="1d", horizon=None: stat)
     out = shr.resolve_marker_hit_fields("volume_breakout", "600519")
@@ -380,3 +381,55 @@ def test_marker_from_vpsignal_no_resolver_corrected_none():
     )
     m = _ss._marker_from_vpsignal(sig)
     assert m["ci_low_corrected"] is None and m["family_size"] is None
+
+
+# --- 链路B 风险画像(Task 6):marker 内存 dict 携带 risk_metrics + build 收敛 map(D5) ---
+
+def _mk(signal_type):
+    """VPSignal SimpleNamespace 工厂（同 test_signals_service.py::_vpsignal 形态）。"""
+    return _types.SimpleNamespace(
+        timestamp=1000, price=10.0, anchor="low", direction="bullish",
+        signal_type=signal_type, confidence="high",
+        is_daily_approx=False, is_anomalous=False, reason="x",
+        threshold=None, observed_value=None,
+    )
+
+
+def test_marker_carries_risk_metrics_in_memory_dict():
+    sig = _types.SimpleNamespace(
+        timestamp=1000, price=10.0, anchor="low", direction="bullish",
+        signal_type="volume_breakout", confidence="high",
+        is_daily_approx=False, is_anomalous=False, reason="x",
+        threshold=None, observed_value=None,
+    )
+    rm = {"sample": 3, "sharpe": 1.2, "excluded": 0, "interval": "1d", "horizon": 10}
+    resolver = lambda st, code: {"hit_rate": 0.6, "hit_sample": 30, "verified": True,
+                                 "ci_low": 0.5, "ci_high": 0.7, "baseline_excess": 0.1,
+                                 "horizon": 10, "ci_low_corrected": None, "family_size": None,
+                                 "risk_metrics": rm}
+    m = _ss._marker_from_vpsignal(sig, code="600519", hit_fields_resolver=resolver)
+    assert m["risk_metrics"] == rm
+
+
+def test_build_collects_risk_metrics_by_signal_type():
+    rm_a = {"sample": 3, "sharpe": 1.2}
+    rm_b = {"sample": 5, "sharpe": -0.4}
+
+    def resolver(st, code):
+        return {"hit_rate": 0.6, "hit_sample": 30, "verified": False,
+                "ci_low": None, "ci_high": None, "baseline_excess": None, "horizon": 10,
+                "ci_low_corrected": None, "family_size": None,
+                "risk_metrics": rm_a if st == "volume_breakout" else rm_b}
+
+    engine_result = _types.SimpleNamespace(
+        status="ok", degraded_reason=None,
+        markers=[_mk("volume_breakout"), _mk("volume_breakout"), _mk("obv_top_divergence")],
+    )
+    payload = _ss.build_signals_payload(
+        engine_result=engine_result, rule_signal=None, llm_record=None,
+        latest_bar_date="2026-06-01", latest_close=10.0,
+        trading_days_elapsed=0, code="600519", hit_fields_resolver=resolver,
+    )
+    assert payload["risk_metrics_by_signal_type"] == {
+        "volume_breakout": rm_a, "obv_top_divergence": rm_b,
+    }   # O(K):两型三 marker 收敛两键

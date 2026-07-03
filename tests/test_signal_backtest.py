@@ -263,3 +263,123 @@ def test_eval_right_edge_absolute_count(n, h, expected):
     df = _smooth_uptrend_df(n)
     base = evaluate_baseline_outcomes(df, market="cn", horizon=h)
     assert len(base) == expected
+
+
+# =====================================================================
+# 链路B 风险画像:三重门收益(保守跳空感知 + 形态级失真守卫,spec §4.1/§7.2)
+# =====================================================================
+from src.services.signal_backtest import (
+    TripleBarrierResult,
+    _classify_core,
+    classify_triple_barrier_with_return,
+)
+
+
+def _bar_ohlc(o, h, l, c):
+    return {"open": o, "high": h, "low": l, "close": c}
+
+
+# entry=100, stop=95, target=110(良构:target>entry)
+def test_win_no_gap_return_at_target():
+    fwd = [_bar_ohlc(101, 111, 100, 108)]
+    r = classify_triple_barrier_with_return(fwd, stop=95.0, target=110.0, entry=100.0)
+    assert r.outcome == "win"
+    assert abs(r.return_pct - 10.0) < 1e-9          # (110-100)/100*100
+
+
+def test_distortion_guard_is_shape_level_not_outcome_level():
+    """Blocker 回归锚:target<=entry 的事件 win/loss/expired 一律 None(单边剔除=选择偏差)。"""
+    # 几何:entry=120 已越过 target=110(动量形态),stop=95
+    win_fwd = [_bar_ohlc(118, 125, 117, 124)]            # high>=110 → win
+    loss_fwd = [_bar_ohlc(118, 119, 90, 92)]             # low<=95 → loss
+    exp_fwd = [_bar_ohlc(109.5, 109.8, 109.0, 109.5)]    # 不触任何门 → expired
+    for fwd, expect_outcome in ((win_fwd, "win"), (loss_fwd, "loss"), (exp_fwd, "expired")):
+        r = classify_triple_barrier_with_return(fwd, stop=95.0, target=110.0, entry=120.0)
+        assert r.outcome == expect_outcome
+        assert r.return_pct is None, f"{expect_outcome} 应被形态级守卫置 None"
+
+
+def test_loss_gap_uses_worse_open():
+    fwd = [_bar_ohlc(90, 96, 88, 89)]                    # 跳空低开 90 < stop 95
+    r = classify_triple_barrier_with_return(fwd, stop=95.0, target=110.0, entry=100.0)
+    assert r.outcome == "loss"
+    assert abs(r.return_pct - (-10.0)) < 1e-9       # (90-100)/100*100,按更差的 open
+
+
+def test_loss_no_gap_uses_stop():
+    fwd = [_bar_ohlc(101, 103, 94, 96)]                  # open 101 > stop 95,盘中破位
+    r = classify_triple_barrier_with_return(fwd, stop=95.0, target=110.0, entry=100.0)
+    assert r.outcome == "loss"
+    assert abs(r.return_pct - (-5.0)) < 1e-9        # 按 stop 95
+
+
+def test_double_touch_three_variants():
+    """同 bar 双触(high>=target 且 low<=stop)恒判 loss;exit 按 min(open,stop) 三变体。"""
+    # 变体1:open < stop(跳空低开双杀)→ exit=open=90 → -10%
+    r1 = classify_triple_barrier_with_return([_bar_ohlc(90, 111, 88, 100)], stop=95.0, target=110.0, entry=100.0)
+    assert r1.outcome == "loss" and abs(r1.return_pct - (-10.0)) < 1e-9
+    # 变体2:stop < open < target → exit=stop=95 → -5%
+    r2 = classify_triple_barrier_with_return([_bar_ohlc(100, 111, 90, 99)], stop=95.0, target=110.0, entry=100.0)
+    assert r2.outcome == "loss" and abs(r2.return_pct - (-5.0)) < 1e-9
+    # 变体3:open >= target(高开双杀,真实本可开盘止盈)→ 保守 loss,exit=min(open,stop)=stop=95 → -5%
+    r3 = classify_triple_barrier_with_return([_bar_ohlc(112, 113, 90, 91)], stop=95.0, target=110.0, entry=100.0)
+    assert r3.outcome == "loss" and abs(r3.return_pct - (-5.0)) < 1e-9   # 锁符号:loss 不得配正收益
+
+
+def test_expired_uses_window_end_close():
+    fwd = [_bar_ohlc(101, 105, 99, 103), _bar_ohlc(103, 106, 101, 104)]
+    r = classify_triple_barrier_with_return(fwd, stop=95.0, target=110.0, entry=100.0)
+    assert r.outcome == "expired"
+    assert abs(r.return_pct - 4.0) < 1e-9           # (104-100)/100*100(D8:expired 计收益)
+
+
+def test_defensive_guards_return_none_not_poison():
+    fwd_ok = [_bar_ohlc(101, 111, 100, 108)]
+    # entry 无效
+    assert classify_triple_barrier_with_return(fwd_ok, stop=95.0, target=110.0, entry=0.0).return_pct is None
+    assert classify_triple_barrier_with_return(fwd_ok, stop=95.0, target=110.0, entry=float("nan")).return_pct is None
+    # loss 触障 bar open 无效(NaN / 0.0 哨兵)→ 回退 stop,非 None 非假 -100
+    r_nan = classify_triple_barrier_with_return([_bar_ohlc(float("nan"), 96, 88, 89)], stop=95.0, target=110.0, entry=100.0)
+    assert r_nan.outcome == "loss" and abs(r_nan.return_pct - (-5.0)) < 1e-9
+    r_zero = classify_triple_barrier_with_return([_bar_ohlc(0.0, 96, 88, 89)], stop=95.0, target=110.0, entry=100.0)
+    assert abs(r_zero.return_pct - (-5.0)) < 1e-9
+    # expired 窗末 close 无效 → None(终门)
+    r_badc = classify_triple_barrier_with_return([_bar_ohlc(101, 105, 99, float("nan"))], stop=95.0, target=110.0, entry=100.0)
+    assert r_badc.outcome == "expired" and r_badc.return_pct is None
+
+
+def test_negative_exit_rejected_by_final_gate():
+    # 非物理构造(负 stop 强制 exit<0):数据有效性终门优先(exit_price>0),拦截返 None 而非钳位放行;
+    # 钳位 max(...,-100.0) 保留为与链路A 对齐的防御,long 语义下经终门后数学不可达
+    r = classify_triple_barrier_with_return([_bar_ohlc(-150.0, 96, -160.0, 90)], stop=-140.0, target=110.0, entry=100.0)
+    assert r.outcome == "loss"
+    assert r.return_pct is None
+
+
+def test_wrapper_equals_core_outcome():
+    cases = [
+        ([_bar_ohlc(101, 111, 100, 108)], 95.0, 110.0),
+        ([_bar_ohlc(90, 96, 88, 89)], 95.0, 110.0),
+        ([_bar_ohlc(101, 105, 99, 103)], 95.0, 110.0),
+        ([_bar_ohlc(90, 111, 88, 100)], 95.0, 110.0),
+    ]
+    for fwd, stop, target in cases:
+        assert classify_triple_barrier(fwd, stop=stop, target=target) == _classify_core(fwd, stop=stop, target=target)[0]
+
+
+def test_eval_produces_outcomes_with_return_and_date():
+    import pandas as pd
+    from src.services.signal_backtest import evaluate_baseline_outcomes
+    n = 80
+    df = pd.DataFrame({
+        "date": [f"2026-03-{(i % 28) + 1:02d}" for i in range(n)],
+        "open": [100.0 + i * 0.1 for i in range(n)],
+        "high": [101.0 + i * 0.1 for i in range(n)],
+        "low": [99.0 + i * 0.1 for i in range(n)],
+        "close": [100.5 + i * 0.1 for i in range(n)],
+        "volume": [1_000_000] * n,
+    })
+    outs = evaluate_baseline_outcomes(df, market="cn", horizon=10)
+    assert outs, "应产出 baseline outcome"
+    assert all(o.date is not None for o in outs)
+    assert any(o.return_pct is not None for o in outs)

@@ -171,3 +171,71 @@ def test_alpha_monotone_stricter_when_smaller():
                                        min_sample=10, fwer_alpha=alpha)
         lows.append(next(s for s in stats if s.signal_type == "probe").ci_low_corrected)
     assert lows[0] > lows[1] > lows[2]
+
+
+# =====================================================================
+# 链路B 风险画像:per-cell risk_metrics 聚合(spec §4.3/§7.5/§7.6)
+# =====================================================================
+
+
+def _o(sig, mkt, outcome, ret=None, date=None):
+    return SignalOutcome(sig, mkt, outcome, return_pct=ret, date=date)
+
+
+def test_cell_risk_metrics_includes_expired_and_counts_excluded():
+    outs = [
+        _o("volume_breakout", "cn", "win", 10.0, "2026-01-02"),
+        _o("volume_breakout", "cn", "loss", -5.0, "2026-01-03"),
+        _o("volume_breakout", "cn", "expired", 2.0, "2026-01-04"),   # D8:expired 计入
+        _o("volume_breakout", "cn", "win", None, "2026-01-05"),      # 失真 win(excluded)
+        _o("volume_breakout", "cn", "loss", None, "2026-01-06"),     # 失真 loss(excluded)
+    ]
+    base = [SignalOutcome("__baseline__", "cn", "win")] * 5 + [SignalOutcome("__baseline__", "cn", "loss")] * 5
+    stats = aggregate_signal_stats(outs, base, horizon=10, interval="5m", min_sample=3)
+    s = stats[0]
+    rm = s.risk_metrics
+    assert rm is not None
+    assert rm["sample"] == 3                     # 10,-5,2(expired 计入;两 None 剔除)
+    assert rm["excluded"] == 2                   # 失真 win + 失真 loss 都计
+    assert rm["interval"] == "5m" and rm["horizon"] == 10
+    assert "note" not in rm                      # D5:note 不入 dict
+    # 胜率分母不变式:sample(win+loss)=4,与 risk sample=3 不定序共存
+    assert s.sample == 4
+
+
+def test_all_excluded_cell_still_gets_full_dict_not_none():
+    """NEW-4 回归锚:100% 剔除时落全键 dict(sample=0/excluded=N),None 仅 legacy 一义。"""
+    outs = [_o("x", "cn", "win", None, "2026-01-02"), _o("x", "cn", "loss", None, "2026-01-03")]
+    base = [SignalOutcome("__baseline__", "cn", "win")]
+    stats = aggregate_signal_stats(outs, base, horizon=10)
+    rm = stats[0].risk_metrics
+    assert rm is not None
+    assert rm["sample"] == 0 and rm["excluded"] == 2
+    assert rm["sharpe"] is None and rm["max_drawdown_pct"] is None
+
+
+def test_cell_maxdd_uses_date_order_not_input_order():
+    """maxDD 排序判别式(3 元非对称):date 序 ≠ 输入序时 maxDD 不同;mean 不随序变。"""
+    # date 序:-50, +100, -50 → equity 0.5→1.0→0.5,maxDD=50%
+    # 输入序:+100, -50, -50 → equity 2.0→1.0→0.5,maxDD=75%
+    outs = [
+        _o("x", "cn", "win", 100.0, "2026-01-02"),
+        _o("x", "cn", "loss", -50.0, "2026-01-01"),
+        _o("x", "cn", "loss", -50.0, "2026-01-03"),
+    ]
+    base = [SignalOutcome("__baseline__", "cn", "win")]
+    rm = aggregate_signal_stats(outs, base, horizon=10)[0].risk_metrics
+    assert abs(rm["max_drawdown_pct"] - 50.0) < 1e-4      # date 序生效(输入序会是 75%)
+    assert abs(rm["mean_return_pct"] - 0.0) < 1e-4        # moment 不随序变
+
+
+def test_dates_all_none_falls_back_to_input_order_no_typeerror():
+    outs = [_o("x", "cn", "win", 100.0), _o("x", "cn", "loss", -50.0), _o("x", "cn", "loss", -50.0)]
+    base = [SignalOutcome("__baseline__", "cn", "win")]
+    rm = aggregate_signal_stats(outs, base, horizon=10)[0].risk_metrics
+    assert abs(rm["max_drawdown_pct"] - 75.0) < 1e-4      # 输入序
+
+
+def test_legacy_signaloutcome_construction_still_works():
+    o = SignalOutcome("x", "cn", "win")                    # 既有三参构造零破坏
+    assert o.return_pct is None and o.date is None

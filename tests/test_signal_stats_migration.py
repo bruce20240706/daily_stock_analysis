@@ -74,3 +74,33 @@ def test_two_new_columns_roundtrip(tmp_path):
         assert fetched.ci_low_corrected == 0.55
         assert fetched.family_size == 20
     DatabaseManager.reset_instance()
+
+
+def test_risk_metrics_json_column_present_and_migrated(tmp_path):
+    DatabaseManager.reset_instance()
+    try:
+        db = DatabaseManager(db_url=f"sqlite:///{tmp_path/'fresh3.db'}")
+        assert "risk_metrics_json" in _columns(db)
+    finally:
+        DatabaseManager.reset_instance()
+
+
+def test_risk_metrics_json_roundtrip_and_null_legacy(tmp_path):
+    import json
+    DatabaseManager.reset_instance()
+    try:
+        db = DatabaseManager(db_url=f"sqlite:///{tmp_path/'rt3.db'}")
+        rm = {"sample": 3, "sharpe": 1.2, "excluded": 1, "interval": "1d", "horizon": 10}
+        row = SignalStatRow(signal_type="volume_breakout", market="cn", interval="1d",
+                            horizon=10, win=2, loss=1, sample=3, win_rate=0.667,
+                            ci_low=0.2, ci_high=0.9, baseline_win_rate=0.5, excess=-0.3,
+                            risk_metrics_json=json.dumps(rm, ensure_ascii=False))
+        legacy = SignalStatRow(signal_type="old_sig", market="cn", interval="1d",
+                               horizon=10, win=1, loss=1, sample=2)
+        with db.get_session() as s:
+            s.add_all([row, legacy]); s.commit()
+            fetched = s.query(SignalStatRow).filter_by(signal_type="volume_breakout").one()
+            assert json.loads(fetched.risk_metrics_json)["sharpe"] == 1.2
+            assert s.query(SignalStatRow).filter_by(signal_type="old_sig").one().risk_metrics_json is None
+    finally:
+        DatabaseManager.reset_instance()

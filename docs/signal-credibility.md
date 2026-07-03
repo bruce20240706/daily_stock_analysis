@@ -93,6 +93,41 @@ excess = ci_low - baseline_win_rate
 | `ci_low_corrected` | `float \| None` | family-wise（Bonferroni-CI）校正后 Wilson 下界；`family_size <= 1` 时等于 `ci_low`；`sample == 0` 时为 `None`（详见 §5.1） |
 | `family_size` | `int` | 本次聚合中可检验格子数 N（同批 `sample >= min_sample` 的 `(signal_type × market)` 格子数） |
 
+### 4.4 风险画像（`risk_metrics`，链路B 增量）
+
+`aggregate_signal_stats` 在按 `(signal_type × market)` 聚合胜率的同时，顺路收集每个格子的信号触发事件收益序列，算出一份不年化风险画像，写入 `SignalStat.risk_metrics`（dict，最终落库为 `signal_stats.risk_metrics_json`）。数学公式与链路A（Inc 1a 回测风险画像）通过共享纯函数 `risk_metrics_from_returns`（`src/core/backtest_engine.py`）完全一致：Sharpe = 原始样本 `mean/std`、Sortino = `mean / sqrt(Σ_{r<0}r²/n)`、`max_drawdown_pct` 按复利事件净值峰谷、均 `round4`，除零/未定义返回 `None`，绝不返回 `inf`/`NaN`。
+
+**收益口径（保守跳空感知）**：单笔收益由 `classify_triple_barrier_with_return` 算出（毛收益，不计交易成本）：
+- `entry` = 信号触发 bar 的收盘价（`close`），隐含"收盘可完全成交"的简化假设，不建模真实滑点/流动性冲击。
+- `win`：`exit = target`（不因跳空高开多计盈利）。
+- `loss`：`exit = min(触障 bar open, stop)`（跳空低开按更差的 open 计，比单纯用 stop 更保守）。
+- `expired`：`exit = 前瞻窗口末 bar 的 close`（窗末平仓）。
+- 三种结果的 exit 侧选取原则一致：宁可低估收益、不高估收益（win 不吃跳空红利、loss 吃跳空亏损、expired 按窗末价了结），因此风险画像整体偏保守估计，不代表实盘可实现的最优执行价。
+
+**失真形态整层剔除**：当 `target <= entry`（触发 bar 收盘已越过回踩锚定的 target，属动量/突破形态下的价位推导失真）时，不论最终 `win`/`loss`/`expired`，该笔 `return_pct` 一律记为 `None`，从收益序列**整层剔除**（不是只剔除某一类结果——单边剔除会导致"赢的不计、输的照计"的选择性偏差）。剔除数量以 `risk_metrics.excluded` 计数披露，供判断该格收益序列的有效覆盖度。
+
+**expired 计入收益序列**：`expired`（到期未触门）虽不计入胜率分母（`SignalStat.sample = win + loss`），但会按窗末平仓价计入风险画像的收益序列——即风险画像只按"结果是否有效（未被失真剔除）"筛选样本，不按"结果类型（win/loss/expired）"筛选，这一原则与链路A（回测风险画像仅按"已完成且非 cash"筛选、不按盈亏方向筛选）口径一致。
+
+**sample 三口径关系**：同一个格子里有三个不同的"样本数"，避免混用：
+
+| 字段 | 分母含义 | 计入范围 |
+|------|---------|---------|
+| `SignalStat.sample`（= `win + loss`） | 胜率/CI 分母 | 仅 `win`、`loss`，不含 `expired` |
+| `risk_metrics["sample"]` | 风险画像收益序列有效样本数 | `win` + `loss` + `expired`，且 `return_pct` 非 `None`（已剔除失真形态） |
+| `risk_metrics["excluded"]` | 因失真形态剔除的笔数 | 上述三类结果中 `target <= entry` 被整层剔除的部分 |
+
+三者不保证相等：`risk_metrics["sample"] + risk_metrics["excluded"]` 一般 **大于** `SignalStat.sample`（因为多了 `expired`），也可能因失真剔除而与 `win + loss + expired` 总数不同。
+
+**重叠窗自相关与跨标的混流**：同一信号类型在同一市场下，不同股票、不同触发时点的收益样本被合并进同一格子统计。前瞻窗口（`horizon` 根 bar）在时间上可能相互重叠（同一股票连续触发、或不同股票同期触发），样本之间并非独立同分布；风险画像也不区分标的，多只股票的收益混流进同一 Sharpe/Sortino/maxDD 计算，不代表可执行的单一资金曲线（`max_drawdown_pct` 是"信号事件序列净值"的峰谷回撤，不是真实组合回撤）。解读时需按此局限打折扣。
+
+**描述性统计、无 CI、不得跨格子挑选**：风险画像是纯描述性统计（点估计），不附带置信区间，也未经 §5.1 的多重检验（family-wise）校正——`ci_low_corrected` / `verified` 才是经过校正的可信度判据。**不应**依据风险画像（如"Sharpe 更高"）在多个 `(signal_type × market)` 格子间挑选信号，这等价于对未校正统计量做隐式多重比较，容易把运气误判为优势；跨格子挑选仍应以 `verified`（§5.1 校正后）为准。
+
+**跨 interval 不可比**：`risk_metrics.interval` / `risk_metrics.horizon` 为自描述字段，标注该格风险画像来自哪个 K 线周期与前瞻窗口。不同 `interval`（如 `1d` vs `5m`）下 `horizon` 根 bar 对应的实际时间跨度不同（例：`5m × horizon=10` ≈ 50 分钟，`1d × horizon=10` ≈ 10 个交易日），Sharpe/Sortino/maxDD 的时间尺度不可直接跨 interval 比较。
+
+**生效前提**：风险画像随 `aggregate_signal_stats` 一并计算，仅在**手动执行** `python main.py --signal-backtest`（或 `--signal-backtest-interval <粒度>`）时生效写入；当前无调度任务自动触发该批作业（`main.py` 仅在显式传入 `--signal-backtest` 参数时才运行，未接入 `--schedule`/GitHub Actions 定时流程）。
+
+**legacy NULL 语义**：`signal_stats.risk_metrics_json` 为幂等补列（`_ensure_signal_stats_columns`，与 `ci_low_corrected`/`family_size` 同款迁移守卫），升级前写入的老行该列为 `NULL`；`resolve_marker_hit_fields` 读到 `NULL`（或非法 JSON、非 dict 内容）一律返回 `risk_metrics: None`，不报错、不假造数据。需重跑批作业才能为老行补上风险画像。
+
 ---
 
 ## 5. `verified` 口径
@@ -202,6 +237,7 @@ verified = (
 | `excess` | FLOAT | 超额 |
 | `ci_low_corrected` | FLOAT | family-wise 校正后 CI 下界（Inc 1c）；`NULL`=legacy 行（升级前写入，未重跑） |
 | `family_size` | INTEGER | 写时 family 可检验格子数 N（Inc 1c）；`NULL`=legacy 行 |
+| `risk_metrics_json` | TEXT | 该格不年化风险画像 JSON（见 §4.4）；`NULL`=legacy 行（升级前写入，未重跑） |
 | `computed_at` | DATETIME | 最后计算时间 |
 
 读写接口：`src/repositories/signal_stats_repo.py` → `SignalStatsRepository`（`get` / `save_batch`）。
