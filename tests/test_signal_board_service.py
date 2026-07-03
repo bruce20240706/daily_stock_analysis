@@ -48,7 +48,7 @@ def test_build_signals_for_code_returns_board_signals(monkeypatch):
 
     bs = sbs.build_signals_for_code("600519", days=120)
 
-    assert set(bs.signals_payload) == {"status", "markers", "price_lines", "consistency", "degraded_reason", "resonance", "plan_quality", "risk_metrics_by_signal_type"}
+    assert set(bs.signals_payload) == {"status", "markers", "price_lines", "consistency", "degraded_reason", "resonance", "plan_quality", "risk_metrics_by_signal_type", "oos_by_signal_type"}
     assert bs.signals_payload["status"] == "ok"
     assert bs.signals_payload["resonance"] == "none"   # 深抓触发但 2 行桩数据不足以算 MA → resonance_from_daily 返回 none
     assert bs.rule_direction == "bullish"
@@ -308,3 +308,17 @@ def test_hit_fields_carry_risk_metrics_and_degraded_none():
     assert _hit_fields_from_markers([marker])["risk_metrics"] == rm
     assert _hit_fields_from_markers([])["risk_metrics"] is None
     assert _degraded_entry("600519", "x")["risk_metrics"] is None
+
+
+# --- Inc 1e:OOS holdout 切分报告(Task 5):board 层 oos 透传三处 return 站点 ---
+
+
+def test_hit_fields_carry_oos_and_degraded_none():
+    rep = {"cutoff_date": "x", "fraction": 0.3}
+    marker = {"source": "rule", "hit_rate": 0.6, "hit_sample": 30, "verified": False,
+              "ci_low": None, "ci_high": None, "baseline_excess": None,
+              "ci_low_corrected": None, "family_size": None, "risk_metrics": None,
+              "horizon_bars": 10, "status": "active", "oos": rep}
+    assert _hit_fields_from_markers([marker])["oos"] == rep
+    assert _hit_fields_from_markers([])["oos"] is None
+    assert _degraded_entry("600519", "x")["oos"] is None

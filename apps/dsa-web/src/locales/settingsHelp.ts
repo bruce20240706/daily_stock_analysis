@@ -911,6 +911,13 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响 signal_stats 中 ci_low_corrected 与前端"已验证"标识;family_size 字段透出同检组合数。'],
     notes: ['修改后需重新运行 --signal-backtest 才会按新族水平重算校正列。'],
   },
+  'settings.backtest.SIGNAL_BACKTEST_OOS_FRACTION': {
+    title: '链路B 样本外 Holdout 切分比例',
+    summary:
+      '链路B 信号统计的样本外 holdout 切分比例(按市场交易日期格点分位,0=关闭)。启用后仅新增披露(oos 字段),verified 徽章与胜率口径不变;切的是时间轴而非样本配额。',
+    impact: ['影响 signal_stats.oos_json 与 API oos_by_signal_type/BoardEntry.oos 披露;不影响 verified 徽章与胜率口径。'],
+    notes: ['修改后需重新运行 --signal-backtest(值>0)才会落 oos_json。'],
+  },
   'settings.backtest.CRYPTO_INTRADAY_BACKTEST_INTERVAL': {
     title: '盘中回测 Bar 粒度',
     summary: '盘中/分钟级回测所用的 K 线粒度（crypto MVP），支持 1m/5m/15m/1h。',
@@ -2004,6 +2011,13 @@ const settingsHelpEnUS: SettingsHelpMap = {
     valueNotes: ['Different versions may use different evaluation algorithms or judgment rules.'],
     impact: ['Affects the evaluation algorithm and results.'],
     notes: ['Keep the default unless instructed to switch versions.'],
+  },
+  'settings.backtest.SIGNAL_BACKTEST_OOS_FRACTION': {
+    title: 'Signal Backtest OOS Fraction',
+    summary:
+      'Out-of-sample holdout fraction of the per-market trading-date grid for chain-B signal stats (0 = disabled). When enabled it only adds a descriptive disclosure (the oos field); the verified badge and win-rate keep the full-sample basis - this splits the time axis, not the sample quota.',
+    impact: ['Affects signal_stats.oos_json and the API oos_by_signal_type / BoardEntry.oos disclosure; does not affect the verified badge or win-rate basis.'],
+    notes: ['Requires re-running --signal-backtest (value > 0) after changes to populate oos_json.'],
   },
   // ------------------------------------------------------------------
   // Report configuration

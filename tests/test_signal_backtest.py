@@ -383,3 +383,56 @@ def test_eval_produces_outcomes_with_return_and_date():
     assert outs, "应产出 baseline outcome"
     assert all(o.date is not None for o in outs)
     assert any(o.return_pct is not None for o in outs)
+
+
+def test_eval_window_end_date_exact_and_both_branches():
+    """Inc 1e:window_end_date 精确=t+horizon bar 日期(审查 F3:弃 '>' 弱判别),双分支同补。"""
+    import pandas as pd
+    from src.services.signal_backtest import (
+        evaluate_baseline_outcomes, evaluate_signal_outcomes,
+    )
+    n, horizon = 80, 10
+    dates = [d.strftime("%Y-%m-%d") for d in pd.date_range("2026-01-01", periods=n, freq="D")]
+    idx_of = {d: i for i, d in enumerate(dates)}          # 逐 bar 唯一日期,可反查 t
+
+    def _df(vol):
+        return pd.DataFrame({
+            "date": dates,
+            "open": [100.0 + i * 0.1 for i in range(n)],
+            "high": [101.0 + i * 0.1 for i in range(n)],
+            "low": [99.0 + i * 0.1 for i in range(n)],
+            "close": [100.5 + i * 0.1 for i in range(n)],
+            "volume": vol,
+        })
+
+    # 分支1:baseline
+    df = _df([1_000_000] * n)
+    outs = evaluate_baseline_outcomes(df, market="cn", horizon=horizon)
+    assert outs, "应产出 baseline outcome"
+    for o in outs:
+        t = idx_of[o.date]
+        assert o.window_end_date == str(df.iloc[t + horizon]["date"])   # 精确相等,杀 t+1/t+horizon-1 变体
+
+    # 分支2:per-signal(放量突破夹具:60 根横盘 + 5 倍量突破,后接足量前瞻)
+    vol = [1_000_000] * n
+    close = [100.0] * 60 + [110.0 + i * 0.5 for i in range(n - 60)]
+    vol[60] = 5_000_000
+    df2 = pd.DataFrame({
+        "date": dates,
+        "open": [c - 0.5 for c in close],
+        "high": [c + 1.0 for c in close],
+        "low": [c - 1.0 for c in close],
+        "close": close,
+        "volume": vol,
+    })
+    sig_outs = evaluate_signal_outcomes(df2, market="cn", horizon=horizon)
+    assert sig_outs, "夹具应触发至少一个 bullish 信号(若为空请调整夹具并在报告披露,勿降低断言)"
+    for o in sig_outs:
+        t = idx_of[o.date]
+        assert o.window_end_date == str(df2.iloc[t + horizon]["date"])
+
+
+def test_legacy_signaloutcome_construction_no_window_end():
+    from src.services.signal_backtest import SignalOutcome
+    o = SignalOutcome("x", "cn", "win")                    # 既有三参构造零破坏
+    assert o.window_end_date is None

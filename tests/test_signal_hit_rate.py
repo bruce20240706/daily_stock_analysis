@@ -205,6 +205,7 @@ class ResolveMarkerHitFieldsTestCase(unittest.TestCase):
         m.ci_low_corrected = ci_low
         m.family_size = 1
         m.risk_metrics_json = None
+        m.oos_json = None
         return m
 
     def test_sample_at_threshold_sets_verified_true(self) -> None:
@@ -380,6 +381,7 @@ def _stat(**kw):
     d.setdefault("ci_low_corrected", d["ci_low"])
     d.setdefault("family_size", 1)
     d.setdefault("risk_metrics_json", None)
+    d.setdefault("oos_json", None)
     for k, v in d.items():
         setattr(m, k, v)
     return m
@@ -411,7 +413,7 @@ def test_resolve_missing_bucket_is_sample_insufficient():
         assert f == {"hit_rate": None, "hit_sample": None, "verified": False,
                      "ci_low": None, "ci_high": None, "baseline_excess": None,
                      "horizon": None, "ci_low_corrected": None, "family_size": None,
-                     "risk_metrics": None}
+                     "risk_metrics": None, "oos": None}
 
 
 def test_resolve_stat_with_zero_sample_returns_all_none():
@@ -431,7 +433,7 @@ def test_resolve_stat_with_zero_sample_returns_all_none():
         assert f == {"hit_rate": None, "hit_sample": None, "verified": False,
                      "ci_low": None, "ci_high": None, "baseline_excess": None,
                      "horizon": None, "ci_low_corrected": None, "family_size": None,
-                     "risk_metrics": None}
+                     "risk_metrics": None, "oos": None}
 
 
 def test_resolve_marker_hit_fields_real_repo_roundtrip(tmp_path):
@@ -524,7 +526,7 @@ def test_resolve_marker_hit_fields_passes_interval(monkeypatch):
             return SimpleNamespace(sample=999, win_rate=0.6, ci_low=0.55,
                                    ci_high=0.7, baseline_win_rate=0.5, excess=0.05,
                                    ci_low_corrected=None, family_size=None,
-                                   risk_metrics_json=None)
+                                   risk_metrics_json=None, oos_json=None)
 
     monkeypatch.setattr(shr, "SignalStatsRepository", lambda *a, **k: _Repo())
     monkeypatch.setattr(shr, "get_market_for_stock", lambda code: "crypto")
@@ -609,3 +611,22 @@ def test_resolver_risk_metrics_defensive_paths():
              patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
             Repo.return_value.get.return_value = _stat(risk_metrics_json=bad)
             assert resolve_marker_hit_fields("volume_breakout", "600519")["risk_metrics"] is None
+
+
+# --- Inc 1e: resolver 第 11 键 oos(spec §4;_parse_json_dict 共用 helper) ---
+
+
+def test_resolver_returns_oos_dict_and_defensive_paths():
+    rep = {"cutoff_date": "x", "fraction": 0.3, "embargoed": 0, "undated": 0,
+           "train": {"win_rate": 0.6, "sample": 5, "baseline_win_rate": 0.5, "excess": 0.1},
+           "oos": {"win_rate": 0.4, "sample": 3, "baseline_win_rate": 0.5, "excess": -0.1}}
+    with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+         patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+        Repo.return_value.get.return_value = _stat(oos_json=_json.dumps(rep))
+        f = resolve_marker_hit_fields("volume_breakout", "600519")
+        assert f["oos"]["oos"]["excess"] == -0.1
+    for bad in (None, "not json{", "[1,2]", "42"):
+        with patch("src.services.signal_hit_rate.get_market_for_stock", return_value="cn"), \
+             patch("src.services.signal_hit_rate.SignalStatsRepository") as Repo:
+            Repo.return_value.get.return_value = _stat(oos_json=bad)
+            assert resolve_marker_hit_fields("volume_breakout", "600519")["oos"] is None

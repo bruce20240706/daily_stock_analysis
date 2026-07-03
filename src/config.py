@@ -901,6 +901,9 @@ class Config:
     # 信号级回测 family-wise 多重检验族水平(Inc 1c):双尾口径,等价单尾假 verified 率≈alpha/2;
     # 域 [0.0001, 0.05],上限保证校正只收紧,下限防 inv_cdf(1.0) 崩溃
     signal_backtest_fwer_alpha: float = 0.05
+    # 链路B 样本外 holdout 切分比例(Inc 1e):按市场交易日期格点分位切分,0=关闭(默认,行为不变);
+    # 仅新增披露(oos 字段),不改变 verified 徽章与胜率口径;域 [0.0, 0.5]
+    signal_backtest_oos_fraction: float = 0.0
 
     # 盘中/分钟级回测(crypto MVP;默认与现状一致)
     crypto_intraday_backtest_interval: str = "5m"
@@ -1757,6 +1760,13 @@ class Config:
                 field_name='SIGNAL_BACKTEST_FWER_ALPHA',
                 minimum=0.0001,
                 maximum=0.05,
+            ),
+            signal_backtest_oos_fraction=parse_env_float(
+                os.getenv('SIGNAL_BACKTEST_OOS_FRACTION'),
+                0.0,
+                field_name='SIGNAL_BACKTEST_OOS_FRACTION',
+                minimum=0.0,
+                maximum=0.5,
             ),
             log_dir=os.getenv('LOG_DIR', './logs'),
             log_level=os.getenv('LOG_LEVEL', 'INFO'),

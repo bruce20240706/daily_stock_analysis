@@ -239,3 +239,120 @@ def test_dates_all_none_falls_back_to_input_order_no_typeerror():
 def test_legacy_signaloutcome_construction_still_works():
     o = SignalOutcome("x", "cn", "win")                    # 既有三参构造零破坏
     assert o.return_pct is None and o.date is None
+
+
+# =====================================================================
+# 链路B OOS holdout 切分(spec §3,Inc 1e)
+# =====================================================================
+
+
+def _b(mkt, date, end=None, outcome="win"):
+    return SignalOutcome("__baseline__", mkt, outcome, date=date, window_end_date=end)
+
+
+def _sig(mkt, date, end=None, outcome="win", st="volume_breakout"):
+    return SignalOutcome(st, mkt, outcome, date=date, window_end_date=end)
+
+
+def test_cutoff_quantile_kills_floor_variants_and_no_date_parsing():
+    """审查 F2:两组算例各杀 len 基/round 变体;非日期 token 证纯字典序无解析。"""
+    from src.services.signal_backtest import _derive_market_cutoffs
+    base = [_b("cn", d) for d in ["d1", "d2", "d3", "d4", "d5"]]
+    assert _derive_market_cutoffs(base, 0.25)["cn"] == "d4"   # floor(0.75*4)=3;len 基变体 floor(3.75)-1=2 → d3 被杀
+    assert _derive_market_cutoffs(base, 0.3)["cn"] == "d3"    # floor(2.8)=2;round 变体 round(2.8)=3 → d4 被杀
+
+
+def test_dual_market_heterogeneous_span_uses_own_cutoff():
+    """审查 STAT-1 回归锚:异构跨度双市场各用自己的分位;全局池化会把短跨度市场 train 清空。"""
+    from src.services.signal_backtest import _derive_market_cutoffs
+    base = [_b("us", f"a{i:03d}", f"a{min(i + 2, 99):03d}") for i in range(100)]
+    base += [_b("cn", f"b{i:03d}", f"b{min(i + 2, 19):03d}",
+                "win" if i % 2 else "loss") for i in range(20)]
+    cutoffs = _derive_market_cutoffs(base, 0.2)
+    assert cutoffs["us"] == "a079" and cutoffs["cn"] == "b015"   # 各自 floor(0.8*(len-1));全局池化会落 a095
+
+    outs = [_sig("cn", f"b{i:03d}", f"b{i + 2:03d}") for i in range(12)]
+    stats = aggregate_signal_stats(outs, base, horizon=10, oos_fraction=0.2)
+    rep = next(s for s in stats if s.market == "cn").oos
+    assert rep["cutoff_date"] == "b015"
+    assert rep["train"]["sample"] > 0            # 全局池化下 cn 全部日期 > a095 → train 必空,此断言即判别式
+
+
+def test_split_conservation_embargo_and_expired_excluded():
+    """审查 STAT-4:守恒恒等式承重;expired 不进任何计数;跨切点窗必 embargo;end 缺失保守归 embargo。"""
+    base = []
+    dates = [f"c{i:02d}" for i in range(10)]                     # c00..c09,f=0.3 → floor(0.7*9)=6 → cutoff=c06
+    for i, d in enumerate(dates):
+        end = dates[min(i + 2, 9)]
+        base.append(_b("cn", d, end, "win" if i % 2 == 0 else "loss"))
+    outs = [
+        _sig("cn", "c01", "c03", "win"),      # train
+        _sig("cn", "c02", "c04", "loss"),     # train
+        _sig("cn", "c05", "c08", "win"),      # embargo:date≤c06<end(泄漏回归锚)
+        _sig("cn", "c03", None, "loss"),      # embargo:end 缺失且 date≤cutoff 保守归类(#4)
+        _sig("cn", "c07", "c09", "win"),      # OOS
+        _sig("cn", "c08", "c09", "loss"),     # OOS
+        _sig("cn", None, None, "win"),        # undated
+        _sig("cn", "c01", "c03", "expired"),  # expired:不进任何 OOS 计数
+    ]
+    s = aggregate_signal_stats(outs, base, horizon=10, oos_fraction=0.3)[0]
+    rep = s.oos
+    assert rep["cutoff_date"] == "c06" and rep["fraction"] == 0.3
+    assert rep["train"]["sample"] == 2 and rep["oos"]["sample"] == 2
+    assert rep["embargoed"] == 2 and rep["undated"] == 1
+    # 守恒恒等式(win/loss 宇宙的精确划分):
+    assert rep["train"]["sample"] + rep["oos"]["sample"] + rep["embargoed"] + rep["undated"] == s.sample == 7
+    # 两段子统计手算 pin:
+    # baseline train=c00..c04(end≤c06)=3W2L→0.6;baseline OOS=c07,c08,c09=1W2L→0.3333
+    assert abs(rep["train"]["win_rate"] - 0.5) < 1e-9
+    assert abs(rep["train"]["baseline_win_rate"] - 0.6) < 1e-9
+    assert abs(rep["train"]["excess"] - (-0.1)) < 1e-9
+    assert abs(rep["oos"]["win_rate"] - 0.5) < 1e-9
+    assert abs(rep["oos"]["baseline_win_rate"] - 0.3333) < 1e-9
+    assert abs(rep["oos"]["excess"] - 0.1667) < 1e-9            # round(0.5-1/3, 4):raw 相减后 round4
+
+
+def test_zero_sample_segment_yields_none_not_crash():
+    base = [_b("cn", f"e{i}", f"e{min(i + 1, 4)}") for i in range(5)]   # e0..e4,f=0.5→floor(0.5*4)=2→cutoff=e2
+    outs = [_sig("cn", "e3", "e4", "win")]                               # 仅 OOS 一件,train 空
+    rep = aggregate_signal_stats(outs, base, horizon=10, oos_fraction=0.5)[0].oos
+    assert rep["train"]["sample"] == 0 and rep["train"]["win_rate"] is None
+    assert rep["train"]["excess"] is None
+
+
+def test_degenerate_market_coexists_with_normal_market():
+    """§7.6:某市场 distinct 日期<2 → 退化 dict;同 run 其他市场正常。"""
+    base = [_b("hk", "only-one-date", "only-one-date")]
+    base += [_b("cn", f"g{i}", f"g{min(i + 1, 4)}") for i in range(5)]
+    outs = [_sig("hk", "only-one-date", None), _sig("cn", "g3", "g4")]
+    stats = aggregate_signal_stats(outs, base, horizon=10, oos_fraction=0.3)
+    hk = next(s for s in stats if s.market == "hk").oos
+    cn = next(s for s in stats if s.market == "cn").oos
+    assert hk == {"cutoff_date": None, "fraction": 0.3, "degenerate": True}
+    assert cn["cutoff_date"] is not None and "train" in cn
+
+
+def test_headline_stats_invariant_and_inputs_not_mutated():
+    """§7.7:f>0 不改任何既有字段;输入列表未被变异(id/顺序/元素同一)。"""
+    base = [_b("cn", f"h{i:02d}", f"h{min(i + 2, 9):02d}", "win" if i % 2 else "loss") for i in range(10)]
+    outs = [_sig("cn", f"h{i:02d}", f"h{min(i + 2, 9):02d}", "win" if i < 4 else "loss") for i in range(8)]
+    snap_outs, snap_base = list(outs), list(base)
+    s0 = aggregate_signal_stats(outs, base, horizon=10)[0]
+    s1 = aggregate_signal_stats(outs, base, horizon=10, oos_fraction=0.3)[0]
+    assert all(a is b for a, b in zip(outs, snap_outs)) and len(outs) == len(snap_outs)
+    assert all(a is b for a, b in zip(base, snap_base)) and len(base) == len(snap_base)
+    for f in ("signal_type", "market", "win", "loss", "sample", "win_rate",
+              "ci_low", "ci_high", "baseline_win_rate", "excess",
+              "ci_low_corrected", "family_size", "risk_metrics"):
+        assert getattr(s0, f) == getattr(s1, f), f
+    assert s0.oos is None and s1.oos is not None
+
+
+def test_function_side_clamp_and_early_exit():
+    """审查 F7:函数侧二次钳;fraction 键落钳后值;负值走 f=0 早退。"""
+    base = [_b("cn", f"k{i}", f"k{min(i + 1, 5)}") for i in range(6)]
+    outs = [_sig("cn", "k1", "k2")]
+    rep09 = aggregate_signal_stats(outs, base, horizon=10, oos_fraction=0.9)[0].oos
+    rep05 = aggregate_signal_stats(outs, base, horizon=10, oos_fraction=0.5)[0].oos
+    assert rep09 == rep05 and rep09["fraction"] == 0.5
+    assert aggregate_signal_stats(outs, base, horizon=10, oos_fraction=-0.1)[0].oos is None

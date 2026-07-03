@@ -98,20 +98,19 @@ def _read_watchlist_codes(service: SystemConfigService) -> list:
     return [c.strip() for c in stock_list_str.split(",") if c.strip()]
 
 
-def _serialize_risk_metrics(risk_metrics: Optional[dict]) -> Optional[str]:
-    """把单格风险画像 dict 序列化为落库 JSON;None 直接透传（无风险画像/legacy）。
+def _serialize_cell_json(payload: Optional[dict], field_label: str,
+                         signal_type: str = "?", market: str = "?") -> Optional[str]:
+    """单格 JSON 字段序列化(risk_metrics/oos 共用);None 直接透传(legacy/未启用)。
 
-    allow_nan=False fail-closed：risk_metrics_from_returns 已按契约保证不产出
-    inf/NaN（非有限值成对剔除），故 ValueError 理论不可达；此处仍用 try/except
-    兜底并单格降级为 None（NULL=legacy），而非让单格异常拖垮整批落库——与本文件
-    既有"单股失败不拖垮整批"风格一致（see 上方 evaluate 循环 `except Exception`）。
+    allow_nan=False fail-closed;失败单格降级 NULL 不拖垮整批,warning 带字段名与格子身份。
     """
-    if risk_metrics is None:
+    if payload is None:
         return None
     try:
-        return json.dumps(risk_metrics, ensure_ascii=False, allow_nan=False)
+        return json.dumps(payload, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
-        logger.warning("risk_metrics 序列化失败，该格降级为 legacy(NULL): %s", exc)
+        logger.warning("%s 序列化失败，(%s, %s) 该格降级为 legacy(NULL): %s",
+                       field_label, signal_type, market, exc)
         return None
 
 
@@ -187,6 +186,7 @@ class SignalBacktestService:
             all_sig, all_base, horizon=hz, interval=interval,
             fwer_alpha=float(getattr(cfg, "signal_backtest_fwer_alpha", 0.05)),
             min_sample=resolve_verified_min_sample(cfg),
+            oos_fraction=float(getattr(cfg, "signal_backtest_oos_fraction", 0.0)),
         )
 
         # 构造 ORM 行并落库
@@ -206,7 +206,9 @@ class SignalBacktestService:
                 excess=s.excess,
                 ci_low_corrected=s.ci_low_corrected,
                 family_size=s.family_size,
-                risk_metrics_json=_serialize_risk_metrics(s.risk_metrics),
+                risk_metrics_json=_serialize_cell_json(
+                    s.risk_metrics, "risk_metrics", s.signal_type, s.market),
+                oos_json=_serialize_cell_json(s.oos, "oos", s.signal_type, s.market),
             )
             for s in stats
         ]

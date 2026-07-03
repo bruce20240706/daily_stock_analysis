@@ -104,3 +104,35 @@ def test_risk_metrics_json_roundtrip_and_null_legacy(tmp_path):
             assert s.query(SignalStatRow).filter_by(signal_type="old_sig").one().risk_metrics_json is None
     finally:
         DatabaseManager.reset_instance()
+
+
+def test_oos_json_column_present_and_migrated(tmp_path):
+    DatabaseManager.reset_instance()
+    try:
+        db = DatabaseManager(db_url=f"sqlite:///{tmp_path/'fresh4.db'}")
+        assert "oos_json" in _columns(db)
+    finally:
+        DatabaseManager.reset_instance()
+
+
+def test_oos_json_roundtrip_and_null_legacy(tmp_path):
+    import json
+    DatabaseManager.reset_instance()
+    try:
+        db = DatabaseManager(db_url=f"sqlite:///{tmp_path/'rt4.db'}")
+        rep = {"cutoff_date": "2026-06-01", "fraction": 0.3, "embargoed": 1, "undated": 0,
+               "train": {"win_rate": 0.6, "sample": 5, "baseline_win_rate": 0.5, "excess": 0.1},
+               "oos": {"win_rate": None, "sample": 0, "baseline_win_rate": None, "excess": None}}
+        row = SignalStatRow(signal_type="volume_breakout", market="cn", interval="1d",
+                            horizon=10, win=2, loss=1, sample=3,
+                            oos_json=json.dumps(rep, ensure_ascii=False))
+        legacy = SignalStatRow(signal_type="old_sig", market="cn", interval="1d",
+                               horizon=10, win=1, loss=1, sample=2)
+        with db.get_session() as s:
+            s.add_all([row, legacy])
+            s.commit()
+            fetched = s.query(SignalStatRow).filter_by(signal_type="volume_breakout").one()
+            assert json.loads(fetched.oos_json)["train"]["excess"] == 0.1
+            assert s.query(SignalStatRow).filter_by(signal_type="old_sig").one().oos_json is None
+    finally:
+        DatabaseManager.reset_instance()
