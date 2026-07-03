@@ -56,6 +56,7 @@ class SignalOutcome:
                  失真形态/无效数据为 None。默认 None（末尾字段，legacy 三参构造零破坏）。
     date         触发 bar 的日期字符串；用于 aggregate 阶段按时序排序计算 maxDD。
                  默认 None（末尾字段，legacy 三参构造零破坏）。
+    window_end_date  前瞻窗末 bar(t+horizon)的日期字符串;用于 OOS holdout 切分的精确 purge(spec §3.2)。默认 None(末尾字段,legacy 构造零破坏)。
     """
 
     signal_type: str
@@ -63,6 +64,7 @@ class SignalOutcome:
     outcome: str
     return_pct: Optional[float] = None
     date: Optional[str] = None
+    window_end_date: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -172,16 +174,19 @@ def _eval(
             continue
         entry = float(df.iloc[t]["close"])
         date = str(df.iloc[t]["date"])
+        window_end = str(df.iloc[t + horizon]["date"])                     # 循环上界 n-horizon 保证索引有效
         r = classify_triple_barrier_with_return(fwd, stop=lv.stop, target=lv.target, entry=entry)
         if all_bars:
             out.append(SignalOutcome(
                 signal_type=BASELINE_SIGNAL_TYPE, market=market,
-                outcome=r.outcome, return_pct=r.return_pct, date=date))
+                outcome=r.outcome, return_pct=r.return_pct, date=date,
+                window_end_date=window_end))
         else:
             for sig_type in sig_by_bar.get(t, ()):                         # O(1) 查表；同 bar 多信号共享同一 r（顺带 O(信号数) 优化，classify 只算一次，行为等价）
                 out.append(SignalOutcome(
                     signal_type=sig_type, market=market,
-                    outcome=r.outcome, return_pct=r.return_pct, date=date))
+                    outcome=r.outcome, return_pct=r.return_pct, date=date,
+                    window_end_date=window_end))
     return out
 
 
