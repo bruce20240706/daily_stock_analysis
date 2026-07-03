@@ -157,6 +157,7 @@ def _marker_from_vpsignal(
         "family_size": None,
         "horizon_bars": None,
         "status": None,
+        "risk_metrics": None,
     }
     if hit_fields_resolver is not None and code:
         try:
@@ -170,6 +171,7 @@ def _marker_from_vpsignal(
             marker["horizon_bars"] = fields.get("horizon")
             marker["ci_low_corrected"] = fields.get("ci_low_corrected")
             marker["family_size"] = fields.get("family_size")
+            marker["risk_metrics"] = fields.get("risk_metrics")
         except Exception:
             logger.warning(
                 "resolve_marker_hit_fields 失败，跳过回填 signal_type=%s code=%s",
@@ -217,6 +219,7 @@ def _llm_marker(
         "as_of": as_of,
         "horizon_bars": None,
         "status": None,
+        "risk_metrics": None,
     }
 
 
@@ -330,10 +333,20 @@ def build_signals_payload(
         stale_threshold=stale_threshold,
     )
 
+    # 按 signal_type 收敛风险画像：O(K) 而非逐 bar marker 携带（防载荷膨胀，D5）。
+    # 首个非 None dict 者胜出（同型多 marker 的画像本就相同，取首条足够）。
+    risk_by_type: dict = {}
+    for m in markers:
+        rm = m.get("risk_metrics")
+        st = m.get("signal_type")
+        if isinstance(rm, dict) and st and st not in risk_by_type:
+            risk_by_type[st] = rm
+
     return {
         "status": engine_result.status,
         "markers": markers,
         "price_lines": {"entry": None, "stop": None, "target": None},
         "consistency": consistency,
         "degraded_reason": engine_result.degraded_reason,
+        "risk_metrics_by_signal_type": risk_by_type,
     }

@@ -134,3 +134,35 @@ def test_verified_description_mentions_correction():
     for model in (SignalMarker, BoardEntry):
         desc = model.model_fields["verified"].description
         assert "校正" in desc, f"{model.__name__}.verified 描述未订正: {desc}"
+
+
+# --- 链路B 风险画像:D5 载荷形态(BoardEntry 带 dict / SignalMarker 刻意剥离 / Response 顶层 map) ---
+from api.v1.schemas.stocks import SignalsResponse
+
+
+def test_board_entry_preserves_risk_metrics_dict():
+    entry = BoardEntry(
+        code="600519", action_group="buy", consistency="consistent",
+        price_lines={"entry": None, "stop": None, "target": None},
+        status="ok", risk_metrics={"sample": 3, "sharpe": 1.2},
+    )
+    assert entry.model_dump()["risk_metrics"]["sharpe"] == 1.2
+
+
+def test_signal_marker_deliberately_strips_risk_metrics():
+    """D5 反向断言:SignalMarker 不声明 risk_metrics——内存 marker 带、序列化剥离(防逐 bar 膨胀)。"""
+    m = SignalMarker(
+        timestamp=1, price=1.0, anchor="low", direction="bullish",
+        signal_type="x", source="rule", confidence="low",
+        is_daily_approx=False, is_anomalous=False, reason="r",
+        risk_metrics={"sample": 3},          # Pydantic extra=ignore:静默丢弃
+    )
+    assert "risk_metrics" not in m.model_dump()
+
+
+def test_signals_response_top_level_map():
+    resp = SignalsResponse(
+        status="ok", markers=[], consistency="consistent", degraded_reason=None,
+        risk_metrics_by_signal_type={"volume_breakout": {"sample": 3, "sharpe": 1.2}},
+    )
+    assert resp.model_dump()["risk_metrics_by_signal_type"]["volume_breakout"]["sample"] == 3
