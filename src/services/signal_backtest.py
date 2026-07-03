@@ -285,6 +285,11 @@ class SignalStat:
                              legacy 位置构造零破坏。注意：值为 dict（可变/不可哈希），虽 frozen=True，
                              但自动生成的 __hash__ 因此字段实际不可调用（hash(instance) 会
                              TypeError），当前代码库无处依赖 SignalStat 可哈希，非回归）。
+        oos:                样本外 holdout 切分报告 dict(spec §3.4;oos_fraction<=0 时为 None)。
+                             退化(市场 distinct 日期<2)时为 {cutoff_date: None, fraction, degenerate: True}；
+                             否则含 cutoff_date/fraction/embargoed/undated/train{win_rate,sample,
+                             baseline_win_rate,excess}/oos{同键}。末尾字段，legacy 位置构造零破坏。
+                             同 risk_metrics，值为 dict，不可哈希，非回归。
     """
 
     signal_type: str
@@ -302,6 +307,7 @@ class SignalStat:
     ci_low_corrected: Optional[float] = None
     family_size: int = 0
     risk_metrics: Optional[dict] = None
+    oos: Optional[dict] = None
 
 
 def wilson_ci(wins: int, n: int, z: float = 1.96) -> tuple:
@@ -345,6 +351,67 @@ def _winrate(wins: int, n: int) -> Optional[float]:
     return round(wins / n, 4) if n > 0 else None
 
 
+def _derive_market_cutoffs(baseline_outcomes, oos_fraction):
+    """per-market holdout 切点(spec §3.1)。
+
+    每市场取 baseline 事件 distinct 日期字符串字典序升序的
+    floor((1-f)*(len-1)) 分位;len<2 → None(退化,调用方落 degenerate dict)。
+    纯字典序比较,不做日期解析(同 maxDD 排序的同格式假设)。
+    """
+    by_market: dict = {}
+    for o in baseline_outcomes:
+        if o.date is not None:
+            by_market.setdefault(o.market, set()).add(o.date)
+    cutoffs: dict = {}
+    for market, date_set in by_market.items():
+        dates = sorted(date_set)
+        if len(dates) < 2:
+            cutoffs[market] = None
+        else:
+            cutoffs[market] = dates[math.floor((1 - oos_fraction) * (len(dates) - 1))]
+    return cutoffs
+
+
+def _split_counts(events, cutoff):
+    """win/loss 事件三分(spec §3.2,谓词按序短路,undated 优先)。
+
+    events: [(date, window_end_date, outcome)],outcome ∈ {win, loss}。
+    返回 (train_win, train_loss, oos_win, oos_loss, embargoed, undated)。
+    """
+    tw = tl = ow = ol = emb = und = 0
+    for date, end, outcome in events:
+        if date is None:
+            und += 1
+        elif end is not None and end <= cutoff:
+            if outcome == "win":
+                tw += 1
+            else:
+                tl += 1
+        elif date > cutoff:
+            if outcome == "win":
+                ow += 1
+            else:
+                ol += 1
+        else:
+            emb += 1                       # 跨切点窗 或 end 缺失且 date≤cutoff:保守剔除防泄漏
+    return tw, tl, ow, ol, emb, und
+
+
+def _segment_stats(win, loss, base_win, base_loss):
+    """单段子统计(spec §3.3)。excess=raw 胜率差后 round4(点估计口径,非 ci_low)。"""
+    sample = win + loss
+    win_rate = (win / sample) if sample else None
+    b_sample = base_win + base_loss
+    baseline = (base_win / b_sample) if b_sample else None
+    excess = (win_rate - baseline) if win_rate is not None and baseline is not None else None
+    return {
+        "win_rate": round(win_rate, 4) if win_rate is not None else None,
+        "sample": sample,
+        "baseline_win_rate": round(baseline, 4) if baseline is not None else None,
+        "excess": round(excess, 4) if excess is not None else None,
+    }
+
+
 def aggregate_signal_stats(
     outcomes: List[SignalOutcome],
     baseline_outcomes: List[SignalOutcome],
@@ -353,6 +420,7 @@ def aggregate_signal_stats(
     interval: str = "1d",
     fwer_alpha: float = 0.05,
     min_sample: int = 10,
+    oos_fraction: float = 0.0,
 ) -> List[SignalStat]:
     """按 (signal_type × market) 聚合回测结果，附 Wilson CI 与基准超额。
 
@@ -368,11 +436,15 @@ def aggregate_signal_stats(
         min_sample:        可检验格子的最小样本阈值(family N 的口径)。默认 10 仅供独测;
                            生产路径必须显式传 resolve_verified_min_sample(cfg),
                            否则 N 与读路径 verified 判据漂移。
+        oos_fraction:      样本外 holdout 占比(spec §3),函数内钳制到 [0.0, 0.5]。默认 0
+                           仅供纯函数独测,生产路径必须显式传 config.signal_backtest_oos_fraction。
 
     Returns:
         每个 (signal_type × market) 对应一个 SignalStat 的列表。
         不包含 __baseline__ 自身的 SignalStat（仅作为基准参考）。
     """
+    oos_fraction = min(max(float(oos_fraction), 0.0), 0.5)
+
     # Step 1: 计算各市场基准胜率（expired 及未知 outcome 排除在分母外）
     base_w: dict = defaultdict(int)
     base_n: dict = defaultdict(int)
@@ -394,6 +466,20 @@ def aggregate_signal_stats(
             cell_events[(o.signal_type, o.market)].append((o.date, idx, o.return_pct))
     # 注意：纯 expired 格子会进 cell_events 但不进 buckets → 不产 SignalStat 行——保持
     # “格子=有 win/loss” 现语义，cell_events 只为已有格子供数；Step 3c 用 .get(...) 取值。
+
+    cell_wl: dict = {}
+    baseline_wl: dict = {}
+    if oos_fraction > 0.0:
+        for o in outcomes:
+            if o.outcome in ("win", "loss"):
+                cell_wl.setdefault((o.signal_type, o.market), []).append(
+                    (o.date, o.window_end_date, o.outcome))
+        for o in baseline_outcomes:
+            if o.outcome in ("win", "loss"):
+                baseline_wl.setdefault(o.market, []).append(
+                    (o.date, o.window_end_date, o.outcome))
+        cutoffs = _derive_market_cutoffs(baseline_outcomes, oos_fraction)
+        baseline_split_cache: dict = {}
 
     # Step 3a: 先算各格 win/loss/sample(第一遍,确定 family N)
     cells = []
@@ -431,6 +517,27 @@ def aggregate_signal_stats(
         rm["interval"] = interval
         rm["horizon"] = horizon
 
+        oos_report = None
+        if oos_fraction > 0.0:
+            cutoff = cutoffs.get(market)
+            if cutoff is None:
+                oos_report = {"cutoff_date": None, "fraction": oos_fraction, "degenerate": True}
+            else:
+                tw, tl, ow, ol, emb, und = _split_counts(
+                    cell_wl.get((sig_type, market), []), cutoff)
+                if market not in baseline_split_cache:
+                    baseline_split_cache[market] = _split_counts(
+                        baseline_wl.get(market, []), cutoff)
+                btw, btl, bow, bol, _, _ = baseline_split_cache[market]
+                oos_report = {
+                    "cutoff_date": cutoff,
+                    "fraction": oos_fraction,
+                    "embargoed": emb,
+                    "undated": und,
+                    "train": _segment_stats(tw, tl, btw, btl),
+                    "oos": _segment_stats(ow, ol, bow, bol),
+                }
+
         stats.append(
             SignalStat(
                 signal_type=sig_type,
@@ -448,6 +555,7 @@ def aggregate_signal_stats(
                 ci_low_corrected=ci_low_corrected,
                 family_size=family_n,
                 risk_metrics=rm,
+                oos=oos_report,
             )
         )
     return stats
