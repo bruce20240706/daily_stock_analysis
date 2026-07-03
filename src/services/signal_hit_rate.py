@@ -83,6 +83,17 @@ def resolve_verified_min_sample(cfg) -> int:
         or int(getattr(cfg, "backtest_eval_window_days", 10))
 
 
+def _parse_json_dict(raw) -> Optional[dict]:
+    """防御解析 JSON 列:非真值/坏 JSON/非 dict 一律 None(NULL=legacy 单义)。"""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1d") -> dict:
     """把命中率聚合结果映射为 SignalMarker 的 hit 字段（M3-A6 改源）。
 
@@ -96,14 +107,17 @@ def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1
                   分钟桶的可信度（需先跑 --signal-backtest-interval 落库）。
 
     返回 keys: hit_rate, hit_sample, verified, ci_low, ci_high, baseline_excess, horizon,
-    ci_low_corrected, family_size, risk_metrics。
+    ci_low_corrected, family_size, risk_metrics, oos。
     （horizon = 命中桶时的 signal_backtest_horizon_bars；无桶/无样本时为 None，由 M3.1 透出。
     ci_low_corrected/family_size 见 Inc 1c；老行为 None。risk_metrics 见链路B 风险画像
-    （spec §4.5）：该格收益序列的不年化风险指标 dict；坏 JSON/非 dict/老行一律 None。）
+    （spec §4.5）：该格收益序列的不年化风险指标 dict；坏 JSON/非 dict/老行一律 None。
+    oos 见 Inc 1e 样本外 holdout 切分（spec §4）：该格 train/oos 切分报告 dict；
+    坏 JSON/非 dict/老行/未启用一律 None。）
     """
     _none = {"hit_rate": None, "hit_sample": None, "verified": False,
              "ci_low": None, "ci_high": None, "baseline_excess": None, "horizon": None,
-             "ci_low_corrected": None, "family_size": None, "risk_metrics": None}
+             "ci_low_corrected": None, "family_size": None, "risk_metrics": None,
+             "oos": None}
 
     market = get_market_for_stock(code)
     if market is None:
@@ -130,16 +144,11 @@ def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1
 
     # 链路B 风险画像:resolver 透出 risk_metrics(spec §4.5)。getattr 容错非 ORM 桩
     # 缺属性（同上 ci_low_corrected 注释：MagicMock 桩必须显式补属性，否则子 mock
-    # 非字符串传入 json.loads 会 TypeError，仍会被下方 except 兜底降级为 None）。
-    _rm_raw = getattr(stat, "risk_metrics_json", None)
-    risk_metrics = None
-    if _rm_raw:
-        try:
-            _parsed = json.loads(_rm_raw)
-            if isinstance(_parsed, dict):
-                risk_metrics = _parsed
-        except (TypeError, ValueError):
-            risk_metrics = None
+    # 非字符串传入 _parse_json_dict 内部 json.loads 会 TypeError，仍被其 except 兜底降级为 None）。
+    risk_metrics = _parse_json_dict(getattr(stat, "risk_metrics_json", None))
+
+    # Inc 1e:resolver 透出 oos(spec §4)。同款 getattr 容错 + 共用防御解析 helper。
+    oos = _parse_json_dict(getattr(stat, "oos_json", None))
 
     return {
         "hit_rate": stat.win_rate,
@@ -152,4 +161,5 @@ def resolve_marker_hit_fields(signal_type: str, code: str, *, interval: str = "1
         "ci_low_corrected": _corr,
         "family_size": getattr(stat, "family_size", None),
         "risk_metrics": risk_metrics,
+        "oos": oos,
     }

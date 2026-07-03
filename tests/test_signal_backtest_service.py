@@ -359,7 +359,8 @@ def test_run_passes_fwer_alpha_and_min_sample_to_aggregate():
     """Inc 1c: run() 把 config 的 fwer_alpha 与共享 min_sample 显式传给 aggregate(spec §4.7)。"""
     captured = {}
 
-    def _fake_aggregate(sig, base, *, horizon, interval="1d", fwer_alpha=None, min_sample=None):
+    def _fake_aggregate(sig, base, *, horizon, interval="1d", fwer_alpha=None, min_sample=None,
+                        oos_fraction=None):
         captured.update(fwer_alpha=fwer_alpha, min_sample=min_sample)
         return []
 
@@ -409,3 +410,87 @@ def test_run_persists_corrected_fields_to_orm_rows():
         # evaluate mock 每股返回同批 outcome,聚合成单格(sample=24>=10 → N=1)
         assert rows[0].family_size == 1
         assert rows[0].ci_low_corrected == rows[0].ci_low   # N=1 恒等
+
+
+# === Inc 1e: run() 接线 oos_fraction(spec §4;审查 F1-Blocker 防静默死配置) ===
+
+
+def test_run_passes_oos_fraction_and_persists_oos_json(monkeypatch):
+    """F1:防静默死配置——config 值必须传到 aggregate 且落库 oos_json 非 NULL。"""
+    import json
+    import src.services.signal_backtest_service as svc_mod
+    captured = {}
+    real_aggregate = svc_mod.aggregate_signal_stats
+
+    def spy(*args, **kwargs):
+        captured["oos_fraction"] = kwargs.get("oos_fraction")
+        return real_aggregate(*args, **kwargs)
+
+    monkeypatch.setattr(svc_mod, "aggregate_signal_stats", spy)
+    monkeypatch.setattr(svc_mod.get_config(), "signal_backtest_oos_fraction", 0.3, raising=False)
+
+    # 夹具照抄 test_run_persists_corrected_fields_to_orm_rows(:383)：合成 outcome 无 date/
+    # window_end_date（三参构造，默认 None）→ baseline 无可用日期格点 → _derive_market_cutoffs
+    # 返回空 cutoffs → 本用例落 degenerate 分支（{"cutoff_date": None, "fraction": 0.3,
+    # "degenerate": True}），非全键分支；两分支均被下方断言接受。
+    with patch(
+        "src.services.signal_backtest_service._read_watchlist_codes",
+        return_value=["600519", "600036"],
+    ), patch(
+        "src.services.signal_backtest_service.StockService"
+    ) as SS, patch(
+        "src.services.signal_backtest_service.get_market_for_stock",
+        side_effect=["cn", "cn"],
+    ), patch(
+        "src.services.signal_backtest_service.evaluate_signal_outcomes",
+        return_value=[SignalOutcome("volume_breakout", "cn", "win")] * 6
+        + [SignalOutcome("volume_breakout", "cn", "loss")] * 6,
+    ), patch(
+        "src.services.signal_backtest_service.evaluate_baseline_outcomes",
+        return_value=[SignalOutcome("__baseline__", "cn", "win")] * 5
+        + [SignalOutcome("__baseline__", "cn", "loss")] * 5,
+    ), patch(
+        "src.services.signal_backtest_service.SignalStatsRepository"
+    ) as Repo:
+        SS.return_value.get_history_data.return_value = _hist()
+        Repo.return_value.save_batch.return_value = 1
+        svc_mod.SignalBacktestService().run(horizon=10)
+
+    assert captured["oos_fraction"] == 0.3
+    rows = Repo.return_value.save_batch.call_args[0][0]
+    assert rows, "应有落库行"
+    row = rows[0]
+    assert row.oos_json is not None
+    rep = json.loads(row.oos_json)
+    assert {"cutoff_date", "fraction", "embargoed", "undated", "train", "oos"} <= set(rep) \
+        or rep.get("degenerate") is True
+
+
+def test_run_default_config_leaves_oos_json_null(monkeypatch):
+    """#1 服务层对偶:默认 config(0.0)跑 run() → 落库 oos_json 全 NULL。"""
+    with patch(
+        "src.services.signal_backtest_service._read_watchlist_codes",
+        return_value=["600519", "600036"],
+    ), patch(
+        "src.services.signal_backtest_service.StockService"
+    ) as SS, patch(
+        "src.services.signal_backtest_service.get_market_for_stock",
+        side_effect=["cn", "cn"],
+    ), patch(
+        "src.services.signal_backtest_service.evaluate_signal_outcomes",
+        return_value=[SignalOutcome("volume_breakout", "cn", "win")] * 6
+        + [SignalOutcome("volume_breakout", "cn", "loss")] * 6,
+    ), patch(
+        "src.services.signal_backtest_service.evaluate_baseline_outcomes",
+        return_value=[SignalOutcome("__baseline__", "cn", "win")] * 5
+        + [SignalOutcome("__baseline__", "cn", "loss")] * 5,
+    ), patch(
+        "src.services.signal_backtest_service.SignalStatsRepository"
+    ) as Repo:
+        SS.return_value.get_history_data.return_value = _hist()
+        Repo.return_value.save_batch.return_value = 1
+        SignalBacktestService().run(horizon=10)
+
+    rows = Repo.return_value.save_batch.call_args[0][0]
+    assert rows, "应有落库行"
+    assert rows[0].oos_json is None
