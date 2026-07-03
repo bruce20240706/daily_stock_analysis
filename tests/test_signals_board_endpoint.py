@@ -166,3 +166,34 @@ def test_signals_response_top_level_map():
         risk_metrics_by_signal_type={"volume_breakout": {"sample": 3, "sharpe": 1.2}},
     )
     assert resp.model_dump()["risk_metrics_by_signal_type"]["volume_breakout"]["sample"] == 3
+
+
+# --- Inc 1e:OOS holdout 切分报告(Task 5):D5 载荷形态(BoardEntry 带 dict / SignalMarker 刻意剥离 / Response 顶层 map) ---
+
+
+def test_board_entry_preserves_oos_dict():
+    entry = BoardEntry(
+        code="600519", action_group="buy", consistency="consistent",
+        price_lines={"entry": None, "stop": None, "target": None},
+        status="ok", oos={"cutoff_date": "x", "fraction": 0.3},
+    )
+    assert entry.model_dump()["oos"]["fraction"] == 0.3
+
+
+def test_signal_marker_deliberately_strips_oos():
+    """D7 反向断言:SignalMarker 不声明 oos——内存 marker 带、序列化剥离(防逐 bar 膨胀)。"""
+    m = SignalMarker(
+        timestamp=1, price=1.0, anchor="low", direction="bullish",
+        signal_type="x", source="rule", confidence="low",
+        is_daily_approx=False, is_anomalous=False, reason="r",
+        oos={"fraction": 0.3},
+    )
+    assert "oos" not in m.model_dump()
+
+
+def test_signals_response_top_level_oos_map():
+    resp = SignalsResponse(
+        status="ok", markers=[], consistency="consistent", degraded_reason=None,
+        oos_by_signal_type={"volume_breakout": {"cutoff_date": "x", "fraction": 0.3}},
+    )
+    assert resp.model_dump()["oos_by_signal_type"]["volume_breakout"]["fraction"] == 0.3

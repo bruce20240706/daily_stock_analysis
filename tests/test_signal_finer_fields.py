@@ -433,3 +433,38 @@ def test_build_collects_risk_metrics_by_signal_type():
     assert payload["risk_metrics_by_signal_type"] == {
         "volume_breakout": rm_a, "obv_top_divergence": rm_b,
     }   # O(K):两型三 marker 收敛两键
+
+
+# --- Inc 1e:OOS holdout 切分报告(Task 5):marker 内存 dict 携带 oos + build 收敛 map(D5 同构) ---
+
+
+def test_marker_carries_oos_in_memory_dict():
+    sig = _mk("volume_breakout")
+    rep = {"cutoff_date": "x", "fraction": 0.3, "embargoed": 0, "undated": 0,
+           "train": {"win_rate": 0.6, "sample": 5, "baseline_win_rate": 0.5, "excess": 0.1},
+           "oos": {"win_rate": 0.4, "sample": 3, "baseline_win_rate": 0.5, "excess": -0.1}}
+    resolver = lambda st, code: {"hit_rate": 0.6, "hit_sample": 30, "verified": True,
+                                 "ci_low": 0.5, "ci_high": 0.7, "baseline_excess": 0.1,
+                                 "horizon": 10, "ci_low_corrected": None, "family_size": None,
+                                 "risk_metrics": None, "oos": rep}
+    m = _ss._marker_from_vpsignal(sig, code="600519", hit_fields_resolver=resolver)
+    assert m["oos"] == rep
+
+
+def test_build_collects_oos_by_signal_type():
+    rep_a = {"cutoff_date": "x", "fraction": 0.3}
+    def resolver(st, code):
+        return {"hit_rate": 0.6, "hit_sample": 30, "verified": False,
+                "ci_low": None, "ci_high": None, "baseline_excess": None, "horizon": 10,
+                "ci_low_corrected": None, "family_size": None, "risk_metrics": None,
+                "oos": rep_a if st == "volume_breakout" else None}
+    engine_result = _types.SimpleNamespace(
+        status="ok", degraded_reason=None,
+        markers=[_mk("volume_breakout"), _mk("obv_top_divergence")],
+    )
+    payload = _ss.build_signals_payload(
+        engine_result=engine_result, rule_signal=None, llm_record=None,
+        latest_bar_date="2026-06-01", latest_close=10.0,
+        trading_days_elapsed=0, code="600519", hit_fields_resolver=resolver,
+    )
+    assert payload["oos_by_signal_type"] == {"volume_breakout": rep_a}   # None 值被 isinstance 守卫跳过

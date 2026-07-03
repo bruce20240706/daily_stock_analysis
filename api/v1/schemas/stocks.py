@@ -162,6 +162,10 @@ class SignalsResponse(BaseModel):
         default_factory=dict,
         description="各信号型所在 (signal_type×market) 格子的风险画像(不年化 Sharpe/Sortino/maxDD/worst,毛收益保守跳空感知口径,expired 计入,excluded=失真/无效剔除数,含 interval/horizon 自描述)。描述性统计:无置信区间、未经多重检验校正,不得作为跨格子挑选依据(verified 才是校正后判据)。空 dict=无格子或 legacy 未重跑。",
     )
+    oos_by_signal_type: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="各信号型所在 (signal_type×market) 格子的样本外 holdout 切分报告(per-market 交易日期格点分位切点,train/oos 两段胜率/样本/基准/超额,embargo 防泄漏剔除计数;子键 excess=胜率点估计差,非 SignalStat.excess 的 ci_low 保守口径)。描述性统计:无置信区间、未经多重检验校正,不作为 verified 判据(verified 全样本口径不变)。空 dict=无格子、legacy 或未启用(SIGNAL_BACKTEST_OOS_FRACTION=0);degenerate=true 表示该市场日期格点不足无法切分。",
+    )
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -173,6 +177,7 @@ class SignalsResponse(BaseModel):
             "resonance": "none",
             "plan_quality": None,
             "risk_metrics_by_signal_type": {},
+            "oos_by_signal_type": {},
         }
     })
 
@@ -215,6 +220,7 @@ class BoardEntry(BaseModel):
     signal_status: Optional[Literal["active", "aging", "expired"]] = Field(None, description="代表信号的生命周期(区别于 status 的 ok/degraded)")
     plan_quality: Optional[Literal["high", "medium", "low"]] = Field(None, description="交易计划质量(该股响应级)")
     risk_metrics: Optional[Dict[str, Any]] = Field(None, description="代表信号格子的风险画像(口径同 SignalsResponse.risk_metrics_by_signal_type);null=legacy 未重跑。描述性统计,不得作为跨格子挑选依据。")
+    oos: Optional[Dict[str, Any]] = Field(None, description="代表信号格子的样本外 holdout 切分报告(口径同 SignalsResponse.oos_by_signal_type);null=legacy 或未启用。描述性统计,不影响 verified。")
 
 
 class BoardCounts(BaseModel):

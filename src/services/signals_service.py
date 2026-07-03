@@ -158,6 +158,7 @@ def _marker_from_vpsignal(
         "horizon_bars": None,
         "status": None,
         "risk_metrics": None,
+        "oos": None,
     }
     if hit_fields_resolver is not None and code:
         try:
@@ -172,6 +173,7 @@ def _marker_from_vpsignal(
             marker["ci_low_corrected"] = fields.get("ci_low_corrected")
             marker["family_size"] = fields.get("family_size")
             marker["risk_metrics"] = fields.get("risk_metrics")
+            marker["oos"] = fields.get("oos")
         except Exception:
             logger.warning(
                 "resolve_marker_hit_fields 失败，跳过回填 signal_type=%s code=%s",
@@ -220,6 +222,7 @@ def _llm_marker(
         "horizon_bars": None,
         "status": None,
         "risk_metrics": None,
+        "oos": None,
     }
 
 
@@ -342,6 +345,14 @@ def build_signals_payload(
         if isinstance(rm, dict) and st and st not in risk_by_type:
             risk_by_type[st] = rm
 
+    # 按 signal_type 收敛 OOS holdout 切分报告：同 risk_by_type 口径(O(K),D5 同构，Inc 1e)。
+    oos_by_type: dict = {}
+    for m in markers:
+        rep = m.get("oos")
+        st = m.get("signal_type")
+        if isinstance(rep, dict) and st and st not in oos_by_type:
+            oos_by_type[st] = rep
+
     return {
         "status": engine_result.status,
         "markers": markers,
@@ -349,4 +360,5 @@ def build_signals_payload(
         "consistency": consistency,
         "degraded_reason": engine_result.degraded_reason,
         "risk_metrics_by_signal_type": risk_by_type,
+        "oos_by_signal_type": oos_by_type,
     }
