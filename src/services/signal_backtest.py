@@ -41,7 +41,8 @@ SIGNAL_RISK_NOTE = (
     "expired按窗末close;entry=触发bar close;target<=entry 失真形态整层剔除计excluded;"
     "非组合回撤;不年化;窗口可重叠自相关;描述性统计无CI未经多重检验校正)"
 )
-# 注:此常量不进 per-cell dict(D5),供 Task 6 的 Field description 与 Task 7 文档引用——单一真源放数据模块。
+# 注:此常量不进 per-cell dict(D5)。API Field description 与 docs/signal-credibility.md 的口径散文
+# 系与其保持一致的手写副本(未 import 引用);修改口径时三处需同步。
 
 
 @dataclass(frozen=True)
