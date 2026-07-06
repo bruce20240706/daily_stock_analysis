@@ -42,6 +42,14 @@ def test_eligibility_set_truncated_table_returns_none():
         assert AkshareFundamentalAdapter().get_ggt_eligibility_set() is None
 
 
+def test_eligibility_set_valid_key_count_below_floor_returns_none():
+    # R4 第二道守卫:原始行数 >=50 过第一道,但归一去重后有效 HK 键 <50 → None
+    # (端点结构漂移/大量重复码时,不返回小而错的 set)
+    df = _components_df(["%05d" % (i % 5) for i in range(60)])  # 60 行但仅 5 个不同码
+    with patch.object(AkshareFundamentalAdapter, "_fetch_ggt_components_df", return_value=df):
+        assert AkshareFundamentalAdapter().get_ggt_eligibility_set() is None
+
+
 def test_eligibility_set_endpoint_failure_returns_none_and_negative_cached():
     calls = {"n": 0}
 
