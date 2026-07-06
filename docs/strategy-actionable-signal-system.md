@@ -116,7 +116,7 @@
 **Inc 2 — 港股通专属维度** — P0
 - 范围:`data_provider` 增补 akshare 南向资金 / 港股通成份 / 持股统计端点(带 fallback,东财不可达时 fail-closed);港股通**成份 universe 过滤**(标的可买性);南向资金特征进报告/信号维度。
 - 交付物:数据适配 + universe 过滤 + 报告字段;文档。
-- 验收:离线单测(端点 schema/成份过滤/1m fail-closed)+ facade 兜底;真网端到端待 eastmoney 可达环境(与既有 HK MVP 同现实约束)。
+- 验收:离线确定性单测(端点 schema/成份码归一/NaN 假零禁 0/截断守卫/三态 eligible);真网端到端(三 probe + 真实 HK 报告 + 净流币种/量级)deferred 至 eastmoney 可达环境。
 - 依赖:无。沙箱可验:部分(离线全覆盖;东财真网受沙箱 egress 限制)。
 
 **Inc 3 — LLM claim-validation 守卫** — P0

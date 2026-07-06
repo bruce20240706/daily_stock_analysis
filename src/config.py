@@ -993,6 +993,8 @@ class Config:
     fundamental_cache_ttl_seconds: int = 120
     # 基本面缓存最大条目数（避免长时间运行内存增长）
     fundamental_cache_max_entries: int = 256
+    # 港股通成份/南向持股/净流缓存 TTL（秒，日级数据默认 12h；env-only，不进 config_registry）
+    ggt_list_cache_ttl_seconds: int = 43200
 
     # === Portfolio PR2: import/risk/fx settings ===
     portfolio_risk_concentration_alert_pct: float = 35.0
@@ -1875,6 +1877,12 @@ class Config:
                 256,
                 field_name='FUNDAMENTAL_CACHE_MAX_ENTRIES',
                 minimum=1,
+            ),
+            ggt_list_cache_ttl_seconds=parse_env_int(
+                os.getenv('GGT_LIST_CACHE_TTL_SECONDS'),
+                43200,
+                field_name='GGT_LIST_CACHE_TTL_SECONDS',
+                minimum=60,
             ),
             portfolio_risk_concentration_alert_pct=parse_env_float(
                 os.getenv('PORTFOLIO_RISK_CONCENTRATION_ALERT_PCT'),
