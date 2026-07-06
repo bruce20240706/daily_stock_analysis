@@ -13,9 +13,11 @@ import data_provider.fundamental_adapter as fa
 def _clear_ggt_cache():
     fa._GGT_LIST_CACHE.clear()
     fa._SB_HOLDING_CACHE.clear()
+    fa._SB_FLOW_CACHE.clear()
     yield
     fa._GGT_LIST_CACHE.clear()
     fa._SB_HOLDING_CACHE.clear()
+    fa._SB_FLOW_CACHE.clear()
 
 
 def test_ggt_key_normalizes_three_writings_to_same_hk_key():
@@ -135,3 +137,60 @@ def test_holding_nan_numeric_values_pass_through_unchanged():
     assert math.isnan(h["holding_shares"])
     assert math.isnan(h["holding_value"])
     assert h["holding_ratio_pct"] == 6.5
+
+
+def _flow_df(sh, sz, date_val="2026-07-01", sh_type="港股通(沪)", sz_type="港股通(深)"):
+    # 首行为真实北向腿名(非"北向"占位),用于真实验证子串排除:
+    # 沪股通/深股通 不含"港股通"子串,应天然被过滤掉。
+    return pd.DataFrame({
+        "交易日": [date_val, date_val, date_val],
+        "类型": ["沪股通", sh_type, sz_type],
+        "板块": ["-", "-", "-"],
+        "成交净买额": [999.0, sh, sz],
+        "资金净流入": [1000.0, sh, sz],
+    })
+
+
+def test_southbound_flow_sums_two_legs():
+    with patch.object(AkshareFundamentalAdapter, "_fetch_sb_flow_df", return_value=_flow_df(12.0, 8.0)):
+        f = AkshareFundamentalAdapter().get_southbound_flow()
+    assert abs(f["southbound_net_flow"] - 20.0) < 1e-9
+    assert f["partial"] is False
+    assert f["flow_date"] == "2026-07-01"
+
+
+def test_southbound_flow_both_nan_returns_none_not_zero():
+    # F4 假零陷阱:两腿 NaN → None,禁 sum 得 0.0
+    with patch.object(AkshareFundamentalAdapter, "_fetch_sb_flow_df",
+                      return_value=_flow_df(float("nan"), float("nan"))):
+        assert AkshareFundamentalAdapter().get_southbound_flow() is None
+
+
+def test_southbound_flow_one_leg_nan_is_partial():
+    with patch.object(AkshareFundamentalAdapter, "_fetch_sb_flow_df",
+                      return_value=_flow_df(12.0, float("nan"))):
+        f = AkshareFundamentalAdapter().get_southbound_flow()
+    assert abs(f["southbound_net_flow"] - 12.0) < 1e-9
+    assert f["partial"] is True
+
+
+def test_southbound_flow_excludes_northbound_legs():
+    # 沪股通 腿值 999.0 巨大且排首行;若未被子串过滤,和会被严重污染
+    with patch.object(AkshareFundamentalAdapter, "_fetch_sb_flow_df", return_value=_flow_df(12.0, 8.0)):
+        f = AkshareFundamentalAdapter().get_southbound_flow()
+    assert abs(f["southbound_net_flow"] - 20.0) < 1e-9
+
+
+def test_southbound_flow_robust_to_fullwidth_parens():
+    # 真实端点 类型 全/半角括号写法线上无法离线核验;子串匹配须对括号宽度免疫
+    df = _flow_df(12.0, 8.0, sh_type="港股通（沪）", sz_type="港股通（深）")
+    with patch.object(AkshareFundamentalAdapter, "_fetch_sb_flow_df", return_value=df):
+        f = AkshareFundamentalAdapter().get_southbound_flow()
+    assert abs(f["southbound_net_flow"] - 20.0) < 1e-9
+    assert f["partial"] is False
+
+
+def test_southbound_flow_endpoint_failure_returns_none():
+    with patch.object(AkshareFundamentalAdapter, "_fetch_sb_flow_df",
+                      side_effect=RuntimeError("boom")):
+        assert AkshareFundamentalAdapter().get_southbound_flow() is None

@@ -9,6 +9,7 @@ endpoint candidates. It should never raise to caller; partial data is allowed.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import threading
 import time
@@ -34,6 +35,7 @@ _GGT_LIST_CACHE: dict = {}                        # {"set": {...} | None, "ts": 
 _GGT_CACHE_LOCK = threading.Lock()                # 只护 dict 读写，网络抓取一律锁外
 _GGT_MIN_COMPONENTS = 50                          # R4 截断守卫：港股通成份常年 500+，<50 视为不可得
 _SB_HOLDING_CACHE: dict = {}                      # {"df": DataFrame|None, "ts": float, "ok": bool}
+_SB_FLOW_CACHE: dict = {}                         # {"result": dict|None, "ts": float, "ok": bool}
 
 
 def _ggt_key(code: str) -> str:
@@ -737,3 +739,50 @@ class AkshareFundamentalAdapter:
             "holding_ratio_pct": _safe_float(row.get("持股数量占发行股百分比")),
             "holding_trade_date": str(row.get("持股日期")),
         }
+
+    def _fetch_sb_flow_df(self):
+        """抓沪深港通资金流向汇总表（akshare 惰性 import；异常上抛给缓存层转负缓存）。"""
+        import akshare as ak
+        return ak.stock_hsgt_fund_flow_summary_em()
+
+    def get_southbound_flow(self, deadline: Optional[float] = None) -> Optional[dict]:
+        """市场级南向净流（两南向腿"成交净买额"之和，亿）；两腿皆 NaN/不可得 → None（禁假零）。
+
+        类型 腿名用子串匹配 "港股通"（而非对 ["港股通(沪)", "港股通(深)"] 精确 isin）：
+        真实端点半角/全角括号写法本环境无法离线核验，子串匹配对括号宽度免疫，且天然
+        排除北向腿（沪股通/深股通不含"港股通"子串），fail-closed 语义不变——这是相对
+        原始 spec 的刻意加固，防止线上因括号宽度不符而静默永久返回 None。
+        """
+        from src.config import get_config
+        ttl = int(getattr(get_config(), "ggt_list_cache_ttl_seconds", 43200))
+        now = time.time()
+        with _GGT_CACHE_LOCK:
+            item = _SB_FLOW_CACHE.get("k")
+            if item is not None:
+                age = now - item["ts"]
+                live = ttl if item["ok"] else _GGT_CACHE_FAIL_TTL
+                if age <= live:
+                    return item["result"]
+        result = None
+        try:
+            df = self._fetch_sb_flow_df()
+            if df is not None and not df.empty and "类型" in df.columns:
+                legs = df[df["类型"].astype(str).str.contains("港股通", na=False)]
+                vals = [_safe_float(v) for v in legs["成交净买额"].tolist()]
+                present = [v for v in vals if v is not None and not math.isnan(v)]
+                if present:                                   # 至少一腿有值,否则 None(禁假零)
+                    flow_date = None
+                    if "交易日" in legs.columns and not legs.empty:
+                        raw_date = legs["交易日"].iloc[0]
+                        if raw_date is not None and not pd.isna(raw_date):
+                            flow_date = str(raw_date)
+                    result = {
+                        "southbound_net_flow": round(sum(present), 4),
+                        "flow_date": flow_date,
+                        "partial": len(present) < 2,
+                    }
+        except Exception:
+            result = None
+        with _GGT_CACHE_LOCK:
+            _SB_FLOW_CACHE["k"] = {"result": result, "ts": time.time(), "ok": result is not None}
+        return result
