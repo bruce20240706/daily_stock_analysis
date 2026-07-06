@@ -80,3 +80,53 @@ def test_fill_ggt_both_pipeline_call_sites_present():
     assert content.count("fill_ggt_if_needed(result, fundamental_context)") == 2
     import_block = content[:content.index("from src.notification import")]
     assert "fill_ggt_if_needed" in import_block
+
+
+# --- Task 6: report_language 双语 + notification 三态渲染 ---
+
+
+def test_ggt_render_three_state_eligible_distinct_text():
+    from src.notification import _render_ggt_section
+
+    ok_true = {"eligible": True, "holding_shares": 200, "holding_ratio_pct": 6.5,
+               "southbound_net_flow": 20.0}
+    ok_false = {"eligible": False}
+    ok_none = {"eligible": None}
+    t_true = _render_ggt_section(ok_true, "zh")
+    t_false = _render_ggt_section(ok_false, "zh")
+    t_none = _render_ggt_section(ok_none, "zh")
+    assert "港股通标的" in t_true
+    assert "非港股通标的" in t_false
+    assert "成份状态未知" in t_none
+    # None 输出禁含 False 文案(F10/§6):None 不得读成"非港股通标的"
+    assert "非港股通标的" not in t_none
+
+
+def test_ggt_render_none_section_empty():
+    from src.notification import _render_ggt_section
+
+    assert _render_ggt_section(None, "zh").strip() == ""
+
+
+def test_ggt_render_en_three_state():
+    from src.notification import _render_ggt_section
+
+    t_true = _render_ggt_section({"eligible": True}, "en")
+    t_false = _render_ggt_section({"eligible": False}, "en")
+    t_none = _render_ggt_section({"eligible": None}, "en")
+    assert "HKSC Eligible" in t_true
+    assert "Not HKSC Eligible" in t_false
+    assert "HKSC Status Unknown" in t_none
+    assert "Not HKSC Eligible" not in t_none
+
+
+def test_ggt_render_numeric_none_fields_skipped():
+    from src.notification import _render_ggt_section
+
+    text = _render_ggt_section(
+        {"eligible": True, "holding_ratio_pct": None, "southbound_net_flow": None}, "zh"
+    )
+    assert "港股通标的" in text
+    assert "南向持股占比" not in text
+    assert "南向净流" not in text
+    assert "None" not in text
