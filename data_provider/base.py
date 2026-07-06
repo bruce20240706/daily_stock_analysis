@@ -2780,6 +2780,7 @@ class DataFetcherManager:
             "capital_flow",
             "dragon_tiger",
             "boards",
+            "ggt",
         ):
             payload = context.get(block, {})
             if isinstance(payload, dict) and DataFetcherManager._has_meaningful_payload(payload.get("data")):
@@ -2834,6 +2835,12 @@ class DataFetcherManager:
                 "not_supported",
                 {},
                 [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
+                [reason],
+            ),
+            "ggt": self._build_fundamental_block(
+                "not_supported",
+                {"eligible": None, "holding": None, "southbound_flow": None},
+                [{"provider": "ggt", "result": "not_supported", "duration_ms": 0}],
                 [reason],
             ),
         }
@@ -2895,6 +2902,7 @@ class DataFetcherManager:
             "capital_flow": {},
             "dragon_tiger": {},
             "boards": {},
+            "ggt": {},
             "belong_boards": [],
             "coverage": {},
             "source_chain": [],
@@ -2992,6 +3000,19 @@ class DataFetcherManager:
 
         result_ctx["belong_boards"] = belong_boards
 
+        # Southbound (GGT) block: HK-only, never drags the offshore total status
+        # (see active_statuses below) — coverage/errors/source_chain still record it.
+        ggt_budget = max(stage_timeout - (time.time() - start_ts), 0.0)
+        if market == "hk":
+            result_ctx["ggt"] = self.get_ggt_context(stock_code, budget_seconds=ggt_budget)
+        else:  # us
+            result_ctx["ggt"] = self._build_fundamental_block(
+                "not_supported",
+                {"eligible": None, "holding": None, "southbound_flow": None},
+                [{"provider": "ggt", "result": "not_supported", "duration_ms": 0}],
+                ["not supported for offshore market"],
+            )
+
         block_statuses = {
             "valuation": result_ctx["valuation"].get("status", "not_supported"),
             "growth": growth_status,
@@ -3001,9 +3022,13 @@ class DataFetcherManager:
             "capital_flow": "not_supported",
             "dragon_tiger": "not_supported",
             "boards": "not_supported",
+            "ggt": result_ctx["ggt"].get("status", "not_supported"),
         }
         result_ctx["coverage"] = block_statuses
-        for block in ("valuation", "growth", "earnings", "institution", "margin", "capital_flow", "dragon_tiger", "boards"):
+        for block in (
+            "valuation", "growth", "earnings", "institution", "margin",
+            "capital_flow", "dragon_tiger", "boards", "ggt",
+        ):
             result_ctx["errors"].extend(result_ctx[block].get("errors", []))
             result_ctx["source_chain"].extend(result_ctx[block].get("source_chain", []))
 
@@ -3047,10 +3072,21 @@ class DataFetcherManager:
             )
             for block in block_names
         }
+        # ggt carries a 3-key payload shape ({"eligible","holding","southbound_flow"})
+        # instead of the generic "{}" the other blocks use, so downstream consumers
+        # (Task 5) always see the same keys regardless of failure path.
+        blocks["ggt"] = self._build_fundamental_block(
+            "failed",
+            {"eligible": None, "holding": None, "southbound_flow": None},
+            [{"provider": "ggt", "result": "failed", "duration_ms": 0}],
+            [reason],
+        )
+        coverage = {block: "failed" for block in block_names}
+        coverage["ggt"] = "failed"
         return {
             "market": market,
             "status": "failed",
-            "coverage": {block: "failed" for block in block_names},
+            "coverage": coverage,
             "source_chain": [{"provider": "fundamental_pipeline", "result": "failed", "duration_ms": 0}],
             "errors": [reason],
             **blocks,
@@ -3555,6 +3591,69 @@ class DataFetcherManager:
                 cost_ms,
             ),
             list(payload.get("errors", [])) + ([err] if err else []),
+        )
+
+    def get_ggt_context(self, stock_code: str, budget_seconds: Optional[float] = None) -> Dict[str, Any]:
+        """港股通(南向)块（fail-open）：eligibility + 个股持股 + 市场级南向净流。
+
+        HK-only. 三个数据面分属三次独立抓取，共享同一个 deadline 预算，但各自
+        独立 try/except——任一面失败不得拖垮其余两面（R2）。
+        """
+        from src.config import get_config
+        from data_provider.fundamental_adapter import _ggt_key
+
+        config = get_config()
+        code = normalize_stock_code(stock_code)
+        timeout = float(budget_seconds if budget_seconds is not None else config.fundamental_fetch_timeout_seconds)
+        empty_payload = {"eligible": None, "holding": None, "southbound_flow": None}
+        if _market_tag(code) != "hk" or _is_etf_code(code):
+            return self._build_fundamental_block(
+                "not_supported",
+                dict(empty_payload),
+                [{"provider": "ggt", "result": "not_supported", "duration_ms": 0}],
+                ["not supported"],
+            )
+
+        if timeout <= 0:
+            return self._build_fundamental_block(
+                "failed",
+                dict(empty_payload),
+                [{"provider": "ggt", "result": "failed", "duration_ms": 0}],
+                ["fundamental stage timeout"],
+            )
+
+        deadline = time.monotonic() + timeout
+        adapter = self._fundamental_adapter
+
+        try:
+            elig_set = adapter.get_ggt_eligibility_set(deadline=deadline)
+            eligible = (_ggt_key(code) in elig_set) if isinstance(elig_set, set) else None
+        except Exception:
+            eligible = None
+
+        try:
+            holding = adapter.get_ggt_holding(code, deadline=deadline)
+        except Exception:
+            holding = None
+
+        try:
+            flow = adapter.get_southbound_flow(deadline=deadline)
+        except Exception:
+            flow = None
+
+        present = [x for x in (eligible, holding, flow) if x is not None]
+        if not present:
+            status = "failed"
+        elif len(present) == 3:
+            status = "ok"
+        else:
+            status = "partial"
+
+        return self._build_fundamental_block(
+            status,
+            {"eligible": eligible, "holding": holding, "southbound_flow": flow},
+            [{"provider": "ggt", "result": status, "duration_ms": 0}],
+            [],
         )
 
     def get_board_context(self, stock_code: str, budget_seconds: Optional[float] = None) -> Dict[str, Any]:
