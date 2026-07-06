@@ -967,6 +967,62 @@ def fill_margin_if_needed(
         logger.warning("[margin] Fill failed, skipping: %s", e)
 
 
+def _build_ggt_from_context(
+    fundamental_context: Optional[Dict[str, Any]], language: str = "zh"
+) -> Optional[Dict[str, Any]]:
+    """从 fundamental_context 的 ggt 块确定性构建港股通 section dict(presence-only)。
+
+    status 非 ok/partial → None。键名映射(D8 冻结):读 ctx["ggt"]["data"],写 dashboard
+    data_perspective["ggt_context"]。纯展示,不含决策字段。language 形参对齐 margin 签名保留。
+    4 个数值字段经 _coerce_chip_metric 统一把 NaN 收敛为 None(akshare pd.to_numeric(errors="coerce")
+    可能产生 NaN,若原样落入 dashboard 经 json.dumps 会产出浏览器 JSON.parse 拒收的非标准 NaN token)。
+    """
+    if not isinstance(fundamental_context, dict):
+        return None
+    gg = fundamental_context.get("ggt")
+    gg = gg if isinstance(gg, dict) else {}
+    if str(gg.get("status") or "").strip().lower() not in ("ok", "partial"):
+        return None
+    data = gg.get("data") if isinstance(gg.get("data"), dict) else {}
+    holding = data.get("holding") if isinstance(data.get("holding"), dict) else {}
+    flow = data.get("southbound_flow") if isinstance(data.get("southbound_flow"), dict) else {}
+    return {
+        "eligible": data.get("eligible"),
+        "holding_shares": _coerce_chip_metric(holding.get("holding_shares")),
+        "holding_value": _coerce_chip_metric(holding.get("holding_value")),
+        "holding_ratio_pct": _coerce_chip_metric(holding.get("holding_ratio_pct")),
+        "holding_trade_date": holding.get("holding_trade_date"),
+        "southbound_net_flow": _coerce_chip_metric(flow.get("southbound_net_flow")),
+        "flow_date": flow.get("flow_date"),
+    }
+
+
+def fill_ggt_if_needed(
+    result: "AnalysisResult", fundamental_context: Optional[Dict[str, Any]]
+) -> None:
+    """确定性把港股通段填进 data_perspective.ggt_context(in-place)。
+
+    presence-only + HK-gated;LLM 后、对决策只读(不喂 prompt、不碰 decision_stability);
+    失败静默跳过、不阻断主流程。
+    """
+    if not result:
+        return
+    try:
+        built = _build_ggt_from_context(
+            fundamental_context, language=getattr(result, "report_language", "zh")
+        )
+        if built is None:
+            return
+        dashboard = result.dashboard if isinstance(result.dashboard, dict) else {}
+        result.dashboard = dashboard
+        dp = dashboard.get("data_perspective") or {}
+        dashboard["data_perspective"] = dp
+        dp["ggt_context"] = built
+        logger.info("[ggt] Filled HKSC southbound section from fundamental_context")
+    except Exception as e:
+        logger.warning("[ggt] Fill failed, skipping: %s", e)
+
+
 def _dragon_tiger_prompt_line(fundamental_context: Optional[Dict[str, Any]]) -> str:
     """龙虎榜 presence-only prompt 行（标志级，非量级）；未上榜/状态不可用 → 空串。
 

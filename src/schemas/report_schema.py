@@ -91,6 +91,18 @@ class MarginTrading(BaseModel):
     exchange: Optional[str] = None                              # SSE / SZSE
 
 
+class GgtContext(BaseModel):
+    """港股通南向维度(HK;EOD 快照,presence-only,纯展示)。"""
+
+    eligible: Optional[bool] = None                                  # True=港股通成份/False=非成份/None=名单不可得(unknown)
+    holding_shares: Optional[Union[int, float, str]] = None          # 南向持股数量(股)
+    holding_value: Optional[Union[int, float, str]] = None           # 南向持股市值
+    holding_ratio_pct: Optional[Union[int, float, str]] = None       # 持股数量占发行股百分比
+    holding_trade_date: Optional[str] = None                         # 持股日期
+    southbound_net_flow: Optional[Union[int, float, str]] = None     # 市场级南向净流(亿,币种以数据源口径为准)
+    flow_date: Optional[str] = None
+
+
 class DataPerspective(BaseModel):
     """Data perspective block."""
 
@@ -100,6 +112,7 @@ class DataPerspective(BaseModel):
     chip_structure: Optional[ChipStructure] = None
     capital_flow: Optional[CapitalFlow] = None
     margin_trading: Optional[MarginTrading] = None
+    ggt_context: Optional[GgtContext] = None
 
 
 class Intelligence(BaseModel):

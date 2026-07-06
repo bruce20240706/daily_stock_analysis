@@ -221,3 +221,23 @@ def test_oos_fraction_clamped(monkeypatch):
     assert Config._load_from_env().signal_backtest_oos_fraction == 0.0
     monkeypatch.setenv("SIGNAL_BACKTEST_OOS_FRACTION", "0.3")
     assert Config._load_from_env().signal_backtest_oos_fraction == 0.3
+
+
+def test_ggt_ttl_default(monkeypatch):
+    monkeypatch.delenv("GGT_LIST_CACHE_TTL_SECONDS", raising=False)
+    assert Config._load_from_env().ggt_list_cache_ttl_seconds == 43200
+
+
+def test_ggt_ttl_from_env(monkeypatch):
+    monkeypatch.setenv("GGT_LIST_CACHE_TTL_SECONDS", "3600")
+    assert Config._load_from_env().ggt_list_cache_ttl_seconds == 3600
+
+
+def test_ggt_ttl_min_clamp(monkeypatch):
+    monkeypatch.setenv("GGT_LIST_CACHE_TTL_SECONDS", "30")
+    assert Config._load_from_env().ggt_list_cache_ttl_seconds == 60
+
+
+def test_ggt_ttl_invalid_falls_back(monkeypatch):
+    monkeypatch.setenv("GGT_LIST_CACHE_TTL_SECONDS", "abc")
+    assert Config._load_from_env().ggt_list_cache_ttl_seconds == 43200

@@ -92,6 +92,36 @@ def _safe_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
 
+
+def _render_ggt_section(ggt: Optional[dict], report_language: str) -> str:
+    """渲染港股通南向段落(presence-only；仅呈现、不喂 LLM、不改决策)。
+
+    三态基于 `eligible`(True/False/None 三互异文案,None 不得读成 False——F10/§6);
+    数值字段(holding_ratio_pct/southbound_net_flow)为 None 时跳过对应行；
+    整段在 `ggt` 为 None/缺失/空 dict 时返回空字符串。
+    """
+    if not ggt:
+        return ""
+    labels = get_report_labels(report_language)
+    zh = report_language != 'en'
+    eligible = ggt.get('eligible')
+    if eligible is True:
+        elig_text = labels['ggt_eligible_label']
+    elif eligible is False:
+        elig_text = labels['ggt_not_eligible_label']
+    else:
+        elig_text = labels['ggt_unknown_label']
+    lines = [f"**{labels['ggt_label']}**: {elig_text}"]
+    ratio = ggt.get('holding_ratio_pct')
+    if ratio is not None:
+        lines.append(f"{labels['ggt_holding_ratio_label']}: {ratio}%")
+    flow = ggt.get('southbound_net_flow')
+    if flow is not None:
+        flow_text = f"{flow} 亿" if zh else f"{flow}"
+        lines.append(f"{labels['southbound_net_flow_label']}: {flow_text}")
+    return "\n".join(lines)
+
+
 if TYPE_CHECKING:
     from src.analyzer import AnalysisResult
 
@@ -1295,6 +1325,10 @@ class NotificationService(
                             f" ({_exch} {_td})",
                             "",
                         ])
+                    # 港股通南向（HK；presence-only；仅呈现、不喂 LLM、不改决策）
+                    ggt_section = _render_ggt_section(data_persp.get('ggt_context'), report_language)
+                    if ggt_section:
+                        report_lines.extend([ggt_section, ""])
 
                 # ========== 作战计划 ==========
                 battle = dashboard.get('battle_plan', {}) if dashboard else {}

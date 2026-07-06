@@ -31,6 +31,7 @@ from src.analyzer import (
     GeminiAnalyzer,
     AnalysisResult,
     fill_capital_flow_if_needed,
+    fill_ggt_if_needed,
     fill_margin_if_needed,
     fill_price_position_if_needed,
     normalize_chip_structure_availability,
@@ -630,6 +631,10 @@ class StockAnalysisPipeline:
             if result:
                 fill_margin_if_needed(result, fundamental_context)
 
+            # Step 7.6d: 港股通南向 section（presence-only, HK, 仅呈现、对决策只读, NO prompt/decision_stability）
+            if result:
+                fill_ggt_if_needed(result, fundamental_context)
+
             # Step 7.7: price_position fallback
             if result:
                 fill_price_position_if_needed(result, trend_result, realtime_quote)
@@ -1152,6 +1157,10 @@ class StockAnalysisPipeline:
             # 融资融券 section（与传统路径 Step 7.6c 同序：chip → capital_flow → margin → price_position → stabilize）
             if result:
                 fill_margin_if_needed(result, fundamental_context)
+
+            # 港股通南向 section（与传统路径 Step 7.6d 同序：chip → capital_flow → margin → ggt → price_position → stabilize）
+            if result:
+                fill_ggt_if_needed(result, fundamental_context)
 
             # price_position fallback (same as non-agent path Step 7.7)
             if result:

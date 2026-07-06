@@ -9,6 +9,7 @@ endpoint candidates. It should never raise to caller; partial data is allowed.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import threading
 import time
@@ -26,6 +27,32 @@ logger = logging.getLogger(__name__)
 _MARGIN_MEMO_MAX = 4
 _MARGIN_MEMO_LOCK = threading.Lock()
 _margin_detail_memo: "OrderedDict[Tuple[str, str], pd.DataFrame]" = OrderedDict()
+
+# 港股通（GGT）成份榜单的模块级缓存。
+# key 固定 "k"（全市场单一榜单，非按股票码分片）。
+_GGT_CACHE_FAIL_TTL = 300.0                       # 失败负缓存 TTL（秒）
+_GGT_LIST_CACHE: dict = {}                        # {"set": {...} | None, "ts": float, "ok": bool}
+_GGT_CACHE_LOCK = threading.Lock()                # 只护 dict 读写，网络抓取一律锁外
+_GGT_MIN_COMPONENTS = 50                          # R4 截断守卫：港股通成份常年 500+，<50 视为不可得
+_SB_HOLDING_CACHE: dict = {}                      # {"df": DataFrame|None, "ts": float, "ok": bool}
+_SB_FLOW_CACHE: dict = {}                         # {"result": dict|None, "ts": float, "ok": bool}
+
+
+def _ggt_key(code: str) -> str:
+    """港股通归一键：三写法（裸5位/HK前缀/.HK后缀）收敛同键（Blocker F1）。
+
+    normalize_stock_code 对裸 5 位数字原样返回（不加 HK 前缀），故此处补齐：
+    结果仍为纯 1-5 位数字 → 'HK' + zfill(5)。成份 ingest 与查询两侧必须同用本函数。
+    """
+    # 惰性 import：data_provider.base 反向 import 本模块的 AkshareFundamentalAdapter，
+    # 模块级 import 会构成循环导入（本文件既有 _normalize_code 亦为同因绕开 base）。
+    from data_provider.base import normalize_stock_code
+
+    norm = normalize_stock_code(code)
+    if norm.isdigit() and 1 <= len(norm) <= 5:
+        return "HK" + norm.zfill(5)
+    return norm
+
 
 _DIVIDEND_KEYWORD_MAP: Dict[str, List[str]] = {
     "per_share": [
@@ -623,4 +650,139 @@ class AkshareFundamentalAdapter:
             result["source_chain"].append(f"margin:{fn_name}")
             result["status"] = "ok" if idx == 0 else "partial"
             break
+        return result
+
+    def _fetch_ggt_components_df(self):
+        """抓港股通成份榜单（akshare 惰性 import；异常上抛给缓存层转负缓存）。"""
+        import akshare as ak
+        return ak.stock_hk_ggt_components_em()
+
+    def get_ggt_eligibility_set(self) -> Optional[set]:
+        """港股通成份码 set（过 _ggt_key）；表不可得或 <50 行 → None（fail-closed unknown）。
+
+        成功缓存 TTL=config.ggt_list_cache_ttl_seconds；失败负缓存 300s（死端点不每报告重打）。
+        锁只护 dict；网络抓取锁外；single-flight 由 'ok' 标志 + ts 近似（并发下最多重抓一次，可接受）。
+        """
+        from src.config import get_config
+        ttl = int(getattr(get_config(), "ggt_list_cache_ttl_seconds", 43200))
+        now = time.time()
+        with _GGT_CACHE_LOCK:
+            item = _GGT_LIST_CACHE.get("k")
+            if item is not None:
+                age = now - item["ts"]
+                live = ttl if item["ok"] else _GGT_CACHE_FAIL_TTL
+                if age <= live:
+                    return item["set"]
+        result_set = None
+        try:
+            df = self._fetch_ggt_components_df()
+            if df is not None and not df.empty and len(df) >= _GGT_MIN_COMPONENTS:
+                codes = [c for c in df["代码"].astype(str).tolist() if c and c.strip()]
+                keys = {_ggt_key(c) for c in codes}
+                # 归一失败比例守卫：有效 HK 键占比过低 → 整表作废（R4）
+                valid = {k for k in keys if k.startswith("HK")}
+                if len(valid) >= _GGT_MIN_COMPONENTS:
+                    result_set = valid
+        except Exception:
+            result_set = None
+        with _GGT_CACHE_LOCK:
+            _GGT_LIST_CACHE["k"] = {"set": result_set, "ts": time.time(), "ok": result_set is not None}
+        return result_set
+
+    def _fetch_ggt_holding_df(self):
+        """抓南向持股全市场日表（近窗；akshare 惰性 import，异常上抛给缓存层转负缓存）。"""
+        import akshare as ak
+        from datetime import datetime, timedelta
+        end = datetime.now()
+        start = end - timedelta(days=7)             # 近 7 日历日窗覆盖末端日回退
+        return ak.stock_hsgt_stock_statistics_em(
+            symbol="南向持股",
+            start_date=start.strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d"),
+        )
+
+    def _ggt_holding_df_cached(self):
+        from src.config import get_config
+        ttl = int(getattr(get_config(), "ggt_list_cache_ttl_seconds", 43200))
+        now = time.time()
+        with _GGT_CACHE_LOCK:
+            item = _SB_HOLDING_CACHE.get("k")
+            if item is not None:
+                age = now - item["ts"]
+                live = ttl if item["ok"] else _GGT_CACHE_FAIL_TTL
+                if age <= live:
+                    return item["df"]
+        df = None
+        try:
+            fetched = self._fetch_ggt_holding_df()
+            if fetched is not None and not fetched.empty:
+                df = fetched
+        except Exception:
+            df = None
+        with _GGT_CACHE_LOCK:
+            _SB_HOLDING_CACHE["k"] = {"df": df, "ts": time.time(), "ok": df is not None}
+        return df
+
+    def get_ggt_holding(self, stock_code: str) -> Optional[dict]:
+        """本股南向持股最新行（持股日期最大）；无本股行/不可得 → None。"""
+        df = self._ggt_holding_df_cached()
+        if df is None or df.empty or "股票代码" not in df.columns:
+            return None
+        key = _ggt_key(stock_code)
+        sub = df[df["股票代码"].astype(str).map(_ggt_key) == key]
+        if sub.empty:
+            return None
+        row = sub.loc[sub["持股日期"].astype(str).idxmax()]  # 持股日期最大行
+        return {
+            "holding_shares": _safe_float(row.get("持股数量")),
+            "holding_value": _safe_float(row.get("持股市值")),
+            "holding_ratio_pct": _safe_float(row.get("持股数量占发行股百分比")),
+            "holding_trade_date": str(row.get("持股日期")),
+        }
+
+    def _fetch_sb_flow_df(self):
+        """抓沪深港通资金流向汇总表（akshare 惰性 import；异常上抛给缓存层转负缓存）。"""
+        import akshare as ak
+        return ak.stock_hsgt_fund_flow_summary_em()
+
+    def get_southbound_flow(self) -> Optional[dict]:
+        """市场级南向净流（两南向腿"成交净买额"之和，亿）；两腿皆 NaN/不可得 → None（禁假零）。
+
+        类型 腿名用子串匹配 "港股通"（而非对 ["港股通(沪)", "港股通(深)"] 精确 isin）：
+        真实端点半角/全角括号写法本环境无法离线核验，子串匹配对括号宽度免疫，且天然
+        排除北向腿（沪股通/深股通不含"港股通"子串），fail-closed 语义不变——这是相对
+        原始 spec 的刻意加固，防止线上因括号宽度不符而静默永久返回 None。
+        """
+        from src.config import get_config
+        ttl = int(getattr(get_config(), "ggt_list_cache_ttl_seconds", 43200))
+        now = time.time()
+        with _GGT_CACHE_LOCK:
+            item = _SB_FLOW_CACHE.get("k")
+            if item is not None:
+                age = now - item["ts"]
+                live = ttl if item["ok"] else _GGT_CACHE_FAIL_TTL
+                if age <= live:
+                    return item["result"]
+        result = None
+        try:
+            df = self._fetch_sb_flow_df()
+            if df is not None and not df.empty and "类型" in df.columns:
+                legs = df[df["类型"].astype(str).str.contains("港股通", na=False)]
+                vals = [_safe_float(v) for v in legs["成交净买额"].tolist()]
+                present = [v for v in vals if v is not None and not math.isnan(v)]
+                if present:                                   # 至少一腿有值,否则 None(禁假零)
+                    flow_date = None
+                    if "交易日" in legs.columns and not legs.empty:
+                        raw_date = legs["交易日"].iloc[0]
+                        if raw_date is not None and not pd.isna(raw_date):
+                            flow_date = str(raw_date)
+                    result = {
+                        "southbound_net_flow": round(sum(present), 4),
+                        "flow_date": flow_date,
+                        "partial": len(present) < 2,
+                    }
+        except Exception:
+            result = None
+        with _GGT_CACHE_LOCK:
+            _SB_FLOW_CACHE["k"] = {"result": result, "ts": time.time(), "ok": result is not None}
         return result
