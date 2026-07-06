@@ -19,9 +19,9 @@ Inc 2 在 HK 标的分析报告中新增「港股通」南向维度：确定性�
 | `holding_shares` | 南向持股数量 | 股 |
 | `holding_value` | 南向持股市值 | 元 |
 | `holding_ratio_pct` | 持股数量占发行股百分比（**非**占 A 股口径） | % |
-| `holding_trade_date` | 持股统计命中交易日 | YYYYMMDD |
+| `holding_trade_date` | 持股统计命中交易日 | YYYY-MM-DD |
 | `southbound_net_flow` | 市场级南向净流（两腿之和） | 亿 |
-| `southbound_flow_partial` | 仅单腿可得时标记（另一腿缺失，非零填充） | bool |
+| `southbound_flow_partial`（内部字段，不在报表中呈现） | adapter 内部仅单腿可得时标记（另一腿缺失，非零填充）；`_build_ggt_from_context` 不投影该键，`GgtContext` schema 无此字段 | bool |
 
 全部 Optional / presence-only / None-tolerant。
 
@@ -57,7 +57,7 @@ Inc 2 在 HK 标的分析报告中新增「港股通」南向维度：确定性�
 ## 门控与语义
 
 - **仅 HK 标的**（港股）触发；A 股/美股/crypto 无该 section。
-- **presence-only**：GGT 块在 `data_perspective.ggt` 中，成功抓到至少一项才出现；三项数据面独立展示，某一项失败不影响另外两项。
+- **presence-only**：GGT 块在 `data_perspective.ggt_context` 中，成功抓到至少一项才出现；三项数据面独立展示，某一项失败不影响另外两项。
 - **纯展示、不影响决策**：不喂 LLM prompt、不进 `decision_stability`、不产生任何 bias、对信号/回测完全只读（与融资融券章节记载的分析原则一致）。
 
 ## 看板注解 defer 到 Inc 2b

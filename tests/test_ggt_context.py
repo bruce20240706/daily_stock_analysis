@@ -2,6 +2,7 @@
 """
 Task 4: get_ggt_context 管理层组装 + offshore context / 枚举工厂 ggt 接线测试。
 """
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -97,6 +98,45 @@ def test_get_ggt_context_one_leg_raises_does_not_drop_others(monkeypatch):
     assert block["data"]["eligible"] is None
     assert block["data"]["holding"]["holding_shares"] == 1
     assert block["data"]["southbound_flow"] is None
+
+
+def test_get_ggt_context_hung_leg_is_bounded_not_blocking(monkeypatch):
+    # G8: 单腿"挂起"(网络库无超时导致的真实卡死场景)不得拖垮整个调用——每腿经
+    # _run_with_retry 跑在有界超时线程下,受 per_leg_cap(=fundamental_fetch_timeout_seconds)
+    # 上限,挂起腿最多消耗 per_leg_cap 而非拖满整个总预算(budget_seconds),腾出预算给
+    # 其余两腿仍能正常完成——生产默认 stage(8s)/fetch(3s)本就总预算>>单腿上限,这里把
+    # per_leg_cap 压到 0.1s(远小于 sleep(3))令测试保持快速且确定性,同时把总预算设为
+    # 1.0s(> per_leg_cap)以复现"挂起腿只吃掉自己的上限,不吃光总预算"这一关键行为。
+    cfg = SimpleNamespace(fundamental_fetch_timeout_seconds=0.1, fundamental_retry_max=1)
+
+    def slow_eligibility():
+        time.sleep(3)
+        return {_ggt_key("00700")}
+
+    mgr = _mgr()
+    monkeypatch.setattr(mgr._fundamental_adapter, "get_ggt_eligibility_set", slow_eligibility)
+    monkeypatch.setattr(
+        mgr._fundamental_adapter, "get_ggt_holding",
+        lambda code: {
+            "holding_shares": 100, "holding_value": 1000.0,
+            "holding_ratio_pct": 3.0, "holding_trade_date": "2026-07-01",
+        },
+    )
+    monkeypatch.setattr(
+        mgr._fundamental_adapter, "get_southbound_flow",
+        lambda: {"southbound_net_flow": 5.0, "flow_date": "2026-07-01", "partial": False},
+    )
+    with patch("src.config.get_config", return_value=cfg):
+        t0 = time.monotonic()
+        block = mgr.get_ggt_context("hk00700", budget_seconds=1.0)
+        elapsed = time.monotonic() - t0
+    # 挂起腿 sleep(3) 若未被有界超时机制 abandon,调用会阻塞~3s;
+    # 断言 < 2.0s 证明调用方在挂起腿完成前已被释放(未原样等满 3s)。
+    assert elapsed < 2.0, f"get_ggt_context blocked for {elapsed:.2f}s waiting on hung leg"
+    assert block["data"]["eligible"] is None
+    assert block["data"]["holding"]["holding_shares"] == 100
+    assert block["data"]["southbound_flow"]["southbound_net_flow"] == 5.0
+    assert block["status"] == "partial"
 
 
 # ---------------------------------------------------------------------------

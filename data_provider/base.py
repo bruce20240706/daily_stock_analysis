@@ -3596,8 +3596,11 @@ class DataFetcherManager:
     def get_ggt_context(self, stock_code: str, budget_seconds: Optional[float] = None) -> Dict[str, Any]:
         """港股通(南向)块（fail-open）：eligibility + 个股持股 + 市场级南向净流。
 
-        HK-only. 三个数据面分属三次独立抓取，共享同一个 deadline 预算，但各自
-        独立 try/except——任一面失败不得拖垮其余两面（R2）。
+        HK-only. 三个数据面分属三次独立抓取，共享同一个 timeout 总预算（各腿再受
+        单腿 per_leg_cap 上限），经 `_run_with_retry` 跑在有界超时线程下——任一腿
+        真正挂起（网络库无超时）也会在预算耗尽后被 abandon，调用方按时释放，
+        该腿降级为 None，不阻塞其余两腿（G8）；各自独立 try/except——任一面失败
+        （抛异常）不得拖垮其余两面（R2）。
         """
         from src.config import get_config
         from data_provider.fundamental_adapter import _ggt_key
@@ -3622,24 +3625,27 @@ class DataFetcherManager:
                 ["fundamental stage timeout"],
             )
 
-        deadline = time.monotonic() + timeout
         adapter = self._fundamental_adapter
+        per_leg_cap = float(config.fundamental_fetch_timeout_seconds)
+        per_leg_cap = max(0.0, per_leg_cap)
+        start = time.monotonic()
 
-        try:
-            elig_set = adapter.get_ggt_eligibility_set(deadline=deadline)
-            eligible = (_ggt_key(code) in elig_set) if isinstance(elig_set, set) else None
-        except Exception:
-            eligible = None
+        def _fetch_leg(task, task_name):
+            # 各 leg 共享总预算 timeout,单 leg 再受 per_leg_cap 上限;超时/异常→None(fail-closed)。
+            remaining = timeout - (time.monotonic() - start)
+            leg_timeout = min(per_leg_cap, remaining) if remaining > 0 else 0.0
+            if leg_timeout <= 0:
+                return None
+            try:
+                payload, _err, _ms = self._run_with_retry(task, leg_timeout, task_name)
+                return payload
+            except Exception:
+                return None
 
-        try:
-            holding = adapter.get_ggt_holding(code, deadline=deadline)
-        except Exception:
-            holding = None
-
-        try:
-            flow = adapter.get_southbound_flow(deadline=deadline)
-        except Exception:
-            flow = None
+        elig_set = _fetch_leg(lambda: adapter.get_ggt_eligibility_set(), "ggt_eligibility")
+        eligible = (_ggt_key(code) in elig_set) if isinstance(elig_set, set) else None
+        holding = _fetch_leg(lambda: adapter.get_ggt_holding(code), "ggt_holding")
+        flow = _fetch_leg(lambda: adapter.get_southbound_flow(), "ggt_southbound_flow")
 
         present = [x for x in (eligible, holding, flow) if x is not None]
         if not present:

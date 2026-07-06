@@ -657,7 +657,7 @@ class AkshareFundamentalAdapter:
         import akshare as ak
         return ak.stock_hk_ggt_components_em()
 
-    def get_ggt_eligibility_set(self, deadline: Optional[float] = None) -> Optional[set]:
+    def get_ggt_eligibility_set(self) -> Optional[set]:
         """港股通成份码 set（过 _ggt_key）；表不可得或 <50 行 → None（fail-closed unknown）。
 
         成功缓存 TTL=config.ggt_list_cache_ttl_seconds；失败负缓存 300s（死端点不每报告重打）。
@@ -723,7 +723,7 @@ class AkshareFundamentalAdapter:
             _SB_HOLDING_CACHE["k"] = {"df": df, "ts": time.time(), "ok": df is not None}
         return df
 
-    def get_ggt_holding(self, stock_code: str, deadline: Optional[float] = None) -> Optional[dict]:
+    def get_ggt_holding(self, stock_code: str) -> Optional[dict]:
         """本股南向持股最新行（持股日期最大）；无本股行/不可得 → None。"""
         df = self._ggt_holding_df_cached()
         if df is None or df.empty or "股票代码" not in df.columns:
@@ -745,7 +745,7 @@ class AkshareFundamentalAdapter:
         import akshare as ak
         return ak.stock_hsgt_fund_flow_summary_em()
 
-    def get_southbound_flow(self, deadline: Optional[float] = None) -> Optional[dict]:
+    def get_southbound_flow(self) -> Optional[dict]:
         """市场级南向净流（两南向腿"成交净买额"之和，亿）；两腿皆 NaN/不可得 → None（禁假零）。
 
         类型 腿名用子串匹配 "港股通"（而非对 ["港股通(沪)", "港股通(深)"] 精确 isin）：
