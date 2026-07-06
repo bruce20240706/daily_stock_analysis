@@ -33,6 +33,7 @@ _GGT_CACHE_FAIL_TTL = 300.0                       # 失败负缓存 TTL（秒）
 _GGT_LIST_CACHE: dict = {}                        # {"set": {...} | None, "ts": float, "ok": bool}
 _GGT_CACHE_LOCK = threading.Lock()                # 只护 dict 读写，网络抓取一律锁外
 _GGT_MIN_COMPONENTS = 50                          # R4 截断守卫：港股通成份常年 500+，<50 视为不可得
+_SB_HOLDING_CACHE: dict = {}                      # {"df": DataFrame|None, "ts": float, "ok": bool}
 
 
 def _ggt_key(code: str) -> str:
@@ -685,3 +686,54 @@ class AkshareFundamentalAdapter:
         with _GGT_CACHE_LOCK:
             _GGT_LIST_CACHE["k"] = {"set": result_set, "ts": time.time(), "ok": result_set is not None}
         return result_set
+
+    def _fetch_ggt_holding_df(self):
+        """抓南向持股全市场日表（近窗；akshare 惰性 import，异常上抛给缓存层转负缓存）。"""
+        import akshare as ak
+        from datetime import datetime, timedelta
+        end = datetime.now()
+        start = end - timedelta(days=7)             # 近 7 日历日窗覆盖末端日回退
+        return ak.stock_hsgt_stock_statistics_em(
+            symbol="南向持股",
+            start_date=start.strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d"),
+        )
+
+    def _ggt_holding_df_cached(self):
+        from src.config import get_config
+        ttl = int(getattr(get_config(), "ggt_list_cache_ttl_seconds", 43200))
+        now = time.time()
+        with _GGT_CACHE_LOCK:
+            item = _SB_HOLDING_CACHE.get("k")
+            if item is not None:
+                age = now - item["ts"]
+                live = ttl if item["ok"] else _GGT_CACHE_FAIL_TTL
+                if age <= live:
+                    return item["df"]
+        df = None
+        try:
+            fetched = self._fetch_ggt_holding_df()
+            if fetched is not None and not fetched.empty:
+                df = fetched
+        except Exception:
+            df = None
+        with _GGT_CACHE_LOCK:
+            _SB_HOLDING_CACHE["k"] = {"df": df, "ts": time.time(), "ok": df is not None}
+        return df
+
+    def get_ggt_holding(self, stock_code: str, deadline: Optional[float] = None) -> Optional[dict]:
+        """本股南向持股最新行（持股日期最大）；无本股行/不可得 → None。"""
+        df = self._ggt_holding_df_cached()
+        if df is None or df.empty or "股票代码" not in df.columns:
+            return None
+        key = _ggt_key(stock_code)
+        sub = df[df["股票代码"].astype(str).map(_ggt_key) == key]
+        if sub.empty:
+            return None
+        row = sub.loc[sub["持股日期"].astype(str).idxmax()]  # 持股日期最大行
+        return {
+            "holding_shares": _safe_float(row.get("持股数量")),
+            "holding_value": _safe_float(row.get("持股市值")),
+            "holding_ratio_pct": _safe_float(row.get("持股数量占发行股百分比")),
+            "holding_trade_date": str(row.get("持股日期")),
+        }

@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+import math
+from datetime import date
+
 import pandas as pd
 import pytest
 from unittest.mock import patch
@@ -9,8 +12,10 @@ import data_provider.fundamental_adapter as fa
 @pytest.fixture(autouse=True)
 def _clear_ggt_cache():
     fa._GGT_LIST_CACHE.clear()
+    fa._SB_HOLDING_CACHE.clear()
     yield
     fa._GGT_LIST_CACHE.clear()
+    fa._SB_HOLDING_CACHE.clear()
 
 
 def test_ggt_key_normalizes_three_writings_to_same_hk_key():
@@ -62,3 +67,71 @@ def test_eligibility_set_endpoint_failure_returns_none_and_negative_cached():
         assert a.get_ggt_eligibility_set() is None
         assert a.get_ggt_eligibility_set() is None   # 负缓存 300s 内不重打
     assert calls["n"] == 1
+
+
+def _holding_df(rows):
+    # rows: list of (股票代码, 持股日期, 持股数量, 持股市值, 占比)
+    return pd.DataFrame({
+        "股票代码": [r[0] for r in rows],
+        "股票简称": [f"n{r[0]}" for r in rows],
+        "持股日期": [r[1] for r in rows],
+        "持股数量": [r[2] for r in rows],
+        "持股市值": [r[3] for r in rows],
+        "持股数量占发行股百分比": [r[4] for r in rows],
+        "持股市值变化-5日": [0.0 for r in rows],   # 存在但不取
+    })
+
+
+def test_holding_picks_latest_row_by_date_and_real_columns():
+    # 同股多日期 → 取持股日期最大行;占比读真实列名(非"占A股")
+    df = _holding_df([
+        ("00700", "2026-06-30", 100, 1000.0, 5.0),
+        ("00700", "2026-07-01", 200, 2200.0, 6.5),   # 最新
+        ("01810", "2026-07-01", 50, 500.0, 2.0),
+    ])
+    with patch.object(AkshareFundamentalAdapter, "_fetch_ggt_holding_df", return_value=df):
+        h = AkshareFundamentalAdapter().get_ggt_holding("hk00700")   # 三写法归一
+    assert h["holding_shares"] == 200 and h["holding_value"] == 2200.0
+    assert h["holding_ratio_pct"] == 6.5
+    assert h["holding_trade_date"] == "2026-07-01"
+
+
+def test_holding_stock_not_in_table_returns_none():
+    df = _holding_df([("01810", "2026-07-01", 50, 500.0, 2.0)])
+    with patch.object(AkshareFundamentalAdapter, "_fetch_ggt_holding_df", return_value=df):
+        assert AkshareFundamentalAdapter().get_ggt_holding("00700") is None
+
+
+def test_holding_endpoint_failure_returns_none():
+    with patch.object(AkshareFundamentalAdapter, "_fetch_ggt_holding_df",
+                      side_effect=RuntimeError("boom")):
+        assert AkshareFundamentalAdapter().get_ggt_holding("00700") is None
+
+
+def test_holding_picks_latest_row_with_real_date_objects():
+    # 真实 akshare 端点 持股日期 列为 datetime.date 对象(pd.to_datetime(...).dt.date),
+    # 非字符串;idxmax() 须对 date 对象与字符串两种 dtype 均正确择最新行(dtype 保真回归)。
+    df = _holding_df([
+        ("00700", date(2026, 6, 30), 100, 1000.0, 5.0),
+        ("00700", date(2026, 7, 1), 200, 2200.0, 6.5),   # 最新
+        ("01810", date(2026, 7, 1), 50, 500.0, 2.0),
+    ])
+    with patch.object(AkshareFundamentalAdapter, "_fetch_ggt_holding_df", return_value=df):
+        h = AkshareFundamentalAdapter().get_ggt_holding("hk00700")
+    assert h["holding_shares"] == 200 and h["holding_value"] == 2200.0
+    assert h["holding_ratio_pct"] == 6.5
+    assert h["holding_trade_date"] == "2026-07-01"
+
+
+def test_holding_nan_numeric_values_pass_through_unchanged():
+    # 真实端点 持股数量/持股市值 经 pd.to_numeric(errors="coerce") 对不可解析值产生 NaN。
+    # 确认既有 _safe_float 行为(非本任务新增语义):NaN 是 float 实例,isinstance 分支
+    # 直接 float(nan) 不抛异常、不映射为 None——原样以 NaN 传出。
+    df = _holding_df([
+        ("00700", "2026-07-01", float("nan"), float("nan"), 6.5),
+    ])
+    with patch.object(AkshareFundamentalAdapter, "_fetch_ggt_holding_df", return_value=df):
+        h = AkshareFundamentalAdapter().get_ggt_holding("00700")
+    assert math.isnan(h["holding_shares"])
+    assert math.isnan(h["holding_value"])
+    assert h["holding_ratio_pct"] == 6.5
