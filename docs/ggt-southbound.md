@@ -68,7 +68,7 @@ Inc 2 在 HK 标的分析报告中新增「港股通」南向维度：确定性�
 
 ## 看板可买性注解（Inc 2b，已落地）
 
-信号看板每行呈现港股通可买性 eligibility 三态徽章（`True`→「港股通」/ `False`→「非港股通」/ `None`→无徽章）。**实现要点**：看板 `GET /api/v1/signals/board` 在 uvicorn 请求内按需计算（无 systemd/scheduler 预计算），故在**同一进程内自抓**一次全市场 eligibility set（`get_ggt_eligibility_set`，有界、进程级 12h 缓存），对每个 `market=="HK" and status=="ok"` 的行做成员判定 —— **不需要跨进程共享缓存**（该前提是否成立取决于部署形态（如 systemd `--schedule` 批量进程与独立 uvicorn API 进程分离时，两者仍是不同进程）；但新实现**从不依赖读取报告进程写入的缓存**——看板在自身请求处理进程内独立完成有界自抓 + 12h 缓存，因此与进程拓扑无关，不需要跨进程共享缓存。）。只呈现 eligibility；个股持股/市场级净流仍仅在报告 section 呈现，看板不注解这两项。HK ETF（如 2800.HK）不在成份表中，镜像报告口径判定为 `False`。
+信号看板每行呈现港股通可买性 eligibility 三态徽章（`True`→「港股通」/ `False`→「非港股通」/ `None`→无徽章）。**实现要点**：看板 `GET /api/v1/signals/board` 在 uvicorn 请求内按需计算（无 systemd/scheduler 预计算），在**自身请求进程内**自抓一次全市场 eligibility set（`get_ggt_eligibility_set`，有界、进程级 12h 缓存），对每个 `market=="HK" and status=="ok"` 的行做成员判定。**不需要跨进程共享缓存**：看板从不依赖读取报告进程写入的缓存——即便报告生成（systemd `--schedule`）与 API（uvicorn）分处不同进程，看板也在自身请求进程内独立完成有界自抓 + 12h 缓存，故与进程拓扑无关（早期 defer 论据误以为看板须读取报告进程的缓存才能拿到 eligibility）。只呈现 eligibility；个股持股/市场级净流仍仅在报告 section 呈现，看板不注解这两项。HK ETF（如 2800.HK）不在成份表中，镜像报告口径判定为 `False`。
 
 ## 不动的既有行为
 
