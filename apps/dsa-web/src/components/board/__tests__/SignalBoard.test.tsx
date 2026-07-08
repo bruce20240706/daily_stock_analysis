@@ -22,6 +22,7 @@ const mk = (over: Partial<BoardEntry>): BoardEntry => ({
   ciLowCorrected: null, familySize: null,
   status: 'ok', degradedReason: null, resonance: 'none',
   horizonBars: null, signalStatus: null, planQuality: null,
+  ggtEligible: null,
   ...over,
 });
 
