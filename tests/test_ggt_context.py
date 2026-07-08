@@ -102,12 +102,10 @@ def test_get_ggt_context_one_leg_raises_does_not_drop_others(monkeypatch):
 
 def test_get_ggt_context_hung_leg_is_bounded_not_blocking(monkeypatch):
     # G8: 单腿"挂起"(网络库无超时导致的真实卡死场景)不得拖垮整个调用——每腿经
-    # _run_with_retry 跑在有界超时线程下,受 per_leg_cap(=fundamental_fetch_timeout_seconds)
-    # 上限,挂起腿最多消耗 per_leg_cap 而非拖满整个总预算(budget_seconds),腾出预算给
-    # 其余两腿仍能正常完成——生产默认 stage(8s)/fetch(3s)本就总预算>>单腿上限,这里把
-    # per_leg_cap 压到 0.1s(远小于 sleep(3))令测试保持快速且确定性,同时把总预算设为
-    # 1.0s(> per_leg_cap)以复现"挂起腿只吃掉自己的上限,不吃光总预算"这一关键行为。
-    cfg = SimpleNamespace(fundamental_fetch_timeout_seconds=0.1, fundamental_retry_max=1)
+    # _run_with_retry 跑在有界超时线程下,各腿**独立**受 leg_cap 上限(此处 budget_seconds
+    # 显式传 0.3s 作 per-leg 上限)。挂起腿 sleep(3) 在 0.3s 被 abandon,其余两腿(快)
+    # 各自独立完成——各腿独立即不会互相饿死(真网发现异构端点共享 deadline 会饿死快腿)。
+    cfg = SimpleNamespace(fundamental_retry_max=1)
 
     def slow_eligibility():
         time.sleep(3)
@@ -128,7 +126,7 @@ def test_get_ggt_context_hung_leg_is_bounded_not_blocking(monkeypatch):
     )
     with patch("src.config.get_config", return_value=cfg):
         t0 = time.monotonic()
-        block = mgr.get_ggt_context("hk00700", budget_seconds=1.0)
+        block = mgr.get_ggt_context("hk00700", budget_seconds=0.3)   # 0.3s=per-leg 上限
         elapsed = time.monotonic() - t0
     # 挂起腿 sleep(3) 若未被有界超时机制 abandon,调用会阻塞~3s;
     # 断言 < 2.0s 证明调用方在挂起腿完成前已被释放(未原样等满 3s)。

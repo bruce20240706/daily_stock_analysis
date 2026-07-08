@@ -995,6 +995,9 @@ class Config:
     fundamental_cache_max_entries: int = 256
     # 港股通成份/南向持股/净流缓存 TTL（秒，日级数据默认 12h；env-only，不进 config_registry）
     ggt_list_cache_ttl_seconds: int = 43200
+    # 港股通单腿抓取超时（秒，per-leg）：三东财端点重（真网核验成份~19s/持股~10s）且 12h 缓存，
+    # 故比常规 fundamental_fetch_timeout_seconds(3s) 宽松，否则冷缓存下慢腿必超时永空；env-only，不进 config_registry
+    ggt_fetch_timeout_seconds: float = 20.0
 
     # === Portfolio PR2: import/risk/fx settings ===
     portfolio_risk_concentration_alert_pct: float = 35.0
@@ -1883,6 +1886,12 @@ class Config:
                 43200,
                 field_name='GGT_LIST_CACHE_TTL_SECONDS',
                 minimum=60,
+            ),
+            ggt_fetch_timeout_seconds=parse_env_float(
+                os.getenv('GGT_FETCH_TIMEOUT_SECONDS'),
+                20.0,
+                field_name='GGT_FETCH_TIMEOUT_SECONDS',
+                minimum=1.0,
             ),
             portfolio_risk_concentration_alert_pct=parse_env_float(
                 os.getenv('PORTFOLIO_RISK_CONCENTRATION_ALERT_PCT'),

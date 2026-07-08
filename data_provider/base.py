@@ -3002,9 +3002,10 @@ class DataFetcherManager:
 
         # Southbound (GGT) block: HK-only, never drags the offshore total status
         # (see active_statuses below) — coverage/errors/source_chain still record it.
-        ggt_budget = max(stage_timeout - (time.time() - start_ts), 0.0)
+        # GGT 用自己宽松的 per-leg 超时(config.ggt_fetch_timeout_seconds),不受基本面
+        # stage 紧预算约束——三端点重(真网~19s/10s)但 12h 缓存,冷取一次性成本。
         if market == "hk":
-            result_ctx["ggt"] = self.get_ggt_context(stock_code, budget_seconds=ggt_budget)
+            result_ctx["ggt"] = self.get_ggt_context(stock_code)
         else:  # us
             result_ctx["ggt"] = self._build_fundamental_block(
                 "not_supported",
@@ -3596,18 +3597,23 @@ class DataFetcherManager:
     def get_ggt_context(self, stock_code: str, budget_seconds: Optional[float] = None) -> Dict[str, Any]:
         """港股通(南向)块（fail-open）：eligibility + 个股持股 + 市场级南向净流。
 
-        HK-only. 三个数据面分属三次独立抓取，共享同一个 timeout 总预算（各腿再受
-        单腿 per_leg_cap 上限），经 `_run_with_retry` 跑在有界超时线程下——任一腿
-        真正挂起（网络库无超时）也会在预算耗尽后被 abandon，调用方按时释放，
-        该腿降级为 None，不阻塞其余两腿（G8）；各自独立 try/except——任一面失败
-        （抛异常）不得拖垮其余两面（R2）。
+        HK-only. 三个数据面是**异构**的重量级东财端点（真网核验 2026-07-06:成份 6 页
+        分页~19s、个股持股全市场日表~10s、净流~0.5s），各自 12h 缓存，故**各腿独立**受
+        per-leg 超时上限 `config.ggt_fetch_timeout_seconds`（默认 20s，比常规 quote 抓取的
+        `fundamental_fetch_timeout_seconds`=3s 宽松，否则冷缓存下慢腿必超时永空）。经
+        `_run_with_retry` 跑在有界超时线程下——任一腿真正挂起（网络库无超时）也会在
+        per-leg 预算耗尽后被 abandon，调用方按时释放，该腿降级为 None（G8）；**各腿独立
+        而非共享 deadline**，避免慢的 eligibility 饿死快的 flow（早期共享 deadline 版本
+        经真网发现会如此）；各自独立 try/except——任一面抛异常不得拖垮其余两面（R2）。
+        冷缓存首个报告可能 partial（慢腿各自暖化）；12h 缓存后各腿命中即快。
         """
         from src.config import get_config
         from data_provider.fundamental_adapter import _ggt_key
 
         config = get_config()
         code = normalize_stock_code(stock_code)
-        timeout = float(budget_seconds if budget_seconds is not None else config.fundamental_fetch_timeout_seconds)
+        leg_cap = float(budget_seconds if budget_seconds is not None else config.ggt_fetch_timeout_seconds)
+        leg_cap = max(0.0, leg_cap)
         empty_payload = {"eligible": None, "holding": None, "southbound_flow": None}
         if _market_tag(code) != "hk" or _is_etf_code(code):
             return self._build_fundamental_block(
@@ -3617,27 +3623,21 @@ class DataFetcherManager:
                 ["not supported"],
             )
 
-        if timeout <= 0:
+        if leg_cap <= 0:
             return self._build_fundamental_block(
                 "failed",
                 dict(empty_payload),
                 [{"provider": "ggt", "result": "failed", "duration_ms": 0}],
-                ["fundamental stage timeout"],
+                ["ggt fetch timeout"],
             )
 
         adapter = self._fundamental_adapter
-        per_leg_cap = float(config.fundamental_fetch_timeout_seconds)
-        per_leg_cap = max(0.0, per_leg_cap)
-        start = time.monotonic()
 
         def _fetch_leg(task, task_name):
-            # 各 leg 共享总预算 timeout,单 leg 再受 per_leg_cap 上限;超时/异常→None(fail-closed)。
-            remaining = timeout - (time.monotonic() - start)
-            leg_timeout = min(per_leg_cap, remaining) if remaining > 0 else 0.0
-            if leg_timeout <= 0:
-                return None
+            # 各腿独立受 leg_cap 上限(异构端点,不共享 deadline 防慢腿饿死快腿);
+            # 挂起腿在 leg_cap 后被 abandon,超时/异常 → None(fail-closed)。
             try:
-                payload, _err, _ms = self._run_with_retry(task, leg_timeout, task_name)
+                payload, _err, _ms = self._run_with_retry(task, leg_cap, task_name)
                 return payload
             except Exception:
                 return None

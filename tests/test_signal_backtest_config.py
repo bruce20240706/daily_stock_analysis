@@ -241,3 +241,23 @@ def test_ggt_ttl_min_clamp(monkeypatch):
 def test_ggt_ttl_invalid_falls_back(monkeypatch):
     monkeypatch.setenv("GGT_LIST_CACHE_TTL_SECONDS", "abc")
     assert Config._load_from_env().ggt_list_cache_ttl_seconds == 43200
+
+
+def test_ggt_fetch_timeout_default(monkeypatch):
+    monkeypatch.delenv("GGT_FETCH_TIMEOUT_SECONDS", raising=False)
+    assert Config._load_from_env().ggt_fetch_timeout_seconds == 20.0
+
+
+def test_ggt_fetch_timeout_from_env(monkeypatch):
+    monkeypatch.setenv("GGT_FETCH_TIMEOUT_SECONDS", "30")
+    assert Config._load_from_env().ggt_fetch_timeout_seconds == 30.0
+
+
+def test_ggt_fetch_timeout_min_clamp(monkeypatch):
+    monkeypatch.setenv("GGT_FETCH_TIMEOUT_SECONDS", "0.5")
+    assert Config._load_from_env().ggt_fetch_timeout_seconds == 1.0
+
+
+def test_ggt_fetch_timeout_invalid_falls_back(monkeypatch):
+    monkeypatch.setenv("GGT_FETCH_TIMEOUT_SECONDS", "abc")
+    assert Config._load_from_env().ggt_fetch_timeout_seconds == 20.0

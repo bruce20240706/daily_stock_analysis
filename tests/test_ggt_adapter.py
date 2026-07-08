@@ -139,15 +139,17 @@ def test_holding_nan_numeric_values_pass_through_unchanged():
     assert h["holding_ratio_pct"] == 6.5
 
 
-def _flow_df(sh, sz, date_val="2026-07-01", sh_type="港股通(沪)", sz_type="港股通(深)"):
-    # 首行为真实北向腿名(非"北向"占位),用于真实验证子串排除:
-    # 沪股通/深股通 不含"港股通"子串,应天然被过滤掉。
+def _flow_df(sh, sz, date_val="2026-07-01"):
+    # 真实东财 fund_flow_summary 结构(真网核验 2026-07-06):4 行——
+    # 类型=沪港通/深港通(连接程序名,不含"港股通"子串)、板块=沪股通/港股通(沪)/深股通/港股通(深)、
+    # 资金方向=北向/南向。北向两腿(沪股通/深股通)成交净买额置 999.0,验证被 资金方向 正确排除。
     return pd.DataFrame({
-        "交易日": [date_val, date_val, date_val],
-        "类型": ["沪股通", sh_type, sz_type],
-        "板块": ["-", "-", "-"],
-        "成交净买额": [999.0, sh, sz],
-        "资金净流入": [1000.0, sh, sz],
+        "交易日": [date_val] * 4,
+        "类型": ["沪港通", "沪港通", "深港通", "深港通"],
+        "板块": ["沪股通", "港股通(沪)", "深股通", "港股通(深)"],
+        "资金方向": ["北向", "南向", "北向", "南向"],
+        "成交净买额": [999.0, sh, 999.0, sz],
+        "资金净流入": [1000.0, 420.0, 1000.0, 420.0],
     })
 
 
@@ -157,6 +159,16 @@ def test_southbound_flow_sums_two_legs():
     assert abs(f["southbound_net_flow"] - 20.0) < 1e-9
     assert f["partial"] is False
     assert f["flow_date"] == "2026-07-01"
+
+
+def test_southbound_flow_matches_by_direction_not_type():
+    # 回归钉(真网 bug):类型 列=沪港通/深港通 全不含"港股通"子串,南向两腿必须靠
+    # 资金方向=南向 命中,而非旧代码对 类型 列子串匹配(那样 0 命中 → 永久 None)。
+    df = _flow_df(12.0, 8.0)
+    assert not df["类型"].astype(str).str.contains("港股通").any()   # 证类型列无"港股通"
+    with patch.object(AkshareFundamentalAdapter, "_fetch_sb_flow_df", return_value=df):
+        f = AkshareFundamentalAdapter().get_southbound_flow()
+    assert f is not None and abs(f["southbound_net_flow"] - 20.0) < 1e-9
 
 
 def test_southbound_flow_both_nan_returns_none_not_zero():
@@ -175,19 +187,23 @@ def test_southbound_flow_one_leg_nan_is_partial():
 
 
 def test_southbound_flow_excludes_northbound_legs():
-    # 沪股通 腿值 999.0 巨大且排首行;若未被子串过滤,和会被严重污染
+    # 北向 沪股通/深股通 腿值 999.0 巨大;若未被 资金方向 过滤,和会被严重污染
     with patch.object(AkshareFundamentalAdapter, "_fetch_sb_flow_df", return_value=_flow_df(12.0, 8.0)):
         f = AkshareFundamentalAdapter().get_southbound_flow()
     assert abs(f["southbound_net_flow"] - 20.0) < 1e-9
 
 
-def test_southbound_flow_robust_to_fullwidth_parens():
-    # 真实端点 类型 全/半角括号写法线上无法离线核验;子串匹配须对括号宽度免疫
-    df = _flow_df(12.0, 8.0, sh_type="港股通（沪）", sz_type="港股通（深）")
+def test_southbound_flow_fallback_to_bankuai_when_no_direction_col():
+    # 兜底路径:无 资金方向 列时退回 板块 含"港股通"(全角括号亦免疫),仍正确求和
+    df = pd.DataFrame({
+        "交易日": ["2026-07-01"] * 4,
+        "类型": ["沪港通", "沪港通", "深港通", "深港通"],
+        "板块": ["沪股通", "港股通（沪）", "深股通", "港股通（深）"],   # 全角括号
+        "成交净买额": [999.0, 12.0, 999.0, 8.0],
+    })
     with patch.object(AkshareFundamentalAdapter, "_fetch_sb_flow_df", return_value=df):
         f = AkshareFundamentalAdapter().get_southbound_flow()
-    assert abs(f["southbound_net_flow"] - 20.0) < 1e-9
-    assert f["partial"] is False
+    assert f is not None and abs(f["southbound_net_flow"] - 20.0) < 1e-9
 
 
 def test_southbound_flow_endpoint_failure_returns_none():

@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 - [新功能] HK 标的分析报告新增港股通(HKSC)南向维度:成份可买性(港股通标的/非标的/名单不可达三态)、个股南向持股(数量/市值/占发行股比)、市场级南向净流(EOD 成交净买额),经 akshare 东财端点抓取(12h 缓存+300s 负缓存,东财不可达时 fail-closed 不编造);纯展示不影响信号/决策;看板可买性注解顺延后续增量
+- [修复] 港股通南向净流腿匹配订正(真网核验 2026-07-06):`stock_hsgt_fund_flow_summary_em` 的 `类型` 列实为连接程序名(沪港通/深港通,不含"港股通"子串),原按 `类型` 子串匹配命中 0 行致净流永久 `None`;改按语义列 `资金方向` 含"南"判定(兜底退 `板块` 含"港股通"),并订正文档币种为亿元人民币(资金净流入列=420 恰为港股通每日 420 亿 RMB 额度)
+- [改进] 港股通三腿抓取新增独立超时 GGT_FETCH_TIMEOUT_SECONDS(默认 20 秒/腿,最小 1 秒,仅 env 不进 registry):真网核验成份端点 ~19s/持股 ~10s 远超默认 fundamental 抓取超时(3 秒),冷缓存下慢腿必超时空返;各腿独立受此上限(非共享 deadline,防慢腿饿死快腿),挂起腿经 G8 有界超时后台线程 abandon 按时释放
 - [新功能] 链路B 信号统计新增样本外 holdout 切分披露(opt-in SIGNAL_BACKTEST_OOS_FRACTION,默认 0 关闭且行为不变;per-market 交易日期格点分位切点,train/OOS 两段胜率/基准/超额并排披露,跨切点窗口 embargo 防泄漏剔除;落库 signal_stats.oos_json,API 经 /signals 顶层 map 与看板行透出;描述性统计不影响 verified 徽章)
 - [新功能] 链路B 信号回测新增 per-(信号类型×市场) 风险画像:不年化 Sharpe/Sortino/事件净值最大回撤/最差单笔(毛收益保守跳空感知口径,expired 窗末平仓计入,失真形态整层剔除并以 excluded 计数披露);落库 signal_stats.risk_metrics_json(历史行为 null,重跑 --signal-backtest 生效),API 经 /signals 顶层 map 与看板行透出;描述性统计无置信区间,不得作为跨格子挑选依据
 - [修复] 信号 resolver 单次调用缓存键由 code 改为 (signal_type, code):修复同股多信号类型时非首个类型的 hit_rate/verified/置信区间等字段错挂第一个类型数值的缺陷

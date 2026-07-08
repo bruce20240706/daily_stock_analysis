@@ -745,13 +745,33 @@ class AkshareFundamentalAdapter:
         import akshare as ak
         return ak.stock_hsgt_fund_flow_summary_em()
 
-    def get_southbound_flow(self) -> Optional[dict]:
-        """市场级南向净流（两南向腿"成交净买额"之和，亿）；两腿皆 NaN/不可得 → None（禁假零）。
+    @staticmethod
+    def _select_southbound_legs(df):
+        """选南向两腿。
 
-        类型 腿名用子串匹配 "港股通"（而非对 ["港股通(沪)", "港股通(深)"] 精确 isin）：
-        真实端点半角/全角括号写法本环境无法离线核验，子串匹配对括号宽度免疫，且天然
-        排除北向腿（沪股通/深股通不含"港股通"子串），fail-closed 语义不变——这是相对
-        原始 spec 的刻意加固，防止线上因括号宽度不符而静默永久返回 None。
+        真网核验(2026-07-06):`fund_flow_summary` 返回 4 行,`类型`=连接程序名
+        (沪港通/深港通,**不含**"港股通"子串)、`板块`=沪股通/港股通(沪)/深股通/港股通(深)、
+        `资金方向`=北向/南向。故主判据用语义列 `资金方向` 含"南"(南向=港股通流出至港),
+        兜底退 `板块` 含"港股通"(对括号全/半角免疫,天然排除北向 沪股通/深股通)。
+        两者皆不可用/无匹配 → None(fail-closed)。
+        """
+        if "资金方向" in df.columns:
+            legs = df[df["资金方向"].astype(str).str.contains("南", na=False)]
+            if not legs.empty:
+                return legs
+        for col in ("板块", "类型"):
+            if col in df.columns:
+                legs = df[df[col].astype(str).str.contains("港股通", na=False)]
+                if not legs.empty:
+                    return legs
+        return None
+
+    def get_southbound_flow(self) -> Optional[dict]:
+        """市场级南向净流（两南向腿"成交净买额"之和，亿元人民币）；两腿皆 NaN/不可得 → None（禁假零）。
+
+        南向腿判定见 :meth:`_select_southbound_legs`(主判据 `资金方向` 含"南",兜底 `板块`
+        含"港股通")。币种:真网核验 `资金净流入` 列=420 匹配港股通每日 420 亿元 RMB 额度,
+        故净流单位为亿元人民币。
         """
         from src.config import get_config
         ttl = int(getattr(get_config(), "ggt_list_cache_ttl_seconds", 43200))
@@ -766,21 +786,22 @@ class AkshareFundamentalAdapter:
         result = None
         try:
             df = self._fetch_sb_flow_df()
-            if df is not None and not df.empty and "类型" in df.columns:
-                legs = df[df["类型"].astype(str).str.contains("港股通", na=False)]
-                vals = [_safe_float(v) for v in legs["成交净买额"].tolist()]
-                present = [v for v in vals if v is not None and not math.isnan(v)]
-                if present:                                   # 至少一腿有值,否则 None(禁假零)
-                    flow_date = None
-                    if "交易日" in legs.columns and not legs.empty:
-                        raw_date = legs["交易日"].iloc[0]
-                        if raw_date is not None and not pd.isna(raw_date):
-                            flow_date = str(raw_date)
-                    result = {
-                        "southbound_net_flow": round(sum(present), 4),
-                        "flow_date": flow_date,
-                        "partial": len(present) < 2,
-                    }
+            if df is not None and not df.empty and "成交净买额" in df.columns:
+                legs = self._select_southbound_legs(df)
+                if legs is not None and not legs.empty:
+                    vals = [_safe_float(v) for v in legs["成交净买额"].tolist()]
+                    present = [v for v in vals if v is not None and not math.isnan(v)]
+                    if present:                               # 至少一腿有值,否则 None(禁假零)
+                        flow_date = None
+                        if "交易日" in legs.columns:
+                            raw_date = legs["交易日"].iloc[0]
+                            if raw_date is not None and not pd.isna(raw_date):
+                                flow_date = str(raw_date)
+                        result = {
+                            "southbound_net_flow": round(sum(present), 4),
+                            "flow_date": flow_date,
+                            "partial": len(present) < 2,
+                        }
         except Exception:
             result = None
         with _GGT_CACHE_LOCK:
