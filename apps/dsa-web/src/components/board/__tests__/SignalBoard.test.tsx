@@ -209,4 +209,17 @@ describe('SignalBoard', () => {
     expect(screen.queryByTestId('board-horizon')).not.toBeInTheDocument();
     expect(screen.queryByTestId('board-signal-status')).not.toBeInTheDocument();
   });
+
+  it('renders GGT eligibility badge tri-state', () => {
+    const entries = [
+      mk({ code: 'hk00700', name: '腾讯', market: 'HK', ggtEligible: true }),
+      mk({ code: 'hk09999', name: '非通', market: 'HK', ggtEligible: false, hitRate: 0.5, hitSample: 9 }),
+      mk({ code: '600519', name: '茅台', market: 'CN', ggtEligible: null, hitRate: 0.4, hitSample: 8 }),
+    ];
+    render(<MemoryRouter><SignalBoard entries={entries} onRowClick={vi.fn()} /></MemoryRouter>);
+    const badges = screen.queryAllByTestId('board-ggt');
+    expect(badges).toHaveLength(2);                 // 仅 True/False 渲染,None 不渲染
+    expect(screen.getByText('港股通')).toBeInTheDocument();
+    expect(screen.getByText('非港股通')).toBeInTheDocument();
+  });
 });

@@ -36,6 +36,12 @@ export function verifiedLabel(verified: boolean): string {
   return verified ? '已验证' : '未验证';
 }
 
+/** 港股通可买性徽章文案:True→'港股通' / False→'非港股通' / null→null(不渲染)。 */
+export function ggtLabel(ggtEligible: boolean | null): string | null {
+  if (ggtEligible === null) return null;
+  return ggtEligible ? '港股通' : '非港股通';
+}
+
 /** Formats horizon bars as '窗口 N 根' or null when absent. */
 export function formatHorizon(horizonBars: number | null): string | null {
   return horizonBars == null ? null : `窗口 ${horizonBars} 根`;

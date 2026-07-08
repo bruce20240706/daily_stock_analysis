@@ -2,7 +2,7 @@ import type React from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { BoardEntry } from '../../types/kline';
 import { cn } from '../../utils/cn';
-import { formatCi, formatExcess, formatHitRate, formatHorizon, markerStatusLabel, planQualityLabel, unverifiedExcessNote, verifiedLabel } from '../../utils/credibility';
+import { formatCi, formatExcess, formatHitRate, formatHorizon, ggtLabel, markerStatusLabel, planQualityLabel, unverifiedExcessNote, verifiedLabel } from '../../utils/credibility';
 import { resonanceLabel, resonanceTooltip } from '../../utils/resonance';
 
 const dirLabel: Record<string, string> = { bullish: '看多', bearish: '看空', neutral: '中性' };
@@ -73,6 +73,12 @@ export const SignalBoardGroup: React.FC<GroupProps> = ({ groupKey, title, entrie
                     aria-label={resonanceTooltip(e.resonance)}
                     className="ml-1 rounded bg-accent/15 px-1 text-accent"
                   >{resonanceLabel(e.resonance)}</span>
+                )}
+                {ggtLabel(e.ggtEligible) && (
+                  <span
+                    data-testid="board-ggt"
+                    className={cn('ml-1 rounded px-1', e.ggtEligible ? 'bg-success/15 text-success' : 'bg-border/40 text-secondary-text')}
+                  >{ggtLabel(e.ggtEligible)}</span>
                 )}
               </td>
               <td>
