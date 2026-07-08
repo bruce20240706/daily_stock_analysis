@@ -91,6 +91,7 @@ export interface BoardEntry {
   baselineExcess: number | null;
   ciLowCorrected: number | null;   // family-wise 校正后 CI 下界(Inc 1c);null=legacy/无样本
   familySize: number | null;       // 同检格子数 N(Inc 1c);null=legacy
+  ggtEligible: boolean | null;    // 港股通可买性三态(Inc 2b);null=名单不可达/非HK/legacy
   status: 'ok' | 'degraded';
   degradedReason: string | null;
   resonance: ResonanceLevel;

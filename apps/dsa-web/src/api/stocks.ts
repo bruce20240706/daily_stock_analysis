@@ -91,6 +91,7 @@ type RawBoardEntry = {
   verified: boolean; ci_low: number | null; ci_high: number | null; baseline_excess: number | null;
   ci_low_corrected?: number | null;
   family_size?: number | null;
+  ggt_eligible?: boolean | null;
   status: BoardEntry['status']; degraded_reason: string | null;
   resonance?: ResonanceLevel | null;
   horizon_bars?: number | null;
@@ -112,6 +113,7 @@ const mapBoardEntry = (r: RawBoardEntry): BoardEntry => ({
   verified: r.verified, ciLow: r.ci_low ?? null, ciHigh: r.ci_high ?? null, baselineExcess: r.baseline_excess ?? null,
   ciLowCorrected: r.ci_low_corrected ?? null,
   familySize: r.family_size ?? null,
+  ggtEligible: r.ggt_eligible ?? null,
   status: r.status, degradedReason: r.degraded_reason ?? null,
   resonance: r.resonance ?? 'none',
   horizonBars: r.horizon_bars ?? null,

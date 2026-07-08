@@ -31,7 +31,8 @@ const entry = (over: Partial<BoardEntry> = {}): BoardEntry => ({
   hitRate: 0.62, hitSample: 18, verified: true, ciLow: null, ciHigh: null, baselineExcess: null,
   ciLowCorrected: null, familySize: null,
   status: 'ok', degradedReason: null, resonance: 'none',
-  horizonBars: null, signalStatus: null, planQuality: null, ...over });
+  horizonBars: null, signalStatus: null, planQuality: null,
+  ggtEligible: null, ...over });
 
 const board = (entries: BoardEntry[]): SignalsBoardResponse => ({
   asOf: 1,

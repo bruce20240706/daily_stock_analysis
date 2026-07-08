@@ -5,7 +5,7 @@ from datetime import date
 import pandas as pd
 import pytest
 from unittest.mock import patch
-from data_provider.fundamental_adapter import AkshareFundamentalAdapter, _ggt_key
+from data_provider.fundamental_adapter import AkshareFundamentalAdapter, _ggt_key, _ggt_eligible_state
 import data_provider.fundamental_adapter as fa
 
 
@@ -210,3 +210,19 @@ def test_southbound_flow_endpoint_failure_returns_none():
     with patch.object(AkshareFundamentalAdapter, "_fetch_sb_flow_df",
                       side_effect=RuntimeError("boom")):
         assert AkshareFundamentalAdapter().get_southbound_flow() is None
+
+
+def test_ggt_eligible_state_true_when_key_in_set():
+    s = {_ggt_key("00700")}
+    assert _ggt_eligible_state("hk00700", s) is True
+    assert _ggt_eligible_state("00700", s) is True          # 裸5位归一同键
+    assert _ggt_eligible_state("00700.HK", s) is True        # .HK 后缀归一同键
+
+
+def test_ggt_eligible_state_false_when_set_present_but_absent():
+    assert _ggt_eligible_state("hk09999", {_ggt_key("00700")}) is False
+
+
+def test_ggt_eligible_state_none_when_not_a_set():
+    assert _ggt_eligible_state("hk00700", None) is None
+    assert _ggt_eligible_state("hk00700", []) is None        # 非 set(空 list)→ None,非 False

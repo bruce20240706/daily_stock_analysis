@@ -30,10 +30,46 @@ from src.services.volume_price_signals import (
 )
 from src.stock_analyzer import StockTrendAnalyzer
 from src.storage import DatabaseManager
+from data_provider.fundamental_adapter import _ggt_eligible_state
 
 logger = logging.getLogger(__name__)
 
 RESONANCE_DAILY_DAYS = 750  # 共振深抓日线天数（够月线 MA20 暖机）
+
+_GGT_MANAGER = None
+_GGT_MANAGER_LOCK = threading.Lock()
+
+
+def _get_ggt_manager():
+    """看板 GGT 注解用进程级单例 manager(镜像 history_loader._get_fetcher_manager 双检锁)。
+
+    避免每 /board 请求重建整个 DataFetcherManager;eligibility set 在 fundamental_adapter
+    模块级 12h 缓存,单例只承载 get_ggt_eligibility_set 的有界调用。
+    """
+    global _GGT_MANAGER
+    if _GGT_MANAGER is None:
+        with _GGT_MANAGER_LOCK:
+            if _GGT_MANAGER is None:
+                from data_provider import DataFetcherManager
+                _GGT_MANAGER = DataFetcherManager()
+    return _GGT_MANAGER
+
+
+def _annotate_ggt(entries: list) -> list:
+    """看板后置 pass:给 HK-ok 行打港股通可买性三态(presence-only,fail-closed)。
+
+    门控 market=="HK"(大写)且 status=="ok"(排除 degraded/非HK;不特殊化 HK ETF,镜像报告);
+    一次性抓全市场 eligibility set(有界、进程级 12h 缓存),逐行成员判定;
+    浅拷贝命中行,不原地 mutate _BOARD_CACHE 缓存对象。
+    """
+    if not any(e["market"] == "HK" and e["status"] == "ok" for e in entries):
+        return entries
+    elig_set = _get_ggt_manager().get_ggt_eligibility_set()
+    return [
+        {**e, "ggt_eligible": _ggt_eligible_state(e["code"], elig_set)}
+        if (e["market"] == "HK" and e["status"] == "ok") else e
+        for e in entries
+    ]
 
 
 def _augment_payload_finer_fields(payload: dict, rows: list) -> None:
@@ -242,6 +278,7 @@ def _degraded_entry(code: str, reason: str) -> dict:
         "resonance": "none",
         "status": "degraded", "degraded_reason": reason,
         "risk_metrics": None,
+        "ggt_eligible": None,
         "oos": None,
     }
 
@@ -286,6 +323,7 @@ def build_board(codes: list, *, days: int = 120, refresh: bool = False,
                                          ttl_s=ttl_s, interval=interval),
                 codes,
             ))
+    entries = _annotate_ggt(entries)
     counts = {"buy": 0, "hold": 0, "sell": 0, "unavailable": 0}
     degraded_codes = []
     for e in entries:

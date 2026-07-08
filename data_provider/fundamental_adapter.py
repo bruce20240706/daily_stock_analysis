@@ -54,6 +54,16 @@ def _ggt_key(code: str) -> str:
     return norm
 
 
+def _ggt_eligible_state(code: str, elig_set) -> Optional[bool]:
+    """港股通可买性三态(fail-closed):elig_set 非 set → None(unknown);否则本股归一键是否在成份集。
+
+    与 base.py `get_ggt_context` 的 eligibility 推断同源,防读写两处判定漂移。
+    """
+    if not isinstance(elig_set, set):
+        return None
+    return _ggt_key(code) in elig_set
+
+
 _DIVIDEND_KEYWORD_MAP: Dict[str, List[str]] = {
     "per_share": [
         "每股派息",

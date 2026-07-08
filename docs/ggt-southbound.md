@@ -66,9 +66,9 @@ Inc 2 在 HK 标的分析报告中新增「港股通」南向维度：确定性�
 - **presence-only**：GGT 块在 `data_perspective.ggt_context` 中，成功抓到至少一项才出现；三项数据面独立展示，某一项失败不影响另外两项。
 - **纯展示、不影响决策**：不喂 LLM prompt、不进 `decision_stability`、不产生任何 bias、对信号/回测完全只读（与融资融券章节记载的分析原则一致）。
 
-## 看板注解 defer 到 Inc 2b
+## 看板可买性注解（Inc 2b，已落地）
 
-本增量**不**在信号看板（`BoardEntry`）上呈现港股通可买性注解，原因是基础设施边界而非产品选择：`data_provider/fundamental_adapter.py` 中的港股通成份/持股/净流缓存是**进程内模块级缓存**（`threading.Lock` 保护的字典），而看板刷新与报告生成在本仓库的部署形态中可能运行在**不同进程**（systemd `--schedule` 常驻进程 vs. `uvicorn` API 服务进程）——跨进程时模块级缓存互不可见，看板侧的 `eligible` 读取会结构性地永远命中 `None`（每次都当作缓存未命中重新抓取甚至永远拿不到有效值，且无法验证一致性）。本增量的报告 section（本文档描述的三项数据面）由**同一次报告生成流程**内联调用消费，不跨进程，没有这个问题。看板维度的注解留给后续增量（Inc 2b），届时需要引入跨进程共享缓存（如落库或外部缓存层）才能保证语义正确。
+信号看板每行呈现港股通可买性 eligibility 三态徽章（`True`→「港股通」/ `False`→「非港股通」/ `None`→无徽章）。**实现要点**：看板 `GET /api/v1/signals/board` 在 uvicorn 请求内按需计算（无 systemd/scheduler 预计算），在**自身请求进程内**自抓一次全市场 eligibility set（`get_ggt_eligibility_set`，有界、进程级 12h 缓存），对每个 `market=="HK" and status=="ok"` 的行做成员判定。**不需要跨进程共享缓存**：看板从不依赖读取报告进程写入的缓存——即便报告生成（systemd `--schedule`）与 API（uvicorn）分处不同进程，看板也在自身请求进程内独立完成有界自抓 + 12h 缓存，故与进程拓扑无关（早期 defer 论据误以为看板须读取报告进程的缓存才能拿到 eligibility）。只呈现 eligibility；个股持股/市场级净流仍仅在报告 section 呈现，看板不注解这两项。HK ETF（如 2800.HK）不在成份表中，镜像报告口径判定为 `False`。
 
 ## 不动的既有行为
 
@@ -82,7 +82,6 @@ Inc 2 在 HK 标的分析报告中新增「港股通」南向维度：确定性�
 ## v1 已知局限
 
 - 仅最新可得的持股/净流快照，无趋势/多日序列。
-- 看板可买性注解 deferred 至 Inc 2b（跨进程缓存基础设施缺口）。
 - 无专用 Web 组件（同融资融券/资金面，经 notification markdown + 报告 payload 呈现）。
 
 ## 真网验证结果（2026-07-06 于 eastmoney 可达环境完成）

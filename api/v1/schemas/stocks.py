@@ -211,6 +211,7 @@ class BoardEntry(BaseModel):
     baseline_excess: Optional[float] = Field(None, description="相对基准超额（M3-A6），无则 null")
     ci_low_corrected: Optional[float] = Field(None, description="family-wise 多重检验校正后的 CI 下界(Inc 1c);null=legacy 行未重跑或无样本")
     family_size: Optional[int] = Field(None, description="该统计所在 family 的同检格子数 N(Inc 1c);null=legacy 行")
+    ggt_eligible: Optional[bool] = Field(None, description="港股通成份可买性三态:True=港股通标的/False=非成份/None=名单不可达或非HK(Inc 2b,presence-only 看板注解)")
     resonance: Literal["none", "weekly", "weekly_monthly"] = Field(
         "none", description="多周期共振档位（M4-A）"
     )
