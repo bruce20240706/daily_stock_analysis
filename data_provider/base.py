@@ -3608,7 +3608,7 @@ class DataFetcherManager:
         冷缓存首个报告可能 partial（慢腿各自暖化）；12h 缓存后各腿命中即快。
         """
         from src.config import get_config
-        from data_provider.fundamental_adapter import _ggt_key, _ggt_eligible_state
+        from data_provider.fundamental_adapter import _ggt_eligible_state
 
         config = get_config()
         code = normalize_stock_code(stock_code)
