@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 """Inc 2b:看板港股通可买性注解后置 pass。"""
-from unittest.mock import patch
-
 from data_provider.fundamental_adapter import _ggt_key
 import src.services.signal_board_service as sbs
 
