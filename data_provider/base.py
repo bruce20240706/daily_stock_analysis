@@ -3608,7 +3608,7 @@ class DataFetcherManager:
         冷缓存首个报告可能 partial（慢腿各自暖化）；12h 缓存后各腿命中即快。
         """
         from src.config import get_config
-        from data_provider.fundamental_adapter import _ggt_key
+        from data_provider.fundamental_adapter import _ggt_key, _ggt_eligible_state
 
         config = get_config()
         code = normalize_stock_code(stock_code)
@@ -3643,7 +3643,7 @@ class DataFetcherManager:
                 return None
 
         elig_set = _fetch_leg(lambda: adapter.get_ggt_eligibility_set(), "ggt_eligibility")
-        eligible = (_ggt_key(code) in elig_set) if isinstance(elig_set, set) else None
+        eligible = _ggt_eligible_state(code, elig_set)
         holding = _fetch_leg(lambda: adapter.get_ggt_holding(code), "ggt_holding")
         flow = _fetch_leg(lambda: adapter.get_southbound_flow(), "ggt_southbound_flow")
 
@@ -3661,6 +3661,25 @@ class DataFetcherManager:
             [{"provider": "ggt", "result": status, "duration_ms": 0}],
             [],
         )
+
+    def get_ggt_eligibility_set(self):
+        """港股通全市场成份集(有界、fail-closed)。供看板注解一次性获取后逐行成员判定。
+
+        适配器 get_ggt_eligibility_set 本身不经 G8 有界超时(那是 get_ggt_context._fetch_leg
+        提供的);此处包 _run_with_retry 给看板路径同款护栏。超时/异常/非 set → None。
+        """
+        from src.config import get_config
+        cap = max(0.0, float(get_config().ggt_fetch_timeout_seconds))
+        if cap <= 0:
+            return None
+        try:
+            payload, _err, _ms = self._run_with_retry(
+                lambda: self._fundamental_adapter.get_ggt_eligibility_set(),
+                cap, "ggt_eligibility",
+            )
+            return payload if isinstance(payload, set) else None
+        except Exception:
+            return None
 
     def get_board_context(self, stock_code: str, budget_seconds: Optional[float] = None) -> Dict[str, Any]:
         """板块榜单块（fail-open）。"""

@@ -232,3 +232,41 @@ def test_offshore_context_us_market_ggt_not_supported():
     spy.assert_not_called()
     assert ctx["coverage"]["ggt"] == "not_supported"
     assert ctx["ggt"]["data"] == {"eligible": None, "holding": None, "southbound_flow": None}
+
+
+# ---------------------------------------------------------------------------
+# get_ggt_eligibility_set (manager-level, bounded)
+# ---------------------------------------------------------------------------
+
+def test_get_ggt_eligibility_set_delegates_and_passes_through(monkeypatch):
+    mgr = _mgr()
+    monkeypatch.setattr(
+        mgr._fundamental_adapter, "get_ggt_eligibility_set",
+        lambda: {_ggt_key("00700")},
+    )
+    got = mgr.get_ggt_eligibility_set()
+    assert isinstance(got, set) and _ggt_key("00700") in got   # 透传 set,非返 tuple
+
+
+def test_get_ggt_eligibility_set_none_on_adapter_none(monkeypatch):
+    mgr = _mgr()
+    monkeypatch.setattr(mgr._fundamental_adapter, "get_ggt_eligibility_set", lambda: None)
+    assert mgr.get_ggt_eligibility_set() is None
+
+
+def test_get_ggt_eligibility_set_bounded_on_hung_adapter(monkeypatch):
+    # 挂起适配器(网络库无超时场景)→ 方法在 leg_cap 内返 None,不阻塞。
+    cfg = SimpleNamespace(fundamental_retry_max=1, ggt_fetch_timeout_seconds=0.3)
+
+    def slow():
+        time.sleep(3)
+        return {_ggt_key("00700")}
+
+    mgr = _mgr()
+    monkeypatch.setattr(mgr._fundamental_adapter, "get_ggt_eligibility_set", slow)
+    with patch("src.config.get_config", return_value=cfg):
+        t0 = time.monotonic()
+        got = mgr.get_ggt_eligibility_set()
+        elapsed = time.monotonic() - t0
+    assert elapsed < 2.0, f"get_ggt_eligibility_set blocked {elapsed:.2f}s on hung adapter"
+    assert got is None
