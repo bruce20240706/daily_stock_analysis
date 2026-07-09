@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for LLM claim-validation primitives (Inc 3)."""
 
+import re
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -272,7 +273,31 @@ _SENTINEL_CONTEXT = {
 }
 
 
+# 每个 fact 的期望值都由 _SENTINEL_CONTEXT 唯一确定。
+# 精确相等断言同时锁住三件事：键集完整、字段没串位、量纲转换正确。
+_EXPECTED_SENTINEL_FACTS = {
+    "ma5": 22222.2222,
+    "ma10": 33333.3333,
+    "ma20": 44444.4444,
+    "volume_ratio": 66666.6666,
+    "turnover_rate": 77777.7777,
+    "profit_ratio": 88.9,      # f"{0.888888:.1%}" == "88.9%" —— 反解，不是 0.888888*100
+    "avg_cost": 99999.9999,
+    "bias_ma5": 8.77,          # f"{8.7654:+.2f}" == "+8.77"
+    "current_price": [11111.1111, 55555.5555],   # today['close'] 与 realtime['price'] 的值集合
+}
+
+
 class TestCollectPromptFacts(unittest.TestCase):
+    def test_exact_fact_mapping_pins_every_key(self) -> None:
+        """完整性 + 字段身份。
+
+        drift-lock 的子串断言对「漏掉一个 fact」和「ma10/ma20 互换」是盲的
+        —— 两个值都真实出现在 prompt 里，只是挂在对方标签下。
+        精确映射断言是唯一能逮住这两类的锁。
+        """
+        self.assertEqual(collect_prompt_facts(_SENTINEL_CONTEXT), _EXPECTED_SENTINEL_FACTS)
+
     def test_current_price_is_a_value_set(self) -> None:
         facts = collect_prompt_facts(_SENTINEL_CONTEXT)
         self.assertEqual(sorted(facts["current_price"]), [11111.1111, 55555.5555])
@@ -320,13 +345,20 @@ class TestPromptFactsDriftLock(unittest.TestCase):
 
     def _assert_facts_in_prompt(self, prompt: str) -> None:
         facts = collect_prompt_facts(_SENTINEL_CONTEXT)
+        # 键集完整性：漏掉一个 fact 不能悄悄通过
+        self.assertEqual(set(facts), set(_EXPECTED_SENTINEL_FACTS))
         for key, value in facts.items():
             candidates = value if isinstance(value, list) else [value]
             for number in candidates:
-                self.assertIn(
-                    str(number),
+                token = str(number)
+                # 数字边界：裸 `in` 会让 '88.9' 匹配到 prompt 里的 '88.89%'，
+                # 于是 prompt 改了格式而 facts 没跟上时 drift-lock 反而不红。
+                pattern = rf"(?<![\d.]){re.escape(token)}(?![\d])"
+                self.assertRegex(
                     prompt,
-                    f"fact {key}={number} 未出现在 prompt 里 —— collect_prompt_facts 与 _format_prompt 已漂移",
+                    pattern,
+                    f"fact {key}={token} 未以完整数字出现在 prompt 里 —— "
+                    f"collect_prompt_facts 与 _format_prompt 已漂移",
                 )
 
     def test_drift_lock_legacy_branch(self) -> None:
