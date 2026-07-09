@@ -223,3 +223,84 @@ def validate_structure(sniper_points: Any) -> Dict[str, Any]:
     if comparable == 0:
         return {"status": "not_applicable", "reason": "insufficient_fields", "violations": []}
     return {"status": "ok", "reason": None, "violations": []}
+
+
+def _as_finite_float(value: Any) -> Optional[float]:
+    if _is_claim_absent(value):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _rendered(fmt: str, value: Any) -> Optional[float]:
+    """按 prompt 的格式化串渲染后再反解回 float。
+
+    fact 必须与 prompt 里那个 token **按构造相等**：
+    `0.7234 * 100` 是 72.34000000000001，而 prompt 写的是 "72.3%"。
+    """
+    number = _as_finite_float(value)
+    if number is None:
+        return None
+    text = format(number, fmt).rstrip("%")
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def collect_prompt_facts(context: Any) -> Dict[str, Any]:
+    """采集「本次实际渲染进 prompt 的数值」。
+
+    这是 `_format_prompt` 的并列纯函数（不改 `_format_prompt`：它有约 30 个
+    测试断言其字符串返回值，且 GeminiAnalyzer 是跨线程共享的单例，
+    实例属性存 facts 会有竞态）。两者的漂移由 drift-lock 测试锁定。
+    """
+    if not isinstance(context, dict):
+        return {}
+    facts: Dict[str, Any] = {}
+
+    today = context.get("today") if isinstance(context.get("today"), dict) else {}
+    prices: List[float] = []
+    close = _as_finite_float(today.get("close"))
+    if close is not None:
+        prices.append(close)
+    for key in ("ma5", "ma10", "ma20"):
+        number = _as_finite_float(today.get(key))
+        if number is not None:
+            facts[key] = number
+
+    if isinstance(context.get("realtime"), dict):
+        realtime = context["realtime"]
+        price = _as_finite_float(realtime.get("price"))
+        if price is not None:
+            prices.append(price)
+        ratio = _as_finite_float(realtime.get("volume_ratio"))
+        if ratio is not None:
+            facts["volume_ratio"] = ratio
+        turnover = _as_finite_float(realtime.get("turnover_rate"))
+        if turnover is not None:
+            facts["turnover_rate"] = turnover
+
+    if isinstance(context.get("chip"), dict):
+        chip = context["chip"]
+        profit = _rendered(".1%", chip.get("profit_ratio", 0))
+        if profit is not None:
+            facts["profit_ratio"] = profit
+        avg_cost = _as_finite_float(chip.get("avg_cost"))
+        if avg_cost is not None:
+            facts["avg_cost"] = avg_cost
+
+    if isinstance(context.get("trend_analysis"), dict):
+        # 直接读未 sanitize 的 trend：_sanitize_trend_analysis_for_prompt 是纯函数，
+        # 只改写 signal_reasons / risk_factors / prompt_*，bias_ma5 原样拷贝。
+        # 若将来它开始改写 bias_ma5，drift-lock 测试会立刻变红。
+        bias = _rendered("+.2f", context["trend_analysis"].get("bias_ma5", 0))
+        if bias is not None:
+            facts["bias_ma5"] = bias
+
+    if prices:
+        facts["current_price"] = prices
+    return facts

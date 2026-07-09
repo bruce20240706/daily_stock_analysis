@@ -2,6 +2,8 @@
 """Tests for LLM claim-validation primitives (Inc 3)."""
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from src.claim_validation import (
     _is_claim_absent,
@@ -230,6 +232,108 @@ class TestValidateStructure(unittest.TestCase):
             out = validate_structure(bad)
             self.assertEqual(out["status"], "not_applicable", bad)
             self.assertEqual(out["reason"], "no_sniper_points")
+
+
+from src.claim_validation import collect_prompt_facts  # noqa: E402
+
+
+# 唯一哨兵值：消除「短字面量恒真」——若用 0 / 1 这类值，
+# "0" 在 prompt 里到处都是，drift-lock 的子串断言会恒绿。
+_SENTINEL_CONTEXT = {
+    "code": "600519",
+    "stock_name": "贵州茅台",
+    "date": "2026-03-16",
+    "today": {
+        "close": 11111.1111,
+        "ma5": 22222.2222,
+        "ma10": 33333.3333,
+        "ma20": 44444.4444,
+        "pct_chg": 1.11,
+        "volume": 123456,
+        "amount": 987654321,
+    },
+    "realtime": {
+        "price": 55555.5555,
+        "volume_ratio": 66666.6666,
+        "turnover_rate": 77777.7777,
+    },
+    "chip": {
+        "profit_ratio": 0.888888,
+        "avg_cost": 99999.9999,
+        "concentration_90": 0.123456,
+        "concentration_70": 0.234567,
+    },
+    "trend_analysis": {
+        "bias_ma5": 8.7654,
+        "bias_ma10": 1.2345,
+        "trend_status": "多头",
+        "signal_score": 60,
+    },
+}
+
+
+class TestCollectPromptFacts(unittest.TestCase):
+    def test_current_price_is_a_value_set(self) -> None:
+        facts = collect_prompt_facts(_SENTINEL_CONTEXT)
+        self.assertEqual(sorted(facts["current_price"]), [11111.1111, 55555.5555])
+
+    def test_percent_fields_are_reverse_parsed_from_rendered_string(self) -> None:
+        facts = collect_prompt_facts(_SENTINEL_CONTEXT)
+        # prompt 写的是 f"{0.888888:.1%}" == "88.9%"，不是 88.8888
+        self.assertEqual(facts["profit_ratio"], 88.9)
+        # prompt 写的是 f"{8.7654:+.2f}%" == "+8.77%"
+        self.assertEqual(facts["bias_ma5"], 8.77)
+
+    def test_bare_fields_are_raw(self) -> None:
+        facts = collect_prompt_facts(_SENTINEL_CONTEXT)
+        self.assertEqual(facts["ma5"], 22222.2222)
+        self.assertEqual(facts["avg_cost"], 99999.9999)
+        self.assertEqual(facts["volume_ratio"], 66666.6666)
+
+    def test_missing_blocks_yield_missing_facts(self) -> None:
+        ctx = {"today": {"close": 10.0, "ma5": 11.0}}
+        facts = collect_prompt_facts(ctx)
+        self.assertEqual(facts["current_price"], [10.0])
+        self.assertEqual(facts["ma5"], 11.0)
+        for absent in ("volume_ratio", "turnover_rate", "profit_ratio", "avg_cost", "bias_ma5"):
+            self.assertNotIn(absent, facts)
+
+    def test_non_numeric_is_skipped(self) -> None:
+        ctx = {"today": {"close": "N/A", "ma5": None}}
+        self.assertEqual(collect_prompt_facts(ctx), {})
+
+
+class TestPromptFactsDriftLock(unittest.TestCase):
+    """facts 一旦对不上 prompt，守卫就会拿错的基准去判 LLM「幻觉」，
+    反而制造假警报。这个测试是 collect_prompt_facts 与 _format_prompt
+    之间唯一的防漂移保证。"""
+
+    def _render(self, *, legacy: bool) -> str:
+        from src.analyzer import GeminiAnalyzer
+
+        with patch.object(GeminiAnalyzer, "_init_litellm", return_value=None):
+            analyzer = GeminiAnalyzer()
+        analyzer._use_legacy_default_prompt_override = legacy
+        fake_cfg = SimpleNamespace(news_max_age_days=30, news_strategy_profile="medium")
+        with patch("src.analyzer.get_config", return_value=fake_cfg):
+            return analyzer._format_prompt(dict(_SENTINEL_CONTEXT), "贵州茅台", news_context=None)
+
+    def _assert_facts_in_prompt(self, prompt: str) -> None:
+        facts = collect_prompt_facts(_SENTINEL_CONTEXT)
+        for key, value in facts.items():
+            candidates = value if isinstance(value, list) else [value]
+            for number in candidates:
+                self.assertIn(
+                    str(number),
+                    prompt,
+                    f"fact {key}={number} 未出现在 prompt 里 —— collect_prompt_facts 与 _format_prompt 已漂移",
+                )
+
+    def test_drift_lock_legacy_branch(self) -> None:
+        self._assert_facts_in_prompt(self._render(legacy=True))
+
+    def test_drift_lock_non_legacy_branch(self) -> None:
+        self._assert_facts_in_prompt(self._render(legacy=False))
 
 
 if __name__ == "__main__":
