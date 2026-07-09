@@ -28,6 +28,7 @@ from src.agent.llm_adapter import (
     register_fallback_model_pricing,
 )
 from src.agent.skills.defaults import CORE_TRADING_SKILL_POLICY_ZH
+from src.claim_validation import collect_prompt_facts
 from src.config import (
     Config,
     extra_litellm_params,
@@ -1779,6 +1780,9 @@ class AnalysisResult:
     # ========== 基本面上下文（仅运行时，用于通知拼装；不持久化到 to_dict）==========
     fundamental_context: Optional[Dict[str, Any]] = None
 
+    # ========== claim-validation 内部快照（Inc 3；不进 to_dict / 不落库 / 不进报告）==========
+    prompt_facts: Optional[Dict[str, Any]] = None  # 本次实际渲染进 prompt 的数值快照
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -2989,7 +2993,16 @@ class GeminiAnalyzer:
                 report_language=report_language,
                 analysis_context_pack_summary=analysis_context_pack_summary,
             )
-            
+            # Inc 3: 与 _format_prompt 消费同一个 context 的并列纯函数。
+            # 关闭时一次也不调用 → 字节级不变。
+            # 自带 try/except：守卫绝不能把一个有效的 LLM 结果拖垮成兜底对象。
+            _claim_facts = None
+            if getattr(self._get_runtime_config(), "llm_claim_validation_enabled", False):
+                try:
+                    _claim_facts = collect_prompt_facts(context)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[claim_validation] collect_prompt_facts failed, skipping: %s", exc)
+
             config = self._get_runtime_config()
             model_name = config.litellm_model or "unknown"
             logger.info(f"========== AI 分析 {name}({code}) ==========")
@@ -3102,6 +3115,9 @@ class GeminiAnalyzer:
             persist_llm_usage(llm_usage, model_used, call_type="analysis", stock_code=code)
 
             logger.info(f"[LLM解析] {name}({code}) 分析完成: {result.trend_prediction}, 评分 {result.sentiment_score}")
+
+            if result is not None:
+                result.prompt_facts = _claim_facts
 
             return result
             

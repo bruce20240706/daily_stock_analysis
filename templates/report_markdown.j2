@@ -152,6 +152,22 @@
 
 {% endif %}
 
+{% set cv = dashboard.get('claim_validation') if dashboard else None -%}
+{% if cv %}
+{% set _t = cv.get('transcription') or {} %}
+{% set _s = cv.get('structural') or {} %}
+{% if _t.get('status') == 'mismatch' or _s.get('status') == 'violation' %}
+**⚠️ {{ labels.claim_validation_heading }}**
+{% if _t.get('status') == 'mismatch' %}
+- {{ labels.claim_mismatch_text.format(count=(_t.get('mismatches') or [])|length) }}
+{% endif %}
+{% if _s.get('status') == 'violation' %}
+- {{ labels.claim_unexecutable_text }}
+{% endif %}
+
+{% endif %}
+{% endif -%}
+
 {% if battle %}
 ### 🎯 {{ labels.battle_plan_heading }}
 

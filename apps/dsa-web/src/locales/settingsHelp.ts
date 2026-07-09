@@ -1194,6 +1194,17 @@ const settingsHelpZhCN: SettingsHelpMap = {
     impact: ['影响分析报告中大盘概览部分的内容和视觉呈现。'],
     notes: ['大盘分析依赖对应市场的指数数据源可用性。'],
   },
+  'settings.ai_model.LLM_CLAIM_VALIDATION_ENABLED': {
+    title: 'LLM 数值校验守卫',
+    summary: '启用后，系统会把 LLM 在报告里陈述的价位/指标数值，与 prompt 中实际喂给它的数值逐一核对，并检查其买卖计划是否内部自洽。',
+    usage: '设为 true 后，个股分析报告会在检出问题时追加一段「数值校验」提示；不一致时本次结论的置信度会被下调。',
+    valueNotes: [
+      'false（默认）：不做任何校验，报告与现状逐字节一致。',
+      'true：检出转录不一致 → 置信度「高」封顶为「中」；检出买卖计划不自洽 → 标注该计划不可执行。',
+    ],
+    impact: ['仅标注与降权，绝不覆盖 LLM 给出的数值、不改变买/卖/观望方向、不触发重试。'],
+    notes: ['agent 模式下不产生 prompt，故转录类校验会标记为「不适用」，结构类校验仍然生效。'],
+  },
 };
 
 const settingsHelpEnUS: SettingsHelpMap = {
@@ -2206,6 +2217,15 @@ const settingsHelpEnUS: SettingsHelpMap = {
     ],
     impact: ['Affects the market overview section in analysis reports.'],
     notes: ['Market review depends on the availability of index data sources for the selected markets.'],
+  },
+  'settings.ai_model.LLM_CLAIM_VALIDATION_ENABLED': {
+    title: 'LLM Claim Validation',
+    summary: 'Cross-checks the numbers the LLM states against the numbers actually fed to it, and validates that its trade plan is internally consistent.',
+    valueNotes: [
+      'false (default): no validation; reports are byte-for-byte unchanged.',
+      'true: transcription mismatch caps High confidence to Medium; an inconsistent trade plan is marked not executable.',
+    ],
+    impact: ['Annotate and downgrade only — values are never overwritten and the decision direction is never changed.'],
   },
 };
 

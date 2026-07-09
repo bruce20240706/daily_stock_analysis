@@ -917,6 +917,10 @@ class Config:
     intraday_backtest_enabled: bool = False
     intraday_backtest_schedule_minutes: int = 60
 
+    # LLM claim-validation 守卫(Inc 3):把 LLM 陈述的数值与 prompt 喂给它的数值交叉核对
+    # 默认关闭;开启后不一致会标注并封顶置信度,绝不覆盖数值、不改决策方向
+    llm_claim_validation_enabled: bool = False
+
     # === 日志配置 ===
     log_dir: str = "./logs"  # 日志文件目录
     log_level: str = "INFO"  # 日志级别
@@ -1960,6 +1964,9 @@ class Config:
             intraday_backtest_schedule_minutes=parse_env_int(
                 os.getenv('INTRADAY_BACKTEST_SCHEDULE_MINUTES'), 60,
                 field_name='INTRADAY_BACKTEST_SCHEDULE_MINUTES', minimum=1,
+            ),
+            llm_claim_validation_enabled=parse_env_bool(
+                os.getenv('LLM_CLAIM_VALIDATION_ENABLED'), False,
             ),
         )
     

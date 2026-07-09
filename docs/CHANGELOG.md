@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 新增 LLM 数值校验守卫(`LLM_CLAIM_VALIDATION_ENABLED`,默认关闭):把 LLM 陈述的价位/指标与 prompt 实际喂入的数值交叉核对,并校验买卖计划内部自洽;不一致时标注并封顶置信度,绝不覆盖数值、不改决策方向、不触发重试。详见 `docs/llm-claim-validation.md`。
 - [新功能] 信号看板每行呈现港股通(HKSC)可买性三态徽章(True→港股通/False→非港股通/None→无徽章,presence-only 纯展示不影响排序/决策);看板 uvicorn 请求内一次性自抓全市场成份集(有界 GGT_FETCH_TIMEOUT_SECONDS+进程级 12h 缓存+fail-closed),不需跨进程共享缓存;HK ETF 镜像报告口径
 - [新功能] HK 标的分析报告新增港股通(HKSC)南向维度:成份可买性(港股通标的/非标的/名单不可达三态)、个股南向持股(数量/市值/占发行股比)、市场级南向净流(EOD 成交净买额),经 akshare 东财端点抓取(12h 缓存+300s 负缓存,东财不可达时 fail-closed 不编造);纯展示不影响信号/决策(看板可买性注解见本段上方条目)
 - [修复] 港股通南向净流腿匹配订正(真网核验 2026-07-06):`stock_hsgt_fund_flow_summary_em` 的 `类型` 列实为连接程序名(沪港通/深港通,不含"港股通"子串),原按 `类型` 子串匹配命中 0 行致净流永久 `None`;改按语义列 `资金方向` 含"南"判定(兜底退 `板块` 含"港股通"),并订正文档币种为亿元人民币(资金净流入列=420 恰为港股通每日 420 亿 RMB 额度)

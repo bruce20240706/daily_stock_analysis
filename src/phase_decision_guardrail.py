@@ -226,9 +226,13 @@ def _merge_limitations(*groups: Any, limit: int = 5) -> List[str]:
     return merged
 
 
-def _is_high_confidence(value: Any) -> bool:
+def is_high_confidence(value: Any) -> bool:
+    """置信度是否为「高」。claim-validation 守卫共用此判据，防止两处漂移。"""
     text = _safe_text(value).lower()
     return text in {"高", "high"}
+
+
+_is_high_confidence = is_high_confidence  # 向后兼容的私有别名（本模块内既有调用点）
 
 
 def _has_immediate_buy_sell_signal(

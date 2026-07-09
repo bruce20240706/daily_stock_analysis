@@ -38,6 +38,7 @@ from src.analyzer import (
     populate_decision_action_fields,
     stabilize_decision_with_structure,
 )
+from src.claim_validation import apply_claim_validation, extract_llm_claims
 from src.notification import NotificationService, NotificationChannel
 from src.report_language import (
     infer_decision_type_from_advice,
@@ -619,6 +620,12 @@ class StockAnalysisPipeline:
                 result.current_price = realtime_data.get('price')
                 result.change_pct = realtime_data.get('change_pct')
 
+            # Step 7.5b: claim-validation 快照(Inc 3)
+            # 必须在任何 in-place 回填之前 —— 之后 dashboard 里的值可能是系统填的，不是 LLM 的 claim。
+            claim_snapshot = None
+            if result and getattr(self.config, "llm_claim_validation_enabled", False):
+                claim_snapshot = extract_llm_claims(result)
+
             # Step 7.6: chip_structure fallback (Issue #589) and unavailable collapse
             if result:
                 normalize_chip_structure_availability(result, chip_data)
@@ -649,6 +656,18 @@ class StockAnalysisPipeline:
                 )
                 if adjustments:
                     logger.info("[phase_decision_guardrail] Applied adjustments for %s: %s", code, adjustments)
+                # claim-validation 判定与降权(Inc 3)
+                # 必须在 apply_phase_decision_guardrails 之后 —— 否则会抑制它的高→低 安全降级。
+                if claim_snapshot is not None:
+                    claim_actions = apply_claim_validation(
+                        result,
+                        claim_snapshot,
+                        getattr(result, "prompt_facts", None),
+                        language=getattr(result, "report_language", None)
+                        or getattr(self.config, "report_language", "zh"),
+                    )
+                    if claim_actions:
+                        logger.info("[claim_validation] Applied actions for %s: %s", code, claim_actions)
                 if isinstance(fundamental_context, dict):
                     result.fundamental_context = fundamental_context
                 result.market_phase_summary = market_phase_summary
@@ -1145,6 +1164,13 @@ class StockAnalysisPipeline:
                         "[LLM完整性] integrity_mode=agent_weak 必填字段缺失 %s，已占位补全",
                         missing,
                     )
+            # claim-validation 快照(Inc 3)：必须在任何 in-place 回填之前。
+            # agent 路径不经 _format_prompt，result.prompt_facts 恒为 None
+            # → 转录类 not_applicable，结构类照跑。
+            claim_snapshot = None
+            if result and getattr(self.config, "llm_claim_validation_enabled", False):
+                claim_snapshot = extract_llm_claims(result)
+
             # chip_structure fallback (Issue #589), before save_analysis_history
             if result and chip_data is not None:
                 normalize_chip_structure_availability(result, chip_data)
@@ -1180,6 +1206,17 @@ class StockAnalysisPipeline:
                 )
                 if adjustments:
                     logger.info("[phase_decision_guardrail] Applied agent adjustments for %s: %s", code, adjustments)
+                # claim-validation 判定与降权(Inc 3)：必须在 phase guardrail 之后。
+                if claim_snapshot is not None:
+                    claim_actions = apply_claim_validation(
+                        result,
+                        claim_snapshot,
+                        getattr(result, "prompt_facts", None),
+                        language=getattr(result, "report_language", None)
+                        or getattr(self.config, "report_language", "zh"),
+                    )
+                    if claim_actions:
+                        logger.info("[claim_validation] Applied agent actions for %s: %s", code, claim_actions)
                 if isinstance(fundamental_context, dict):
                     result.fundamental_context = fundamental_context
                 result.market_phase_summary = market_phase_summary

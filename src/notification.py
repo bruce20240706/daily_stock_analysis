@@ -122,6 +122,29 @@ def _render_ggt_section(ggt: Optional[dict], report_language: str) -> str:
     return "\n".join(lines)
 
 
+def _render_claim_validation_section(claim_validation: Optional[dict], report_language: str) -> str:
+    """渲染 LLM 数值校验提示(presence-only；仅在检出问题时出现)。
+
+    转录类 ok / not_applicable、结构类 ok / not_applicable → 返回空串，
+    报告与守卫未启用时逐字节一致。
+    """
+    if not claim_validation:
+        return ""
+    labels = get_report_labels(report_language)
+    transcription = claim_validation.get("transcription") or {}
+    structural = claim_validation.get("structural") or {}
+    lines = []
+    if transcription.get("status") == "mismatch":
+        count = len(transcription.get("mismatches") or [])
+        lines.append(labels["claim_mismatch_text"].format(count=count))
+    if structural.get("status") == "violation":
+        lines.append(labels["claim_unexecutable_text"])
+    if not lines:
+        return ""
+    body = "\n".join(f"- {line}" for line in lines)
+    return f"**⚠️ {labels['claim_validation_heading']}**\n{body}"
+
+
 if TYPE_CHECKING:
     from src.analyzer import AnalysisResult
 
@@ -1329,6 +1352,13 @@ class NotificationService(
                     ggt_section = _render_ggt_section(data_persp.get('ggt_context'), report_language)
                     if ggt_section:
                         report_lines.extend([ggt_section, ""])
+
+                # LLM 数值校验(Inc 3；presence-only；顶层 dashboard 键)
+                claim_section = _render_claim_validation_section(
+                    dashboard.get('claim_validation') if dashboard else None, report_language
+                )
+                if claim_section:
+                    report_lines.extend([claim_section, ""])
 
                 # ========== 作战计划 ==========
                 battle = dashboard.get('battle_plan', {}) if dashboard else {}
