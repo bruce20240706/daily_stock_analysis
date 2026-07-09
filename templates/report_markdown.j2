@@ -152,7 +152,7 @@
 
 {% endif %}
 
-{% set cv = dashboard.get('claim_validation') if dashboard else None %}
+{% set cv = dashboard.get('claim_validation') if dashboard else None -%}
 {% if cv %}
 {% set _t = cv.get('transcription') or {} %}
 {% set _s = cv.get('structural') or {} %}
@@ -166,7 +166,7 @@
 {% endif %}
 
 {% endif %}
-{% endif %}
+{% endif -%}
 
 {% if battle %}
 ### 🎯 {{ labels.battle_plan_heading }}
