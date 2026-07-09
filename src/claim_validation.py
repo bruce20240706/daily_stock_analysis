@@ -370,6 +370,8 @@ def _validate_transcription(claims: Dict[str, Any], facts: Optional[Dict[str, An
             continue
         claimed, decimals = parsed
         candidates = fact if isinstance(fact, (list, tuple)) else [fact]
+        if not candidates:
+            continue  # 空值集：无可比对的基准，视同 fact 缺失
         checked += 1
         if any(claim_matches_fact(claimed, decimals, candidate) for candidate in candidates):
             continue
@@ -405,6 +407,10 @@ def apply_claim_validation(
     包括更严厉的高→低 安全降级。结果是开启防幻觉守卫反而让阶段护栏变得不保守。
 
     cap 是单调的：仅当仍为「高」时降到「中」，否则 no-op，永不回撤 guardrail 的降级。
+    `confidence_capped_claim_mismatch` 只在 cap 真的发生（置信度从「高」降到
+    「中」）时才会出现在返回的 actions 里；若置信度已是中/低，cap 是 no-op，
+    action code 不会出现——但 `mismatch` 判定本身仍完整写进
+    `dashboard['claim_validation']['transcription']`，不会丢失。
     """
     if claims is None:
         return []
@@ -417,9 +423,14 @@ def apply_claim_validation(
         transcription = _validate_transcription(claims.get("transcription") or {}, facts)
         structural = validate_structure(claims.get("sniper_points"))
 
-        if transcription["status"] == "mismatch":
-            if is_high_confidence(getattr(result, "confidence_level", "")):
-                result.confidence_level = "Medium" if language == "en" else "中"
+        # action code 与**真实的 cap 动作**绑定：置信度已是中/低时 cap 是 no-op，
+        # 不能报 "capped"。与 phase_decision_guardrail 的
+        # confidence_capped_core_data_degraded 门控方式一致。
+        # 「mismatch 发生过」这个信息在 transcription.status 里，不会丢。
+        if transcription["status"] == "mismatch" and is_high_confidence(
+            getattr(result, "confidence_level", "")
+        ):
+            result.confidence_level = "Medium" if language == "en" else "中"
             actions.append("confidence_capped_claim_mismatch")
         if structural["status"] == "violation":
             actions.append("sniper_points_unexecutable")

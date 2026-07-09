@@ -538,6 +538,36 @@ class TestApplyClaimValidation(unittest.TestCase):
         self.assertEqual(cv["transcription"]["status"], "mismatch")
         self.assertEqual(cv["transcription"]["mismatches"][0]["field"], "price_position.ma5")
 
+    def test_cap_no_op_omits_action_code(self) -> None:
+        """置信度已是中/低时 cap 是 no-op —— actions 不得谎报「已封顶」。
+
+        「mismatch 发生过」的信息不丢，它在 transcription.status 里。
+        """
+        dashboard = {"data_perspective": {"price_position": {"ma5": 99999.9}}, "battle_plan": {}}
+        result = _result_with_dashboard(dashboard, confidence="中")
+        claims = extract_llm_claims(result)
+        actions = apply_claim_validation(result, claims, {"ma5": 22222.2222}, language="zh")
+        self.assertEqual(actions, [])
+        self.assertEqual(result.confidence_level, "中")
+        cv = result.dashboard["claim_validation"]
+        self.assertEqual(cv["actions"], [])
+        self.assertEqual(cv["transcription"]["status"], "mismatch")
+
+    def test_cap_fires_action_code_only_when_high(self) -> None:
+        dashboard = {"data_perspective": {"price_position": {"ma5": 99999.9}}, "battle_plan": {}}
+        result = _result_with_dashboard(dashboard, confidence="高")
+        claims = extract_llm_claims(result)
+        actions = apply_claim_validation(result, claims, {"ma5": 22222.2222}, language="zh")
+        self.assertEqual(actions, ["confidence_capped_claim_mismatch"])
+        self.assertEqual(result.confidence_level, "中")
+
+    def test_empty_value_set_fact_is_skipped(self) -> None:
+        from src.claim_validation import _validate_transcription
+
+        out = _validate_transcription({"ma5": "99999.9"}, {"ma5": []})
+        self.assertEqual(out["checked"], 0)
+        self.assertEqual(out["mismatches"], [])
+
     def test_cap_is_monotone_no_op_when_already_medium(self) -> None:
         dashboard = {"data_perspective": {"price_position": {"ma5": 99999.9}}, "battle_plan": {}}
         result = _result_with_dashboard(dashboard, confidence="低")
