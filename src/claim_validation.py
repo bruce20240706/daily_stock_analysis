@@ -14,6 +14,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.phase_decision_guardrail import is_high_confidence
 from src.sniper_parsing import parse_sniper_value
 
 logger = logging.getLogger(__name__)
@@ -304,3 +305,132 @@ def collect_prompt_facts(context: Any) -> Dict[str, Any]:
     if prices:
         facts["current_price"] = prices
     return facts
+
+
+# canonical fact key → dashboard 内的点分路径（用于 mismatch 报告与快照）
+_CLAIM_PATHS: Dict[str, Tuple[str, str]] = {
+    "current_price": ("price_position", "current_price"),
+    "ma5": ("price_position", "ma5"),
+    "ma10": ("price_position", "ma10"),
+    "ma20": ("price_position", "ma20"),
+    "bias_ma5": ("price_position", "bias_ma5"),
+    "volume_ratio": ("volume_analysis", "volume_ratio"),
+    "turnover_rate": ("volume_analysis", "turnover_rate"),
+    "profit_ratio": ("chip_structure", "profit_ratio"),
+    "avg_cost": ("chip_structure", "avg_cost"),
+}
+
+_MISSING = object()
+
+
+def extract_llm_claims(result: Any) -> Optional[Dict[str, Any]]:
+    """纯读快照：LLM 原始输出里的可校验 claim。
+
+    **必须在 pipeline 的任何 in-place 回填之前调用。**
+    `normalize_chip_structure_availability` 会用 chip_data 回填 chip_structure，
+    `fill_price_position_if_needed` 会用 trend_result 的重算值回填 price_position。
+    挂在它们之后，守卫就是在拿系统自己的值当 LLM 的 claim。
+
+    dashboard 非 dict → 返回 None（调用方据此整体跳过，不写键、不抛错）。
+    """
+    try:
+        dashboard = getattr(result, "dashboard", None)
+        if not isinstance(dashboard, dict):
+            return None
+        perspective = dashboard.get("data_perspective")
+        perspective = perspective if isinstance(perspective, dict) else {}
+        transcription: Dict[str, Any] = {}
+        for key, (block_name, field) in _CLAIM_PATHS.items():
+            block = perspective.get(block_name)
+            if isinstance(block, dict) and field in block:
+                transcription[key] = block[field]
+        battle_plan = dashboard.get("battle_plan")
+        battle_plan = battle_plan if isinstance(battle_plan, dict) else {}
+        return {"transcription": transcription, "sniper_points": battle_plan.get("sniper_points")}
+    except Exception as exc:  # noqa: BLE001 - 纯读也不得抛错
+        logger.warning("[claim_validation] extract_llm_claims failed, skipping: %s", exc)
+        return None
+
+
+def _validate_transcription(claims: Dict[str, Any], facts: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not facts:
+        return {"status": "not_applicable", "reason": "no_prompt_facts", "checked": 0, "mismatches": []}
+
+    checked = 0
+    mismatches: List[Dict[str, Any]] = []
+    for key in FACT_KEYS:
+        raw = claims.get(key, _MISSING)
+        if raw is _MISSING or _is_claim_absent(raw):
+            continue
+        fact = facts.get(key)
+        if fact is None:
+            continue
+        parsed = extract_numeric_claim(raw)
+        if parsed is None:
+            continue
+        claimed, decimals = parsed
+        candidates = fact if isinstance(fact, (list, tuple)) else [fact]
+        checked += 1
+        if any(claim_matches_fact(claimed, decimals, candidate) for candidate in candidates):
+            continue
+        block_name, field = _CLAIM_PATHS[key]
+        mismatches.append(
+            {
+                "field": f"{block_name}.{field}",
+                "claimed": claimed,
+                "fact": list(candidates) if len(candidates) > 1 else candidates[0],
+                "tolerance": 10.0 ** (-decimals),
+            }
+        )
+
+    if checked == 0:
+        return {"status": "not_applicable", "reason": "no_comparable_claims", "checked": 0, "mismatches": []}
+    if mismatches:
+        return {"status": "mismatch", "reason": None, "checked": checked, "mismatches": mismatches}
+    return {"status": "ok", "reason": None, "checked": checked, "mismatches": []}
+
+
+def apply_claim_validation(
+    result: Any,
+    claims: Optional[Dict[str, Any]],
+    facts: Optional[Dict[str, Any]],
+    *,
+    language: str,
+) -> List[str]:
+    """判定 + 写 dashboard['claim_validation'] + 单调封顶置信度。
+
+    **必须在 apply_phase_decision_guardrails 之后调用。** 该守卫在入口一次性算
+    `initially_high_confidence`，随后两个降级分支（高→中、高→低）都消费它。
+    若 claim-validation 先把「高」降到「中」，那两个分支会全部静默失效 ——
+    包括更严厉的高→低 安全降级。结果是开启防幻觉守卫反而让阶段护栏变得不保守。
+
+    cap 是单调的：仅当仍为「高」时降到「中」，否则 no-op，永不回撤 guardrail 的降级。
+    """
+    if claims is None:
+        return []
+    actions: List[str] = []
+    try:
+        dashboard = getattr(result, "dashboard", None)
+        if not isinstance(dashboard, dict):
+            return []
+
+        transcription = _validate_transcription(claims.get("transcription") or {}, facts)
+        structural = validate_structure(claims.get("sniper_points"))
+
+        if transcription["status"] == "mismatch":
+            if is_high_confidence(getattr(result, "confidence_level", "")):
+                result.confidence_level = "Medium" if language == "en" else "中"
+            actions.append("confidence_capped_claim_mismatch")
+        if structural["status"] == "violation":
+            actions.append("sniper_points_unexecutable")
+
+        dashboard["claim_validation"] = {
+            "applied": True,
+            "transcription": transcription,
+            "structural": structural,
+            "actions": list(actions),
+        }
+        return actions
+    except Exception as exc:  # noqa: BLE001 - 守卫绝不阻塞报告产出
+        logger.warning("[claim_validation] apply_claim_validation failed, skipping: %s", exc)
+        return []

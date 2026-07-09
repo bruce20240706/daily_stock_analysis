@@ -2995,11 +2995,13 @@ class GeminiAnalyzer:
             )
             # Inc 3: 与 _format_prompt 消费同一个 context 的并列纯函数。
             # 关闭时一次也不调用 → 字节级不变。
-            _claim_facts = (
-                collect_prompt_facts(context)
-                if getattr(self._get_runtime_config(), "llm_claim_validation_enabled", False)
-                else None
-            )
+            # 自带 try/except：守卫绝不能把一个有效的 LLM 结果拖垮成兜底对象。
+            _claim_facts = None
+            if getattr(self._get_runtime_config(), "llm_claim_validation_enabled", False):
+                try:
+                    _claim_facts = collect_prompt_facts(context)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[claim_validation] collect_prompt_facts failed, skipping: %s", exc)
 
             config = self._get_runtime_config()
             model_name = config.litellm_model or "unknown"

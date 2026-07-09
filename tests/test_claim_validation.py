@@ -399,7 +399,7 @@ class TestAnalyzeGate(unittest.TestCase):
 
         self.assertIs(Config.llm_claim_validation_enabled, False)
 
-    def _run_analyze(self, *, gate_enabled: bool, collected_facts=None):
+    def _run_analyze(self, *, gate_enabled: bool, collected_facts=None, collect_side_effect=None):
         """Drive analyze() end-to-end with the retry/integrity loop short-circuited
         (report_integrity_enabled=False) so only the claim-validation gate is under test."""
         from src.analyzer import AnalysisResult
@@ -430,22 +430,168 @@ class TestAnalyzeGate(unittest.TestCase):
              patch.object(analyzer, "_parse_response", return_value=parsed_result), \
              patch.object(analyzer, "_build_market_snapshot", return_value={}), \
              patch("src.analyzer.persist_llm_usage"), \
-             patch("src.analyzer.collect_prompt_facts", return_value=collected_facts) as mock_collect:
+             patch(
+                 "src.analyzer.collect_prompt_facts",
+                 return_value=collected_facts,
+                 side_effect=collect_side_effect,
+             ) as mock_collect:
             result = analyzer.analyze(context)
 
-        return result, mock_collect, context
+        return result, mock_collect, context, parsed_result
 
     def test_gate_off_never_calls_collect_prompt_facts(self) -> None:
-        result, mock_collect, _context = self._run_analyze(gate_enabled=False)
+        result, mock_collect, _context, _parsed_result = self._run_analyze(gate_enabled=False)
         # 仅断言 prompt_facts is None 不够——那分不清「没调用」和「调用了但返回空」。
         mock_collect.assert_not_called()
         self.assertIsNone(result.prompt_facts)
 
     def test_gate_on_calls_collect_prompt_facts_and_attaches_result(self) -> None:
         facts = {"ma5": 1.0}
-        result, mock_collect, context = self._run_analyze(gate_enabled=True, collected_facts=facts)
+        result, mock_collect, context, _parsed_result = self._run_analyze(gate_enabled=True, collected_facts=facts)
         mock_collect.assert_called_once_with(context)
         self.assertIs(result.prompt_facts, facts)
+
+    def test_collect_prompt_facts_exception_returns_llm_result_not_fallback(self) -> None:
+        """A2: collect_prompt_facts 抛错时，analyze() 仍返回正常的 LLM 结果（不是兜底对象）。
+
+        一个防幻觉守卫自己把主流程搞崩，是最坏的结果——这条锁住 §5.1 的缺口：
+        collect_prompt_facts 原本裸调在覆盖整个 LLM 调用/解析的大 try 之内，
+        抛错会把一个有效结果换成 success=False 的兜底 AnalysisResult。
+        """
+        result, mock_collect, _context, parsed_result = self._run_analyze(
+            gate_enabled=True, collect_side_effect=RuntimeError("boom"),
+        )
+        mock_collect.assert_called_once()
+        self.assertIs(result, parsed_result)
+        self.assertTrue(result.success)
+        self.assertIsNone(result.prompt_facts)
+
+
+from src.analyzer import AnalysisResult  # noqa: E402
+from src.claim_validation import apply_claim_validation, extract_llm_claims  # noqa: E402
+
+
+def _result_with_dashboard(dashboard, *, confidence="高"):
+    result = AnalysisResult(
+        code="600519", name="贵州茅台", sentiment_score=75,
+        trend_prediction="看多", operation_advice="买入",
+        decision_type="buy", confidence_level=confidence,
+    )
+    result.dashboard = dashboard
+    return result
+
+
+_GOOD_DASHBOARD = {
+    "data_perspective": {
+        "price_position": {"current_price": 11111.1111, "ma5": 22222.2222},
+        "volume_analysis": {"volume_ratio": 66666.6666},
+        "chip_structure": {"profit_ratio": "88.9%"},
+    },
+    "battle_plan": {
+        "sniper_points": {"ideal_buy": 12.5, "stop_loss": 12.0, "take_profit": 13.5}
+    },
+}
+
+_FACTS = {"current_price": [11111.1111], "ma5": 22222.2222,
+          "volume_ratio": 66666.6666, "profit_ratio": 88.9}
+
+
+class TestExtractLlmClaims(unittest.TestCase):
+    def test_snapshot_reads_all_three_blocks(self) -> None:
+        claims = extract_llm_claims(_result_with_dashboard(dict(_GOOD_DASHBOARD)))
+        self.assertEqual(claims["transcription"]["ma5"], 22222.2222)
+        self.assertEqual(claims["transcription"]["profit_ratio"], "88.9%")
+        self.assertEqual(claims["sniper_points"]["stop_loss"], 12.0)
+
+    def test_non_dict_dashboard_returns_none(self) -> None:
+        for bad in (None, "", [], 42):
+            self.assertIsNone(extract_llm_claims(_result_with_dashboard(bad)), bad)
+
+    def test_malformed_result_returns_none(self) -> None:
+        self.assertIsNone(extract_llm_claims(SimpleNamespace()))
+
+
+class TestApplyClaimValidation(unittest.TestCase):
+    def test_all_ok_writes_key_without_capping(self) -> None:
+        result = _result_with_dashboard(dict(_GOOD_DASHBOARD))
+        claims = extract_llm_claims(result)
+        actions = apply_claim_validation(result, claims, _FACTS, language="zh")
+        cv = result.dashboard["claim_validation"]
+        self.assertTrue(cv["applied"])
+        self.assertEqual(cv["transcription"]["status"], "ok")
+        self.assertEqual(cv["transcription"]["checked"], 4)
+        self.assertEqual(cv["structural"]["status"], "ok")
+        self.assertEqual(actions, [])
+        self.assertEqual(result.confidence_level, "高")
+
+    def test_transcription_mismatch_caps_confidence(self) -> None:
+        dashboard = {
+            "data_perspective": {"price_position": {"ma5": 99999.9}},
+            "battle_plan": {},
+        }
+        result = _result_with_dashboard(dashboard)
+        claims = extract_llm_claims(result)
+        actions = apply_claim_validation(result, claims, {"ma5": 22222.2222}, language="zh")
+        self.assertIn("confidence_capped_claim_mismatch", actions)
+        self.assertEqual(result.confidence_level, "中")
+        cv = result.dashboard["claim_validation"]
+        self.assertEqual(cv["transcription"]["status"], "mismatch")
+        self.assertEqual(cv["transcription"]["mismatches"][0]["field"], "price_position.ma5")
+
+    def test_cap_is_monotone_no_op_when_already_medium(self) -> None:
+        dashboard = {"data_perspective": {"price_position": {"ma5": 99999.9}}, "battle_plan": {}}
+        result = _result_with_dashboard(dashboard, confidence="低")
+        claims = extract_llm_claims(result)
+        apply_claim_validation(result, claims, {"ma5": 22222.2222}, language="zh")
+        self.assertEqual(result.confidence_level, "低")
+
+    def test_english_cap_writes_localized_text(self) -> None:
+        dashboard = {"data_perspective": {"price_position": {"ma5": 99999.9}}, "battle_plan": {}}
+        result = _result_with_dashboard(dashboard, confidence="High")
+        claims = extract_llm_claims(result)
+        apply_claim_validation(result, claims, {"ma5": 22222.2222}, language="en")
+        self.assertEqual(result.confidence_level, "Medium")
+
+    def test_structural_violation_marks_unexecutable_without_clearing(self) -> None:
+        dashboard = {
+            "data_perspective": {},
+            "battle_plan": {"sniper_points": {"ideal_buy": 12.5, "stop_loss": 13.0, "take_profit": 14.0}},
+        }
+        result = _result_with_dashboard(dashboard)
+        claims = extract_llm_claims(result)
+        actions = apply_claim_validation(result, claims, {}, language="zh")
+        self.assertIn("sniper_points_unexecutable", actions)
+        self.assertEqual(result.confidence_level, "高")  # 结构违规不封顶置信度
+        # 契约：不清空字段，storage._extract_sniper_points 仍要读它
+        self.assertEqual(dashboard["battle_plan"]["sniper_points"]["stop_loss"], 13.0)
+
+    def test_no_facts_means_transcription_not_applicable(self) -> None:
+        """agent 路径：不经 _format_prompt，永远没有 prompt_facts。"""
+        result = _result_with_dashboard(dict(_GOOD_DASHBOARD))
+        claims = extract_llm_claims(result)
+        apply_claim_validation(result, claims, None, language="zh")
+        cv = result.dashboard["claim_validation"]
+        self.assertEqual(cv["transcription"]["status"], "not_applicable")
+        self.assertEqual(cv["transcription"]["reason"], "no_prompt_facts")
+        self.assertEqual(cv["structural"]["status"], "ok")  # 结构类照跑
+
+    def test_numeric_zero_claim_is_validated(self) -> None:
+        dashboard = {"data_perspective": {"price_position": {"bias_ma5": 0}}, "battle_plan": {}}
+        result = _result_with_dashboard(dashboard)
+        claims = extract_llm_claims(result)
+        apply_claim_validation(result, claims, {"bias_ma5": 0.0}, language="zh")
+        cv = result.dashboard["claim_validation"]
+        self.assertEqual(cv["transcription"]["checked"], 1)
+        self.assertEqual(cv["transcription"]["status"], "ok")
+
+    def test_guard_never_raises(self) -> None:
+        """一个防幻觉守卫自己把主流程搞崩，是最坏的结果。"""
+        result = _result_with_dashboard(dict(_GOOD_DASHBOARD))
+        claims = extract_llm_claims(result)
+        with patch("src.claim_validation.extract_numeric_claim", side_effect=RuntimeError("boom")):
+            actions = apply_claim_validation(result, claims, _FACTS, language="zh")
+        self.assertEqual(actions, [])
+        self.assertNotIn("claim_validation", result.dashboard)
 
 
 if __name__ == "__main__":
