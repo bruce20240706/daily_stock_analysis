@@ -48,7 +48,60 @@ r"[-+]?(?:\d+\.\d+|\.\d+|\d+)(?:[eE][-+]?\d+)?"
 
 两处遗漏都会造成**假警报**,比漏报更糟,因此正则同时收纳两种形态。
 
-## 3. `dashboard["claim_validation"]` 字段契约
+## 3. 结构类判据:签名即护栏
+
+结构类校验 LLM **自主生成**的买卖计划是否内部自洽。它读 `dashboard.battle_plan.sniper_points` 的四个字段,用共享的 `parse_sniper_value`(与 `DatabaseManager._extract_sniper_points` **同一个函数**)抽数 —— 这保证「守卫判定的数」与「落库的数」永远是同一个。
+
+### 判据
+
+**仅当相关字段都成功抽出数值时才判**(缺失 → 跳过,不判违规)。`sniper_points` 非 dict / 空 → `not_applicable`(`reason="no_sniper_points"`);一条序关系都凑不出 → `not_applicable`(`reason="insufficient_fields"`)。
+
+1. **抽出的值若非有限或 `<= 0` → `violation`**(不是「缺失」)
+2. `stop_loss < ideal_buy`(两者皆存在时)
+3. `ideal_buy < take_profit`(两者皆存在时)
+4. `stop_loss < take_profit`(两者皆存在时)
+5. `secondary_buy` 若存在:`stop_loss < secondary_buy` 且 `secondary_buy < take_profit`
+
+`violations` 非空时即 `violation`,即便一条可比较的序关系都凑不出(例如只有 `ideal_buy: "-5"` 一个字段)。
+
+### 判据 1 为什么是 `violation` 而不是静默丢弃
+
+早期实现把非正值**静默丢弃**、当作字段缺失,于是 `{"ideal_buy": "-5", "stop_loss": 1, "take_profit": 2}` 报 `ok` —— 负数买入价被放过。`AGENTS.md` 明列「用 broad fallback、静默降级掩盖不清晰的契约」为低质量特征。
+
+改为 `violation` 之后,判据 1 **恰好只对「会被真正落库的非正数」报警**,这正是本函数的头号约束「与落库口径一致」:
+
+| claim | `parse_sniper_value` | DB 存的 | 判定 |
+| --- | --- | --- | --- |
+| `-5`(数值) | `None`(上游即滤除) | NULL | 缺失(不报警) |
+| `"-5"`(字符串) | `-5.0` | `-5.0` | **violation** |
+| `"0元"` | `0.0` | `0.0` | **violation** |
+| `"inf"` | `inf` | `inf` | **violation**(非有限) |
+
+数值与字符串之间的不对称由 `parse_sniper_value` 承担(它对落库行为有「逐字等价」保证,不可改);判据 1 只负责把**已经透出来的**非正/非有限值显式报出来。
+
+### 签名即护栏:为什么不复用 `is_invalid_price_level`
+
+```python
+def validate_structure(sniper_points: Any) -> Dict[str, Any]: ...
+```
+
+**签名只接收 `sniper_points`。** 不传 `current_price`、不传 `result`。
+
+`src/services/volume_price_signals.py` 的 `is_invalid_price_level(*, entry, stop, target, current_price)` 有一条判据是 `entry > current_price → invalid`。那条对**它自己**成立:它校验的是 `derive_price_levels` **反算出的** long-setup entry —— 按构造 entry 就是「MA20 与近 20 日 swing low 中 **≤ 现价** 的较高者」,`entry ≤ current_price` 是它的**构造不变式**。
+
+LLM 的 `ideal_buy` **没有这个不变式**。「突破 12.8 元买入」(现价 12.3)是完全合法的交易计划。照搬那条判据会**系统性误杀所有突破买入计划**。
+
+因此结构判据自写,不调 `is_invalid_price_level`。**主要防线是签名** —— 一个拿不到 `current_price` 的函数,不可能拿它做判据。这比任何测试都强:误用在类型上就无法表达。
+
+### 动作
+
+结构 violation → 追加 action code `sniper_points_unexecutable`,在报告里标注该买卖计划不可执行。
+
+**不封顶置信度**(证据类型不同:数字不可信 ≠ 计划不可执行),**不清空 `sniper_points` 字段** —— `storage._extract_sniper_points` 仍要读它并落库,清空会破坏落库契约。标注即可,让消费方决定。
+
+---
+
+## 4. `dashboard["claim_validation"]` 字段契约
 
 守卫开启且守卫判定发生时,`result.dashboard` 会追加一个顶层键(与 `decision_stability` / `phase_decision` 同级):
 
@@ -74,7 +127,7 @@ r"[-+]?(?:\d+\.\d+|\.\d+|\d+)(?:[eE][-+]?\d+)?"
 
 **开关关闭时整个键不写**,`result.dashboard` 字节级不变。
 
-## 4. 动作:标注 + 分级降权
+## 5. 动作:标注 + 分级降权
 
 | 触发 | 动作 |
 | --- | --- |
@@ -83,11 +136,11 @@ r"[-+]?(?:\d+\.\d+|\.\d+|\d+)(?:[eE][-+]?\d+)?"
 
 **action code 只在真实 cap 发生时才发。** 若置信度已经是「中」或「低」,即便转录 mismatch 存在,cap 是 no-op,`confidence_capped_claim_mismatch` 不会出现在 `actions` 里 —— 但 mismatch 判定本身仍完整写在 `transcription.status == "mismatch"` 里,不会丢信息。这与仓库既有先例 `phase_decision_guardrail` 的 `confidence_capped_core_data_degraded` 门控方式一致:只在降级真的发生时才 append action code,名字与实际动作严格对应。
 
-**cap 是单调的**:仅当置信度仍为「高」时降到「中」,已是中/低则永不回撤 —— 保证它不会撤销 phase guardrail 已经施加的更严格降级(见 §5)。
+**cap 是单调的**:仅当置信度仍为「高」时降到「中」,已是中/低则永不回撤 —— 保证它不会撤销 phase guardrail 已经施加的更严格降级(见 §6)。
 
 **守卫绝不覆盖 LLM 给出的数值、不改变买/卖/观望方向、不触发 LLM 重试。** 覆盖等于系统替 LLM 编答案,且单改一个字段修不好建立在错数之上的整段推理;改写决策方向是从"数字不可信"到"应该观望"的逻辑跳跃,方向判定是 `stabilize_decision_with_structure` 基于结构做的独立判断,证据链不同;触发重试成本高且未必修复转录幻觉,还会与既有 `check_content_integrity` 重试循环耦合。
 
-## 5. 挂载点:两条不变式
+## 6. 挂载点:两条不变式
 
 守卫拆成两个函数,插在 pipeline 的 Step 7.7 两端:
 
@@ -111,11 +164,11 @@ pipeline 在 Step 7.5–7.7 之间有一整串 in-place 改写 `result.dashboard
 
 若 claim-validation 先把"高"降到"中",`initially_high_confidence` 就会变成 `False`,这两个分支全部静默失效 —— 包括更严厉的高→低安全降级。结果是开启防幻觉守卫反而让阶段护栏变得不保守。
 
-把 B 放在 guardrail 之后即可根除:guardrail 先看到原始"高"并施加自己的降级;claim 的 cap 是单调的(§4),永不回撤 guardrail 已做的降级。
+把 B 放在 guardrail 之后即可根除:guardrail 先看到原始"高"并施加自己的降级;claim 的 cap 是单调的(§5),永不回撤 guardrail 已做的降级。
 
 **两条不变式在非-agent 与 agent 两条 pipeline 路径上都要成立**,四个插入点(两路径 × 两步)缺一即会导致行为漂移。
 
-## 6. 校验字段范围
+## 7. 校验字段范围
 
 ### 转录类覆盖的 9 个字段
 
@@ -131,7 +184,7 @@ facts 记录的是"渲染后的语义值"而非原始值:`profit_ratio` 从 `f"{
 | `capital_flow.*` | 根本不是 LLM 的 claim。`fill_capital_flow_if_needed` 在 LLM 输出**之后**才把资金面数据确定性回填进 `data_perspective.capital_flow`(presence-only,对决策只读)。没有 LLM 转录动作,就没有转录锚点。 |
 | `price_position.support_level` / `resistance_level` | 推断类,见 §1 的非目标说明。 |
 
-## 7. agent 路径的 `not_applicable`
+## 8. agent 路径的 `not_applicable`
 
 仓库有两条个股分析路径:非-agent 路径经 `_format_prompt` 生成 prompt 文本;agent 路径(`_analyze_with_agent`)不经过 `_format_prompt`,因此没有 `prompt_facts` 可比对。
 
@@ -144,7 +197,7 @@ facts 记录的是"渲染后的语义值"而非原始值:`profit_ratio` 从 `f"{
 
 agent 路径的转录类降级是显式的 `not_applicable`,是 fail-closed 行为:不报错、不阻塞、不假装通过。
 
-## 8. 配置项
+## 9. 配置项
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -152,7 +205,7 @@ agent 路径的转录类降级是显式的 `not_applicable`,是 fail-closed 行�
 
 该开关是用户可见能力开关(开启后报告可能多出一段"数值校验"提示、置信度可能被封顶),因此注册进 `config_registry`,Web 设置页 → AI 模型分类下可见可开。
 
-## 9. 两套渲染引擎的 presence-only 行为
+## 10. 两套渲染引擎的 presence-only 行为
 
 仓库有两套报告渲染引擎,由 `config.report_renderer_enabled`(默认 `False`)切换:传统 Python 拼接(`src/notification.py::generate_dashboard_report`,默认生效)与 Jinja(`templates/report_markdown.j2`,`REPORT_RENDERER_ENABLED=true` 时生效)。两侧都已接入 `claim_validation` 提示行渲染,行为一致:
 
@@ -163,9 +216,9 @@ agent 路径的转录类降级是显式的 `not_applicable`,是 fail-closed 行�
 
 不渲染提示行的面(跟随既有 `margin_trading` / `phase_decision` 的既有边界,当前对这些面全不渲染):`generate_wechat_dashboard`、`generate_single_stock_report`、`report_wechat.j2`、`report_brief.j2`。被封顶后的 `confidence_level` 本身仍会在所有面显形,只是"数值校验"提示行不会。
 
-## 10. 已知边界
+## 11. 已知边界
 
 - 只覆盖个股分析路径。大盘复盘(`generate_market_review`,纯自由文本、不回读数字)与图片提取(`extract_stock_codes_from_image`,输出无价位数值)无可校验的数值 claim 面。
-- agent 路径无转录校验(见 §7),结构类仍覆盖。
+- agent 路径无转录校验(见 §8),结构类仍覆盖。
 - crypto 标的通常没有 `chip` 块,`profit_ratio` / `avg_cost` 对 crypto 恒缺失、不参与校验 —— 这是"缺失即 fact 缺失"的正常工作方式,不是缺陷。
 - 区间型 `ideal_buy`(如 `'180-182'`)取最后一个数,与落库口径(`parse_sniper_value`)一致;区间本身无单一小数位数 `d`,不参与转录类校验。
