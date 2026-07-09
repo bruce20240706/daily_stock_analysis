@@ -144,5 +144,67 @@ class TestComposedTolerance(unittest.TestCase):
         self.assertFalse(self._matches("4.56e-5", 1.23e-5))
 
 
+from src.claim_validation import validate_structure  # noqa: E402
+
+
+class TestValidateStructure(unittest.TestCase):
+    def test_valid_long_plan(self) -> None:
+        out = validate_structure(
+            {"ideal_buy": 12.5, "stop_loss": 12.0, "take_profit": 13.5}
+        )
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["violations"], [])
+
+    def test_breakout_buy_above_current_price_is_valid(self) -> None:
+        # 文档性护栏：真正的防线是签名拿不到 current_price。
+        # 若有人给本函数加上 current_price 参数并引入 entry<=current 判据，本例会红。
+        out = validate_structure(
+            {"ideal_buy": 12.8, "stop_loss": 12.0, "take_profit": 13.5}
+        )
+        self.assertEqual(out["status"], "ok")
+
+    def test_stop_above_entry_is_violation(self) -> None:
+        out = validate_structure(
+            {"ideal_buy": 12.5, "stop_loss": 13.0, "take_profit": 14.0}
+        )
+        self.assertEqual(out["status"], "violation")
+        self.assertTrue(any("stop_loss" in v for v in out["violations"]))
+
+    def test_target_below_entry_is_violation(self) -> None:
+        out = validate_structure(
+            {"ideal_buy": 12.5, "stop_loss": 12.0, "take_profit": 12.1}
+        )
+        self.assertEqual(out["status"], "violation")
+
+    def test_secondary_buy_outside_band_is_violation(self) -> None:
+        out = validate_structure(
+            {
+                "ideal_buy": 12.5,
+                "secondary_buy": 14.0,
+                "stop_loss": 12.0,
+                "take_profit": 13.5,
+            }
+        )
+        self.assertEqual(out["status"], "violation")
+
+    def test_range_ideal_buy_uses_last_number(self) -> None:
+        # 与落库口径一致：'180-182' → 182
+        out = validate_structure(
+            {"ideal_buy": "180-182", "stop_loss": 175.0, "take_profit": 190.0}
+        )
+        self.assertEqual(out["status"], "ok")
+
+    def test_insufficient_fields_is_not_applicable(self) -> None:
+        out = validate_structure({"stop_loss": 12.0})
+        self.assertEqual(out["status"], "not_applicable")
+        self.assertEqual(out["reason"], "insufficient_fields")
+
+    def test_malformed_input_is_not_applicable(self) -> None:
+        for bad in (None, "", [], 42):
+            out = validate_structure(bad)
+            self.assertEqual(out["status"], "not_applicable", bad)
+            self.assertEqual(out["reason"], "no_sniper_points")
+
+
 if __name__ == "__main__":
     unittest.main()

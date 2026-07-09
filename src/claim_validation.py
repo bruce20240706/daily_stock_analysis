@@ -12,7 +12,9 @@ import logging
 import math
 import re
 from decimal import Decimal, InvalidOperation
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from src.sniper_parsing import parse_sniper_value
 
 logger = logging.getLogger(__name__)
 
@@ -153,3 +155,53 @@ def claim_matches_fact(claimed: float, decimals: int, fact: float) -> bool:
         return False
     tolerance = max(10.0 ** (-decimals), abs(fact) * _REL_NOISE_FLOOR)
     return abs(claimed - fact) <= tolerance
+
+
+_SNIPER_FIELDS = ("ideal_buy", "secondary_buy", "stop_loss", "take_profit")
+
+
+def validate_structure(sniper_points: Any) -> Dict[str, Any]:
+    """校验 LLM 自主生成的买卖计划是否内部自洽。
+
+    **签名只收 sniper_points**：拿不到 current_price 的函数不可能拿它做判据。
+    `ideal_buy > current_price`（突破买入）是完全合法的计划，
+    照搬 `is_invalid_price_level` 的 `entry <= current_price` 会系统性误杀。
+
+    仅在相关字段都成功抽出数值时才判；缺失 → 跳过，不判违规。
+    """
+    if not isinstance(sniper_points, dict) or not sniper_points:
+        return {"status": "not_applicable", "reason": "no_sniper_points", "violations": []}
+
+    parsed: Dict[str, float] = {}
+    for field in _SNIPER_FIELDS:
+        number = parse_sniper_value(sniper_points.get(field))
+        if number is not None and math.isfinite(number) and number > 0:
+            parsed[field] = number
+
+    entry = parsed.get("ideal_buy")
+    second = parsed.get("secondary_buy")
+    stop = parsed.get("stop_loss")
+    target = parsed.get("take_profit")
+
+    pairs: List[Tuple[str, Optional[float], str, Optional[float]]] = [
+        ("stop_loss", stop, "ideal_buy", entry),
+        ("ideal_buy", entry, "take_profit", target),
+        ("stop_loss", stop, "take_profit", target),
+        ("stop_loss", stop, "secondary_buy", second),
+        ("secondary_buy", second, "take_profit", target),
+    ]
+
+    comparable = 0
+    violations: List[str] = []
+    for lo_name, lo, hi_name, hi in pairs:
+        if lo is None or hi is None:
+            continue
+        comparable += 1
+        if not lo < hi:
+            violations.append(f"{lo_name}({lo}) >= {hi_name}({hi})")
+
+    if comparable == 0:
+        return {"status": "not_applicable", "reason": "insufficient_fields", "violations": []}
+    if violations:
+        return {"status": "violation", "reason": None, "violations": violations}
+    return {"status": "ok", "reason": None, "violations": []}
