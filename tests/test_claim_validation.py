@@ -368,5 +368,85 @@ class TestPromptFactsDriftLock(unittest.TestCase):
         self._assert_facts_in_prompt(self._render(legacy=False))
 
 
+class TestAnalyzeGate(unittest.TestCase):
+    def _analyzer(self):
+        from src.analyzer import GeminiAnalyzer
+
+        with patch.object(GeminiAnalyzer, "_init_litellm", return_value=None):
+            return GeminiAnalyzer()
+
+    def test_prompt_facts_field_defaults_to_none(self) -> None:
+        from src.analyzer import AnalysisResult
+
+        result = AnalysisResult(
+            code="600519", name="贵州茅台", sentiment_score=60,
+            trend_prediction="震荡", operation_advice="持有",
+        )
+        self.assertIsNone(result.prompt_facts)
+
+    def test_to_dict_does_not_leak_prompt_facts(self) -> None:
+        from src.analyzer import AnalysisResult
+
+        result = AnalysisResult(
+            code="600519", name="贵州茅台", sentiment_score=60,
+            trend_prediction="震荡", operation_advice="持有",
+        )
+        result.prompt_facts = {"ma5": 1.0}
+        self.assertNotIn("prompt_facts", result.to_dict())
+
+    def test_config_default_is_false(self) -> None:
+        from src.config import Config
+
+        self.assertIs(Config.llm_claim_validation_enabled, False)
+
+    def _run_analyze(self, *, gate_enabled: bool, collected_facts=None):
+        """Drive analyze() end-to-end with the retry/integrity loop short-circuited
+        (report_integrity_enabled=False) so only the claim-validation gate is under test."""
+        from src.analyzer import AnalysisResult
+
+        analyzer = self._analyzer()
+        analyzer._config_override = SimpleNamespace(
+            gemini_request_delay=0,
+            report_language="zh",
+            litellm_model="gemini/gemini-2.0-flash",
+            llm_temperature=0.2,
+            report_integrity_enabled=False,
+            llm_claim_validation_enabled=gate_enabled,
+        )
+        context = {"code": "600519", "stock_name": "贵州茅台"}
+        parsed_result = AnalysisResult(
+            code="600519", name="贵州茅台", sentiment_score=70,
+            trend_prediction="看多", operation_advice="持有",
+        )
+
+        with patch.object(analyzer, "is_available", return_value=True), \
+             patch.object(analyzer, "_get_analysis_system_prompt", return_value="system"), \
+             patch.object(analyzer, "_format_prompt", return_value="prompt"), \
+             patch.object(
+                 analyzer,
+                 "_call_litellm",
+                 return_value=("response text", "model-a", {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}),
+             ), \
+             patch.object(analyzer, "_parse_response", return_value=parsed_result), \
+             patch.object(analyzer, "_build_market_snapshot", return_value={}), \
+             patch("src.analyzer.persist_llm_usage"), \
+             patch("src.analyzer.collect_prompt_facts", return_value=collected_facts) as mock_collect:
+            result = analyzer.analyze(context)
+
+        return result, mock_collect, context
+
+    def test_gate_off_never_calls_collect_prompt_facts(self) -> None:
+        result, mock_collect, _context = self._run_analyze(gate_enabled=False)
+        # 仅断言 prompt_facts is None 不够——那分不清「没调用」和「调用了但返回空」。
+        mock_collect.assert_not_called()
+        self.assertIsNone(result.prompt_facts)
+
+    def test_gate_on_calls_collect_prompt_facts_and_attaches_result(self) -> None:
+        facts = {"ma5": 1.0}
+        result, mock_collect, context = self._run_analyze(gate_enabled=True, collected_facts=facts)
+        mock_collect.assert_called_once_with(context)
+        self.assertIs(result.prompt_facts, facts)
+
+
 if __name__ == "__main__":
     unittest.main()
