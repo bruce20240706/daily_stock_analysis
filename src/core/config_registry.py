@@ -1101,6 +1101,32 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "validation": {"min": 0.0, "max": 2.0},
         "display_order": 62,
     },
+    "LLM_CLAIM_VALIDATION_ENABLED": {
+        "title": "LLM Claim Validation",
+        "description": "Cross-check the numbers the LLM states against the numbers actually fed to it in the prompt, and validate that its trade plan is internally consistent. Disabled by default; when enabled, mismatches are annotated and confidence is capped (values are never overwritten).",
+        "category": "ai_model",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "false",
+        "options": [],
+        "validation": {},
+        "display_order": 63,
+        "help_key": "settings.ai_model.LLM_CLAIM_VALIDATION_ENABLED",
+        "examples": [
+            "LLM_CLAIM_VALIDATION_ENABLED=false",
+            "LLM_CLAIM_VALIDATION_ENABLED=true",
+        ],
+        "docs": [
+            {
+                "label": "专题：LLM 数值校验守卫",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/llm-claim-validation.md",
+            },
+        ],
+        "warning_codes": [],
+    },
     "ANTHROPIC_API_KEY": {
         "title": "Anthropic API Key",
         "description": "Anthropic Claude API key (from https://console.anthropic.com).",
