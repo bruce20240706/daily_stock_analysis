@@ -50,7 +50,7 @@ r"[-+]?(?:\d+\.\d+|\.\d+|\d+)(?:[eE][-+]?\d+)?"
 
 ## 3. 结构类判据:签名即护栏
 
-结构类校验 LLM **自主生成**的买卖计划是否内部自洽。它读 `dashboard.battle_plan.sniper_points` 的四个字段,用共享的 `parse_sniper_value`(与 `DatabaseManager._extract_sniper_points` **同一个函数**)抽数 —— 这保证「守卫判定的数」与「落库的数」永远是同一个。
+结构类校验 LLM **自主生成**的买卖计划是否内部自洽。它读 `dashboard.battle_plan.sniper_points` 的四个字段,用共享的 `parse_sniper_value`(`src/sniper_parsing.py`)抽数。`DatabaseManager._parse_sniper_value`(`src/storage.py`)委托的正是**同一个函数**,而落库路径 `DatabaseManager._extract_sniper_points` 逐字段调它 —— 这保证「守卫判定的数」与「落库的数」永远是同一个。
 
 ### 判据
 
