@@ -16,7 +16,6 @@ from contextlib import contextmanager
 import hashlib
 import json
 import logging
-import re
 import threading
 import time
 from datetime import datetime, date, timedelta
