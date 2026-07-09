@@ -54,6 +54,15 @@ class TestExtractNumericClaim(unittest.TestCase):
         for bad in (None, "", "N/A", "待补充"):
             self.assertIsNone(extract_numeric_claim(bad), bad)
 
+    def test_leading_dot_keeps_sign_and_magnitude(self) -> None:
+        # 旧正则返回 (5.0, 0)：符号与数量级双双丢失 → 正确的 claim 被判成编造
+        self.assertEqual(extract_numeric_claim("-.05%"), (-0.05, 2))
+        self.assertEqual(extract_numeric_claim(".5"), (0.5, 1))
+        self.assertEqual(extract_numeric_claim("+.25"), (0.25, 2))
+
+    def test_out_of_range_int_returns_none(self) -> None:
+        self.assertIsNone(extract_numeric_claim(10 ** 400))
+
 
 class TestClaimMatchesFact(unittest.TestCase):
     def test_integer_rounding_is_legal(self) -> None:
@@ -100,6 +109,39 @@ class TestIsClaimAbsent(unittest.TestCase):
         self.assertFalse(_is_claim_absent(0))
         self.assertFalse(_is_claim_absent(0.0))
         self.assertFalse(_is_claim_absent("0"))
+
+
+class TestComposedTolerance(unittest.TestCase):
+    """§4.1 容差表的端到端锁：抽取 + 比对合起来跑。
+
+    两个半边各自的单测都绿，组合起来仍可能错（例如 d 从错误的
+    repr 求出）。这一类才是守卫真正的行为。
+    """
+
+    def _matches(self, claim, fact) -> bool:
+        parsed = extract_numeric_claim(claim)
+        assert parsed is not None, claim
+        value, decimals = parsed
+        return claim_matches_fact(value, decimals, fact)
+
+    def test_composed_integer_claim_against_fractional_fact(self) -> None:
+        self.assertTrue(self._matches("1800", 1800.4231))   # 整数 round 合法
+        self.assertFalse(self._matches("1795", 1800.4231))  # 编造
+
+    def test_composed_json_number_int(self) -> None:
+        self.assertTrue(self._matches(1800, 1800.4231))
+
+    def test_composed_truncation_and_rounding(self) -> None:
+        self.assertTrue(self._matches("3.4", 3.4512))
+        self.assertTrue(self._matches("3.5", 3.4512))
+        self.assertFalse(self._matches("3.3", 3.4512))
+
+    def test_composed_invented_precision(self) -> None:
+        self.assertFalse(self._matches("72.34", 72.3))
+
+    def test_composed_crypto_tiny_price(self) -> None:
+        self.assertTrue(self._matches("1.23e-5", 1.23e-5))
+        self.assertFalse(self._matches("4.56e-5", 1.23e-5))
 
 
 if __name__ == "__main__":

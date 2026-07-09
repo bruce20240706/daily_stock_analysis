@@ -29,8 +29,11 @@ FACT_KEYS: Tuple[str, ...] = (
     "avg_cost",
 )
 
-# 数字抽取：**必须**含指数段。缺了它 '1.23e-5' 会被抽成 1.23（错 5 个数量级）。
-_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
+# 数字抽取：**必须**含指数段与前导点分支。
+# 缺指数段 → '1.23e-5' 被抽成 1.23（错 5 个数量级）。
+# 缺前导点 → '-.05%' 被抽成 (5.0, 0)（符号与数量级双双丢失）。
+# 两者都会把**正确**的 claim 判成编造 —— 假警报比漏报更糟。
+_NUMBER_RE = re.compile(r"[-+]?(?:\d+\.\d+|\.\d+|\d+)(?:[eE][-+]?\d+)?")
 
 # `d` 的钳制区间。上界 8 兼顾 crypto 极小价（1.23e-5 → d=7）与 float64 分辨率。
 _MIN_DECIMALS = 0
@@ -105,7 +108,14 @@ def extract_numeric_claim(value: Any) -> Optional[Tuple[float, int]]:
         return None
 
     if isinstance(value, (int, float)):  # bool 已在 _is_claim_absent 里排除
-        number = float(value)
+        try:
+            number = float(value)
+        except OverflowError:
+            # 超出 float64 范围的 Python int（如 10**400）：float() 抛
+            # OverflowError 而非返回 inf。字符串分支的 float(token) 在
+            # 同等量级下会静默返回 inf，交由下面的 isfinite 守卫收口；
+            # 这里用 except 补齐同一「非有限 → None」契约，不让主流程崩。
+            return None
         if not math.isfinite(number):
             return None
         # 注意：对 repr(value)（原始值）取位数，不是 repr(number)（转 float 后的值）。
@@ -134,6 +144,10 @@ def claim_matches_fact(claimed: float, decimals: int, fact: float) -> bool:
 
     自校准：LLM 写 '1800'（d=0）只要求误差 < 1；写 '1800.42'（d=2）
     要求误差 < 0.01。凭空多出一位有效数字会被逮住。
+
+    `decimals` 在函数内部不做钳制：调用方须保证传入值已在
+    `[_MIN_DECIMALS, _MAX_DECIMALS]`（即 `[0, 8]`）内 —— `extract_numeric_claim`
+    已钳制过；直接传字面量的调用方需自行保证。
     """
     if not (math.isfinite(claimed) and math.isfinite(fact)):
         return False
