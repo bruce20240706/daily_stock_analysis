@@ -167,16 +167,33 @@ def validate_structure(sniper_points: Any) -> Dict[str, Any]:
     `ideal_buy > current_price`（突破买入）是完全合法的计划，
     照搬 `is_invalid_price_level` 的 `entry <= current_price` 会系统性误杀。
 
-    仅在相关字段都成功抽出数值时才判；缺失 → 跳过，不判违规。
+    两类判据：
+    1. 单字段抽出的值非有限或 `<= 0` → violation（与落库口径一致：
+       `parse_sniper_value` 对数值类型的非正输入在上游就返回 None——
+       该字段视为缺失，不在此列；只有字符串/文本抽出的非正值才会落到
+       这一判据，因为它们会被同一个 `parse_sniper_value` 实际落库）。
+    2. 字段两两之间的价位顺序（stop < entry < target 等）不自洽 → violation。
+
+    `parse_sniper_value` 返回 None（抽不出数）→ 字段视为缺失，跳过该字段
+    参与的判据，不因缺失而报违规。violations 非空时整体判 violation；
+    否则若没有任何可比较的字段对，判 not_applicable。
     """
     if not isinstance(sniper_points, dict) or not sniper_points:
         return {"status": "not_applicable", "reason": "no_sniper_points", "violations": []}
 
     parsed: Dict[str, float] = {}
+    violations: List[str] = []
     for field in _SNIPER_FIELDS:
         number = parse_sniper_value(sniper_points.get(field))
-        if number is not None and math.isfinite(number) and number > 0:
-            parsed[field] = number
+        if number is None:
+            continue  # 抽不出数 → 字段缺失（与落库的 NULL 一致）
+        if not math.isfinite(number):
+            violations.append(f"{field}({number}) 非有限")
+            continue
+        if number <= 0:
+            violations.append(f"{field}({number}) <= 0")
+            continue
+        parsed[field] = number
 
     entry = parsed.get("ideal_buy")
     second = parsed.get("secondary_buy")
@@ -192,7 +209,6 @@ def validate_structure(sniper_points: Any) -> Dict[str, Any]:
     ]
 
     comparable = 0
-    violations: List[str] = []
     for lo_name, lo, hi_name, hi in pairs:
         if lo is None or hi is None:
             continue
@@ -200,8 +216,10 @@ def validate_structure(sniper_points: Any) -> Dict[str, Any]:
         if not lo < hi:
             violations.append(f"{lo_name}({lo}) >= {hi_name}({hi})")
 
-    if comparable == 0:
-        return {"status": "not_applicable", "reason": "insufficient_fields", "violations": []}
+    # violations 优先：只有 `ideal_buy: "-5"` 一个字段时凑不出任何序关系，
+    # 但它仍是 violation，不是 not_applicable。
     if violations:
         return {"status": "violation", "reason": None, "violations": violations}
+    if comparable == 0:
+        return {"status": "not_applicable", "reason": "insufficient_fields", "violations": []}
     return {"status": "ok", "reason": None, "violations": []}

@@ -188,10 +188,36 @@ class TestValidateStructure(unittest.TestCase):
         self.assertEqual(out["status"], "violation")
 
     def test_range_ideal_buy_uses_last_number(self) -> None:
-        # 与落库口径一致：'180-182' → 182
-        out = validate_structure(
-            {"ideal_buy": "180-182", "stop_loss": 175.0, "take_profit": 190.0}
-        )
+        # 与落库口径一致：'180-182' → 182（不是 180）。
+        # 夹具必须能分辨首/尾 —— 把边界卡在 181，两种取法结论相反。
+        # 取尾(182)：181 < 182 < 190 → ok ；取首(180)：181 < 180 为假 → violation
+        ok = validate_structure({"ideal_buy": "180-182", "stop_loss": 181.0, "take_profit": 190.0})
+        self.assertEqual(ok["status"], "ok")
+        # 取尾(182)：182 < 181 为假 → violation ；取首(180)：180 < 181 → ok
+        bad = validate_structure({"ideal_buy": "180-182", "stop_loss": 175.0, "take_profit": 181.0})
+        self.assertEqual(bad["status"], "violation")
+
+    def test_non_positive_extracted_value_is_violation(self) -> None:
+        out = validate_structure({"ideal_buy": "-5", "stop_loss": 1.0, "take_profit": 2.0})
+        self.assertEqual(out["status"], "violation")
+        self.assertTrue(any("ideal_buy" in v and "<= 0" in v for v in out["violations"]))
+
+    def test_zero_extracted_value_is_violation(self) -> None:
+        out = validate_structure({"ideal_buy": "0元", "stop_loss": 1.0, "take_profit": 2.0})
+        self.assertEqual(out["status"], "violation")
+
+    def test_non_finite_extracted_value_is_violation(self) -> None:
+        out = validate_structure({"ideal_buy": 12.5, "stop_loss": 12.0, "take_profit": "inf"})
+        self.assertEqual(out["status"], "violation")
+
+    def test_violation_wins_over_insufficient_fields(self) -> None:
+        # 只有一个非正字段，凑不出任何序关系，但仍是 violation
+        out = validate_structure({"ideal_buy": "-5"})
+        self.assertEqual(out["status"], "violation")
+
+    def test_numeric_non_positive_is_absent_not_violation(self) -> None:
+        # parse_sniper_value(-5) → None（上游即滤除，与落库 NULL 一致）
+        out = validate_structure({"ideal_buy": -5, "stop_loss": 1.0, "take_profit": 2.0})
         self.assertEqual(out["status"], "ok")
 
     def test_insufficient_fields_is_not_applicable(self) -> None:
