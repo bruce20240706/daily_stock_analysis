@@ -16,16 +16,20 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from src.schemas.decision_action import DecisionAction
+from src.schemas.report_schema import SniperPoints
 from src.schemas.trade_signal import (
     Invalidation,
     PriceZone,
     SignalEvidence,
     TradeSignal,
+    is_positive_finite,
+    trade_levels_invalid,
 )
 from src.services.volume_price_signals import PriceLevels, is_invalid_price_level
+from src.sniper_parsing import parse_sniper_value
 
 
 def build_from_price_levels(
@@ -76,6 +80,75 @@ def build_from_price_levels(
         entry_zone=PriceZone(low=entry, high=entry),
         stop=float(levels.stop),
         targets=[float(levels.target)],
+        confidence=confidence,
+        invalidation=invalidation,
+        action=action,
+        evidence=evidence,
+    )
+
+
+def build_from_sniper_points(
+    sniper: SniperPoints,
+    *,
+    code: str,
+    market: str,
+    signal_type: str,
+    interval: str,
+    horizon_bars: int,
+    as_of: str,
+    confidence: str,
+    invalidation: Invalidation,
+    action: Optional[DecisionAction] = None,
+    evidence: Optional[SignalEvidence] = None,
+) -> Optional[TradeSignal]:
+    """LLM 路径:SniperPoints -> TradeSignal(long)。源数据不足以构成有效信号时返回 None。
+
+    四个值一律走 parse_sniper_value(src/sniper_parsing.py:13),不另写解析。
+    继承其行为:"18.50-19.00" -> 19.0(区间字符串塌缩到上界)。
+
+    secondary_buy 是入场区间的第二端(可选);它的坏值只降级为退化点区间,不使
+    整条信号作废。**筛选必须先于 min/max**,否则 min(19.0, -5.0) 会把 -5.0 选成
+    区间下端。
+
+    排序与正数/有限性由 trade_levels_invalid 一次判定,**不**用
+    try/except ValidationError 吞异常:那会把「源数据不足」(应返回 None)与
+    「调用方传参错误」(应抛异常)混为一谈。
+    """
+    ideal = parse_sniper_value(sniper.ideal_buy)
+    secondary = parse_sniper_value(sniper.secondary_buy)
+    stop = parse_sniper_value(sniper.stop_loss)
+    target = parse_sniper_value(sniper.take_profit)
+
+    if ideal is None or stop is None or target is None:
+        return None
+
+    if is_positive_finite(ideal) and is_positive_finite(secondary):
+        zone_low, zone_high = min(ideal, secondary), max(ideal, secondary)
+    else:
+        zone_low = zone_high = ideal
+
+    targets: List[float] = [target]
+    if trade_levels_invalid(
+        direction="long",
+        zone_low=zone_low,
+        zone_high=zone_high,
+        stop=stop,
+        targets=targets,
+    ):
+        return None
+
+    return TradeSignal(
+        code=code,
+        market=market,
+        signal_type=signal_type,
+        interval=interval,
+        horizon_bars=horizon_bars,
+        as_of=as_of,
+        source="llm",
+        direction="long",
+        entry_zone=PriceZone(low=zone_low, high=zone_high),
+        stop=stop,
+        targets=targets,
         confidence=confidence,
         invalidation=invalidation,
         action=action,
