@@ -303,7 +303,6 @@ from typing import Annotated, Any, List, Literal, Optional, Sequence
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.schemas.analysis_context_pack import validate_iso8601_timestamp
-from src.schemas.decision_action import DecisionAction
 
 # get_market_for_stock(src/core/trading_calendar.py:110)的值域去掉 None。
 # 不复用 MarketRegion(src/schemas/market_light.py:11):它无 crypto 成员,
@@ -459,7 +458,7 @@ class Invalidation(BaseModel):
         return self
 ```
 
-注意:`DecisionAction` 在本 task 尚未被使用(Task 3 才用),但一并写入 import 以免 Task 3 再改 import 块。flake8 的门禁只选 `E9,F63,F7,F82`,不含 F401,不会因此变红。
+**不要**在本 task 预先 import `DecisionAction`:它到 Task 3 才被用到,提前引入就是一个未使用 import。Task 3 会自己补这行。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -513,15 +512,21 @@ def _signal(**overrides):
 
 
 def _long(**overrides):
-    return _signal(source="rule", direction="long",
+    # 先建 dict 再 update:直接写 `_signal(stop=7.0, **overrides)` 会在
+    # `_long(stop=11.0)` 时抛 TypeError(stop 收到多个值)。
+    payload = dict(source="rule", direction="long",
                    entry_zone=PriceZone(low=11.0, high=12.0), stop=7.0,
-                   targets=[19.0], **overrides)
+                   targets=[19.0])
+    payload.update(overrides)
+    return _signal(**payload)
 
 
 def _short(**overrides):
-    return _signal(source="llm", direction="short",
+    payload = dict(source="llm", direction="short",
                    entry_zone=PriceZone(low=30.0, high=32.0), stop=40.0,
-                   targets=[25.0], **overrides)
+                   targets=[25.0])
+    payload.update(overrides)
+    return _signal(**payload)
 
 
 def test_valid_long_and_short():
@@ -531,12 +536,12 @@ def test_valid_long_and_short():
     assert _short(targets=[25.0, 20.0]).targets == [25.0, 20.0]
 
 
-@pytest.mark.parametrize("overrides, why", [
-    (dict(stop=11.0), "long: stop 未严格低于 zone.low"),
-    (dict(targets=[12.0]), "long: targets[0] 未严格高于 zone.high"),
-    (dict(targets=[19.0, 19.0]), "long: targets 非严格递增"),
-])
-def test_long_ordering_violations(overrides, why):
+@pytest.mark.parametrize("overrides", [
+    dict(stop=11.0),
+    dict(targets=[12.0]),
+    dict(targets=[19.0, 19.0]),
+], ids=["stop 未严格低于 zone.low", "targets[0] 未严格高于 zone.high", "targets 非严格递增"])
+def test_long_ordering_violations(overrides):
     with pytest.raises(ValueError):
         _long(**overrides)
 
@@ -546,12 +551,12 @@ def test_long_zone_low_above_high():
         PriceZone(low=12.0, high=11.0)
 
 
-@pytest.mark.parametrize("overrides, why", [
-    (dict(stop=32.0), "short: stop 未严格高于 zone.high"),
-    (dict(targets=[30.0]), "short: targets[0] 未严格低于 zone.low"),
-    (dict(targets=[25.0, 26.0]), "short: targets 非严格递减"),
-])
-def test_short_ordering_violations(overrides, why):
+@pytest.mark.parametrize("overrides", [
+    dict(stop=32.0),
+    dict(targets=[30.0]),
+    dict(targets=[25.0, 26.0]),
+], ids=["stop 未严格高于 zone.high", "targets[0] 未严格低于 zone.low", "targets 非严格递减"])
+def test_short_ordering_violations(overrides):
     with pytest.raises(ValueError):
         _short(**overrides)
 
@@ -641,7 +646,13 @@ Expected: FAIL — `ImportError: cannot import name 'TradeSignal' from 'src.sche
 
 - [ ] **Step 3: 写实现**
 
-在 `src/schemas/trade_signal.py` 末尾追加:
+先在 `src/schemas/trade_signal.py` 的 import 块补一行(Task 2 刻意没提前引入):
+
+```python
+from src.schemas.decision_action import DecisionAction
+```
+
+再在文件末尾追加:
 
 ```python
 class TradeSignal(BaseModel):
@@ -1502,11 +1513,13 @@ Expected: PASS(4 项)
 cp src/schemas/trade_signal.py /tmp/ts_backup.py
 
 # 变异 A:白名单 —— 让一个非白名单模块提及它
-echo "# trade_signal" >> src/core/trading_calendar.py
+#   用一次性探针文件,**不要**改任何既有源文件:Global Constraints 写明
+#   唯一允许触碰的既有源文件是 src/schemas/analysis_context_pack.py。
+echo "# trade_signal" > src/_lock_probe.py
 python -m pytest tests/test_trade_signal_contract_locks.py::test_trade_signal_import_allowlist -q
-# Expected: FAIL,报出 src/core/trading_calendar.py
-sed -i '$ d' src/core/trading_calendar.py
-git diff --quiet src/core/trading_calendar.py && echo "还原 OK"
+# Expected: FAIL,报出 src/_lock_probe.py
+rm -f src/_lock_probe.py
+git status --porcelain src/ | grep . && echo "警告:src/ 有残留" || echo "还原 OK"
 
 # 变异 B:阳性对照 —— 把扫描根指向一个空目录,断言仍会红
 #   (改 _SKIP_DIR_PARTS 加入 "src" 即可模拟扫描器失效)
