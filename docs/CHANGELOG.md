@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 新增 canonical TradeSignal 契约(`src/schemas/trade_signal.py`)与两条只读构造器(`src/services/trade_signal_builder.py`):统一「方向/入场区间/止损/目标位/仓位/置信度/时效/失效条件」八字段,止损与目标沿用既有 ATR 波动率自适应价位,LLM 路径首次把 `ideal_buy` 与 `secondary_buy` 组装成入场区间两端。当前为零接线内部契约,不接入 API/报告/通知/持久化,不新增配置项,不改变任何现有载荷;呈现边界与已知缺口见 `docs/trade-signal-contract.md`。
 - [新功能] 新增 LLM 数值校验守卫(`LLM_CLAIM_VALIDATION_ENABLED`,默认关闭):把 LLM 陈述的价位/指标与 prompt 实际喂入的数值交叉核对,并校验买卖计划内部自洽;不一致时标注并封顶置信度,绝不覆盖数值、不改决策方向、不触发重试。详见 `docs/llm-claim-validation.md`。
 - [新功能] 信号看板每行呈现港股通(HKSC)可买性三态徽章(True→港股通/False→非港股通/None→无徽章,presence-only 纯展示不影响排序/决策);看板 uvicorn 请求内一次性自抓全市场成份集(有界 GGT_FETCH_TIMEOUT_SECONDS+进程级 12h 缓存+fail-closed),不需跨进程共享缓存;HK ETF 镜像报告口径
 - [新功能] HK 标的分析报告新增港股通(HKSC)南向维度:成份可买性(港股通标的/非标的/名单不可达三态)、个股南向持股(数量/市值/占发行股比)、市场级南向净流(EOD 成交净买额),经 akshare 东财端点抓取(12h 缓存+300s 负缓存,东财不可达时 fail-closed 不编造);纯展示不影响信号/决策(看板可买性注解见本段上方条目)
