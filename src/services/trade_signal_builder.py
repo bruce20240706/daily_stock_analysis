@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, List, Mapping, Optional
 
 from src.schemas.decision_action import DecisionAction
 from src.schemas.report_schema import SniperPoints
@@ -154,3 +154,39 @@ def build_from_sniper_points(
         action=action,
         evidence=evidence,
     )
+
+
+_EVIDENCE_KEYS = frozenset({
+    "verified", "hit_rate", "hit_sample", "ci_low", "ci_high",
+    "baseline_excess", "ci_low_corrected", "family_size",
+})
+
+
+def attach_evidence(
+    signal: TradeSignal,
+    hit_fields: Optional[Mapping[str, Any]],
+) -> TradeSignal:
+    """把 resolve_marker_hit_fields 的输出映成 SignalEvidence,返回新的 TradeSignal。
+
+    判别「有无证据」用 `hit_sample is not None`,**不是** `verified`:
+    resolver 的 _none 哨兵(signal_hit_rate.py:117-120)是 hit_sample=None 且
+    verified=False;而「有桶但未通过超额判定」也是 verified=False 却带真实样本。
+    用 verified 判别会把后者一起丢掉。
+
+    horizon 不匹配时 raise:把 5 根窗口的统计附到 10 根窗口的信号上是编程错误,
+    不是缺数据,必须响,不静默。
+
+    risk_metrics / oos 刻意丢弃(spec §5.6(5))。
+    """
+    if not hit_fields or hit_fields.get("hit_sample") is None:
+        return signal
+
+    horizon = hit_fields.get("horizon")
+    if horizon is not None and int(horizon) != signal.horizon_bars:
+        raise ValueError(
+            f"evidence horizon {horizon} does not match signal.horizon_bars "
+            f"{signal.horizon_bars}"
+        )
+
+    evidence = SignalEvidence(**{key: hit_fields.get(key) for key in _EVIDENCE_KEYS})
+    return signal.model_copy(update={"evidence": evidence})

@@ -5,12 +5,15 @@
 以此证明契约能被今天的数据填满,而不是白板上的字段名。
 """
 
+import ast
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
 from src.schemas.report_schema import SniperPoints
 from src.schemas.trade_signal import Invalidation, TradeSignal
-from src.services.trade_signal_builder import build_from_price_levels, build_from_sniper_points
+from src.services.trade_signal_builder import attach_evidence, build_from_price_levels, build_from_sniper_points
 from src.services.volume_price_signals import PriceLevels, derive_price_levels
 from src.sniper_parsing import parse_sniper_value
 
@@ -149,3 +152,103 @@ def test_parse_sniper_value_inherited_behaviour_is_characterized():
     assert parse_sniper_value("0") == 0.0               # 字符串入口无 >0 守卫
     assert parse_sniper_value(0) is None                # 数值入口有 >0 守卫
     assert parse_sniper_value("inf") == float("inf")    # 字符串入口无有限性守卫
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# resolve_marker_hit_fields(src/services/signal_hit_rate.py:117-120)的缺桶哨兵
+RESOLVER_NONE_SENTINEL = {
+    "hit_rate": None, "hit_sample": None, "verified": False, "ci_low": None,
+    "ci_high": None, "baseline_excess": None, "horizon": None,
+    "ci_low_corrected": None, "family_size": None, "risk_metrics": None, "oos": None,
+}
+
+# 有桶但未通过超额判定:verified=False 却带真实样本。八个字段值互不相同以锁住串位。
+RESOLVER_REAL_BUCKET = {
+    "hit_rate": 0.61, "hit_sample": 37, "verified": False, "ci_low": 0.52,
+    "ci_high": 0.71, "baseline_excess": 0.09, "horizon": 10,
+    "ci_low_corrected": 0.48, "family_size": 23,
+    "risk_metrics": {"sharpe": 1.0}, "oos": {"train": 1},
+}
+
+
+def _llm_signal():
+    return build_from_sniper_points(_sniper(), invalidation=_invalidation(), **COMMON)
+
+
+def test_attach_evidence_no_hit_fields():
+    assert attach_evidence(_llm_signal(), None).evidence is None
+
+
+def test_attach_evidence_resolver_none_sentinel_means_no_stats():
+    assert attach_evidence(_llm_signal(), RESOLVER_NONE_SENTINEL).evidence is None
+
+
+def test_attach_evidence_real_bucket_survives_verified_false():
+    """判别式是 hit_sample is not None,不是 verified。"""
+    evidence = attach_evidence(_llm_signal(), RESOLVER_REAL_BUCKET).evidence
+    assert evidence is not None
+    assert evidence.verified is False
+    assert evidence.hit_sample == 37
+
+
+def test_attach_evidence_maps_every_field_by_sentinel():
+    """八个字段值互不相同:任何一对串位都必红。"""
+    evidence = attach_evidence(_llm_signal(), RESOLVER_REAL_BUCKET).evidence
+    assert evidence.hit_rate == 0.61
+    assert evidence.hit_sample == 37
+    assert evidence.ci_low == 0.52
+    assert evidence.ci_high == 0.71
+    assert evidence.baseline_excess == 0.09
+    assert evidence.ci_low_corrected == 0.48
+    assert evidence.family_size == 23
+    assert evidence.verified is False
+
+
+def test_attach_evidence_drops_risk_metrics_and_oos():
+    """两生产者形状不同且为描述性统计,不进契约。"""
+    evidence = attach_evidence(_llm_signal(), RESOLVER_REAL_BUCKET).evidence
+    assert not hasattr(evidence, "risk_metrics")
+    assert not hasattr(evidence, "oos")
+
+
+def test_attach_evidence_raises_on_horizon_mismatch():
+    """把 5 根窗口的统计附到 10 根窗口的信号上是编程错误,必须响,不静默。"""
+    mismatched = {**RESOLVER_REAL_BUCKET, "horizon": 5}
+    with pytest.raises(ValueError, match="horizon"):
+        attach_evidence(_llm_signal(), mismatched)
+
+
+def test_attach_evidence_returns_new_object():
+    original = _llm_signal()
+    updated = attach_evidence(original, RESOLVER_REAL_BUCKET)
+    assert updated is not original
+    assert original.evidence is None
+
+
+def test_builder_module_declares_no_config_or_db_dependency():
+    """构造器纯度。
+
+    **不**用 monkeypatch 打 get_config:它根本不在本模块的调用路径上,打一个永不被
+    调的桩,任何实现都能通过——那是恒真测试。改测「这个文件 import 了什么」这个
+    可判定的事实。
+    """
+    source = (REPO_ROOT / "src" / "services" / "trade_signal_builder.py").read_text(encoding="utf-8")
+    imported = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            imported.add(module)
+            imported.update(f"{module}.{alias.name}" for alias in node.names)
+
+    # 前缀 + 末段精确匹配,不用子串:子串判据里的 "_repo" 迟早会误伤
+    # "src.schemas.report_schema" 这类合法名字。
+    forbidden_prefixes = ("src.config", "src.storage", "src.repositories", "sqlalchemy")
+    forbidden_names = {"get_config"}
+    offenders = sorted(
+        name for name in imported
+        if name.startswith(forbidden_prefixes) or name.rsplit(".", 1)[-1] in forbidden_names
+    )
+    assert not offenders, f"构造器不得依赖 config / DB:{offenders}"
