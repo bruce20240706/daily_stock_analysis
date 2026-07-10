@@ -4,7 +4,7 @@
 三个纯函数:零 I/O、零 config 读取、零 DB 访问、零日志。
 把仓库里**已经存在**的两种信号载荷适配成 canonical 形状,四种既有价位拼写一个不动:
 
-  PriceLevels(规则路径,src/services/volume_price_signals.py:352)  -> build_from_price_levels
+  PriceLevels(规则路径,src/services/volume_price_signals.py:353)  -> build_from_price_levels
   SniperPoints(LLM 路径,src/schemas/report_schema.py:128)          -> build_from_sniper_points
 
 `source` 与 `direction` 由构造器自身固定,不是参数:它们描述的正是这条信号从哪条

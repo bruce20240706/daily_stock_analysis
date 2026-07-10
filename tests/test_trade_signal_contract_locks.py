@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Inc 0 TradeSignal 契约的四条 drift-lock。
+"""Inc 0 TradeSignal 契约的五条 drift-lock。
 
-三条 canonical-derived(两边来源不同,非 tautology),一条 import 白名单(锁零接线)。
+一条 import 白名单(锁零接线);两条 canonical-derived 跨源钉死(两边各有独立真源,
+非 tautology):SignalInterval ↔ SUPPORTED_INTERVALS、RESERVED_SIGNAL_TYPE ↔
+BASELINE_SIGNAL_TYPE;一条哨兵字段映射锁(锁构造器内部赋值不串位、不误读
+levels.risk_reward);一条证据键锁(锁 _EVIDENCE_KEYS 相对真实 resolver 输出集合的
+子集关系,防 resolver 改名后静默漏映射)。
 """
 
 from pathlib import Path
@@ -12,7 +16,8 @@ import pytest
 from src.core.intraday_backtest import SUPPORTED_INTERVALS
 from src.schemas.trade_signal import RESERVED_SIGNAL_TYPE, Invalidation, SignalInterval
 from src.services.signal_backtest import BASELINE_SIGNAL_TYPE
-from src.services.trade_signal_builder import build_from_price_levels
+from src.services.signal_hit_rate import resolve_marker_hit_fields
+from src.services.trade_signal_builder import _EVIDENCE_KEYS, build_from_price_levels
 from src.services.volume_price_signals import PriceLevels
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -103,3 +108,34 @@ def test_rule_path_field_mapping_sentinels():
     assert signal.stop == 7.0
     assert signal.targets == [19.0]
     assert signal.risk_reward == pytest.approx(2.0)   # (19-11)/(11-7);证明 99.0 被无视
+
+
+def test_evidence_keys_are_subset_of_real_resolver_output():
+    """_EVIDENCE_KEYS 钉死在**真实** resolve_marker_hit_fields 输出的 key 集合上。
+
+    tests/test_trade_signal_builder.py 里的 RESOLVER_REAL_BUCKET 是手写字典,形状上
+    模仿 resolve_marker_hit_fields 的返回值,但从未真正流经该函数——如果有人改名
+    resolver 里的某个 key(比如把 baseline_excess 改成别的名字),RESOLVER_REAL_BUCKET
+    不会察觉,attach_evidence 会静默把 evidence.baseline_excess 置 None,而 builder
+    测试仍然全绿。这正是仓库明确禁止的「mock 掉真实风险层」模式,手写镜像字典本身
+    管不住这条契约,必须有一条真正调用真实 resolver 的锁。
+
+    本测试改为直接调用 resolve_marker_hit_fields("breakout", "NOT_A_REAL_CODE")。
+    "NOT_A_REAL_CODE" 不被任何市场规则识别,resolver 内部
+    `market = get_market_for_stock(code)` 会返回 None;signal_hit_rate.py 里
+    `if market is None: return dict(_none)` 这一行**先于** `cfg = get_config()`,
+    也先于任何 Repository 构造——因此这是一次零 I/O、零 config、零 DB 的纯调用,
+    但拿到的是 resolver 真实定义的 key 名集合,不是我们手写猜测出来的。
+    """
+    result = resolve_marker_hit_fields("breakout", "NOT_A_REAL_CODE")
+
+    # 证明真的走了零 I/O 的哨兵早退路径,不是意外命中了某个真实数据桶。
+    assert result["hit_sample"] is None
+
+    # 真正的锁:resolver 一旦改名/删掉 _EVIDENCE_KEYS 依赖的任何一个 key,这里立刻红。
+    assert set(_EVIDENCE_KEYS) <= set(result)
+
+    # resolver 返回但 SignalEvidence 刻意丢弃的 key 必须恰好是这三个;resolver 新增
+    # 字段会让这个差集变化,逼一次有意识的收进/继续丢的决定,而不是被默默忽略。
+    dropped = set(result) - set(_EVIDENCE_KEYS)
+    assert dropped == {"horizon", "risk_metrics", "oos"}

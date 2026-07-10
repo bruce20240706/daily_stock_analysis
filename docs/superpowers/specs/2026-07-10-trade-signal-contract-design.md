@@ -104,7 +104,7 @@
 | 形状 | 位置 | 字段 |
 | --- | --- | --- |
 | `SniperPoints` | `src/schemas/report_schema.py:128` | `ideal_buy / secondary_buy / stop_loss / take_profit` |
-| `PriceLevels` | `src/services/volume_price_signals.py:352` | `entry / stop / target / risk_reward` |
+| `PriceLevels` | `src/services/volume_price_signals.py:353` | `entry / stop / target / risk_reward` |
 | `PriceLines` | `api/v1/schemas/stocks.py:139` | `entry / stop / target` |
 | `key_levels` | `src/agent/protocols.py:139` | `support / resistance / stop_loss` |
 
@@ -504,7 +504,7 @@ def attach_evidence(signal: TradeSignal, hit_fields: Optional[Mapping[str, Any]]
 | `is_invalid_price_level` 作为通用排序判据 | `volume_price_signals.py:425` | docstring 写死 `long-setup ordering: stop < entry < target` 且额外要求 `entry <= current_price`。对 `short` 直接是错的。Inc 3 已确立「不复用它」的先例。规则路径(long)仍调它,因其判据恰好适用。 |
 | `MarketRegion` | `market_light.py:11` | 无 `crypto` 成员;且是市场级 regime 语义,非个股信号的市场键。 |
 | `claim_validation.validate_structure` 作为构造器判据 | `src/claim_validation.py:164` | **最接近的既有原语,必须讲清楚**,见 §8.1 |
-| `PriceLevels` 作为契约字段 | `volume_price_signals.py:352` | 非 frozen dataclass、非 pydantic,不符 `src/schemas/` 房规;且只能表达标量 entry/target,表达不了 `entry_zone` 与 `targets[]`。 |
+| `PriceLevels` 作为契约字段 | `volume_price_signals.py:353` | 非 frozen dataclass、非 pydantic,不符 `src/schemas/` 房规;且只能表达标量 entry/target,表达不了 `entry_zone` 与 `targets[]`。 |
 | `report_schema.SniperPoints` 直接内嵌 | `report_schema.py:128` | 值为 `Union[str,int,float]` 未解析;且它所在的树是校验专用(`AnalysisReportSchema` 的 `model_validate` 返回值被丢弃,`analyzer.py:3884`),树顶 `ConfigDict(extra="allow")`(`report_schema.py:181`)—— `SniperPoints` 自身无 `model_config`,继承 pydantic 默认 `extra="ignore"`。 |
 | `risk_metrics` / `oos` 进 `SignalEvidence` | §2.9 | 两生产者形状不同;且为描述性统计,非选择判据。 |
 | `is_limit_bar` / `is_anomalous` 作为可执行性 gate | `volume_price_signals.py:247` | 退化 bar 启发式,不是涨跌停判定(§2.6)。 |
