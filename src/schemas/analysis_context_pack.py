@@ -22,7 +22,7 @@ class _AnalysisContextModel(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
 
-def _validate_iso8601_timestamp(value: Optional[str]) -> Optional[str]:
+def validate_iso8601_timestamp(value: Optional[str]) -> Optional[str]:
     if value is None:
         return value
     if "T" not in value:
@@ -33,6 +33,10 @@ def _validate_iso8601_timestamp(value: Optional[str]) -> Optional[str]:
     except ValueError as exc:
         raise ValueError("timestamp must be an ISO 8601 datetime string") from exc
     return value
+
+
+# 私有别名:保持模块内既有引用(:74 / :90)与任何历史导入不变。
+_validate_iso8601_timestamp = validate_iso8601_timestamp
 
 
 class ContextFieldStatus(str, Enum):
