@@ -1539,7 +1539,11 @@ python -m pytest tests/test_trade_signal_contract_locks.py::test_signal_interval
 cp /tmp/ts_backup.py src/schemas/trade_signal.py
 
 # 变异 D:保留哨兵
-sed -i 's/RESERVED_SIGNAL_TYPE = "__baseline__"/RESERVED_SIGNAL_TYPE = "__base__"/' src/schemas/trade_signal.py
+#   注意常量带 `: str` 标注(Task 2 的 fix 加的)。写成 `RESERVED_SIGNAL_TYPE = "__baseline__"`
+#   的 sed 模式会**静默 no-op**:测试照样绿,却什么都没变异 —— 那是假的「lock 有效」证据。
+#   每次变异后都必须先确认文件真的变了(`git diff --stat` 非空),再看测试结果。
+sed -i 's/RESERVED_SIGNAL_TYPE: str = "__baseline__"/RESERVED_SIGNAL_TYPE: str = "__base__"/' src/schemas/trade_signal.py
+git diff --stat src/schemas/trade_signal.py | grep -q . || { echo "变异未生效,sed 模式没匹配上"; exit 1; }
 python -m pytest tests/test_trade_signal_contract_locks.py::test_reserved_signal_type_pinned_to_backtest_sentinel -q
 # Expected: FAIL
 cp /tmp/ts_backup.py src/schemas/trade_signal.py
