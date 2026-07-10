@@ -16,11 +16,12 @@ tests/test_trade_signal_contract_locks.py 的 import 白名单锁住这一点;
 from __future__ import annotations
 
 import math
-from typing import Annotated, Any, Literal, Optional, Sequence
+from typing import Annotated, Any, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.schemas.analysis_context_pack import validate_iso8601_timestamp
+from src.schemas.decision_action import DecisionAction
 
 # get_market_for_stock(src/core/trading_calendar.py:110)的值域去掉 None。
 # 不复用 MarketRegion(src/schemas/market_light.py:11):它无 crypto 成员,
@@ -174,3 +175,89 @@ class Invalidation(BaseModel):
                 "invalidation requires at least one of price / valid_until / note"
             )
         return self
+
+
+class TradeSignal(BaseModel):
+    """canonical 可执行信号契约(战略 §L1:72 的 8 字段)。
+
+    身份四元组 (signal_type, market, interval, horizon_bars) 与 signal_stats 的
+    自然键对齐,evidence 靠它定位统计桶。故 horizon 拆成 interval + horizon_bars:
+    单独一个 horizon 无法定位证据桶。
+
+    **零接线**:见模块 docstring 与 docs/trade-signal-contract.md。
+    """
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    # --- 身份 ---
+    code: str = Field(min_length=1)
+    market: SignalMarket
+    signal_type: str = Field(min_length=1)
+    interval: SignalInterval = "1d"
+    horizon_bars: int = Field(gt=0)
+    as_of: str                     # 完整 ISO-8601 datetime;日线写 T00:00:00
+    source: SignalSource
+
+    # --- 战略 :72 钦定的 8 字段(horizon 拆为 interval + horizon_bars)---
+    direction: SignalDirection
+    entry_zone: PriceZone
+    stop: float = Field(gt=0, allow_inf_nan=False)
+    targets: List[Level] = Field(min_length=1)
+    # 单位 = 权益比例;允许 > 1 表示杠杆(perp L>1 回测真实存在),故不设 le=1。
+    # None = 尚未定量(Inc 5 的 sizing 填)。
+    position_size: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    confidence: SignalConfidence
+    invalidation: Invalidation
+
+    # --- 投影与证据 ---
+    action: Optional[DecisionAction] = None       # 八态投影,不新增词表
+    evidence: Optional[SignalEvidence] = None     # None = 无历史统计路径(short 侧必然如此)
+
+    @field_validator("market", mode="before")
+    @classmethod
+    def _normalize_market(cls, value: Any) -> Any:
+        """引擎/回测/signal_stats 用小写,看板 _infer_market 用大写;此处归一。"""
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("signal_type")
+    @classmethod
+    def _reject_reserved_signal_type(cls, value: str) -> str:
+        if value == RESERVED_SIGNAL_TYPE:
+            raise ValueError(
+                f"signal_type must not be the reserved sentinel {RESERVED_SIGNAL_TYPE!r}"
+            )
+        return value
+
+    @field_validator("as_of")
+    @classmethod
+    def _as_of_iso8601(cls, value: str) -> str:
+        return validate_iso8601_timestamp(value)
+
+    @model_validator(mode="after")
+    def _levels_consistent(self) -> "TradeSignal":
+        if trade_levels_invalid(
+            direction=self.direction,
+            zone_low=self.entry_zone.low,
+            zone_high=self.entry_zone.high,
+            stop=self.stop,
+            targets=self.targets,
+        ):
+            raise ValueError(
+                "trade levels violate the direction-aware ordering invariant "
+                f"(direction={self.direction})"
+            )
+        return self
+
+    @property
+    def risk_reward(self) -> float:
+        """报酬风险比,取**最差入场**(long 用 zone.high、short 用 zone.low)。
+
+        普通 @property 而非 computed_field:后者会进入 model_dump(),与
+        extra="forbid" 组合会让 TradeSignal(**s.model_dump()) round-trip 抛
+        ValidationError。分母由 _levels_consistent 保证严格为正,故恒有限。
+        """
+        if self.direction == "long":
+            entry = self.entry_zone.high
+            return (self.targets[0] - entry) / (entry - self.stop)
+        entry = self.entry_zone.low
+        return (entry - self.targets[0]) / (self.stop - entry)
