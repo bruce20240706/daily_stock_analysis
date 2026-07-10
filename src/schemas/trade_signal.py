@@ -16,7 +16,7 @@ tests/test_trade_signal_contract_locks.py 的 import 白名单锁住这一点;
 from __future__ import annotations
 
 import math
-from typing import Annotated, Any, List, Literal, Optional, Sequence
+from typing import Annotated, Any, Literal, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -42,7 +42,7 @@ SignalInterval = Literal["1d", "1m", "5m", "15m", "1h"]
 
 # 回测基线格子的保留哨兵 signal_type。真源:BASELINE_SIGNAL_TYPE
 # (src/services/signal_backtest.py:37)。schema 层不能 import 回测模块,故字面量 + drift-lock。
-RESERVED_SIGNAL_TYPE = "__baseline__"
+RESERVED_SIGNAL_TYPE: str = "__baseline__"
 
 # 价位元素约束:gt=0 拦不住 inf(inf > 0 为真),必须叠加 allow_inf_nan=False。
 Level = Annotated[float, Field(gt=0, allow_inf_nan=False)]
