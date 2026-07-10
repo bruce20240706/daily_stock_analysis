@@ -1525,12 +1525,16 @@ python -m pytest tests/test_trade_signal_contract_locks.py::test_trade_signal_im
 rm -f src/_lock_probe.py
 git status --porcelain src/ | grep . && echo "警告:src/ 有残留" || echo "还原 OK"
 
-# 变异 B:阳性对照 —— 把扫描根指向一个空目录,断言仍会红
-#   (改 _SKIP_DIR_PARTS 加入 "src" 即可模拟扫描器失效)
+# 变异 B:阳性对照 —— 模拟扫描器失效(把 "src" 塞进跳过目录),断言仍会红
+#   还原**必须**走文件备份,不能靠「反向 sed」:反向模式一旦写错或正向模式多匹配了一行,
+#   还原就会静默留下损坏内容,而这正是文件备份要防的事(与 C/D/E 同一手法)。
+cp tests/test_trade_signal_contract_locks.py /tmp/locks_backup.py
 sed -i 's/"tests", "build", "dist", ".worktrees",/"tests", "build", "dist", ".worktrees", "src",/' tests/test_trade_signal_contract_locks.py
+git diff --stat tests/test_trade_signal_contract_locks.py | grep -q . || { echo "变异未生效"; exit 1; }
 python -m pytest tests/test_trade_signal_contract_locks.py::test_trade_signal_import_allowlist -q
 # Expected: FAIL "扫描器失效:阳性对照未命中"
-sed -i 's/"tests", "build", "dist", ".worktrees", "src",/"tests", "build", "dist", ".worktrees",/' tests/test_trade_signal_contract_locks.py
+cp /tmp/locks_backup.py tests/test_trade_signal_contract_locks.py
+git diff --quiet tests/test_trade_signal_contract_locks.py && echo "还原 OK" || echo "✗ 还原失败"
 
 # 变异 C:interval 集合
 sed -i 's/SignalInterval = Literal\["1d", "1m", "5m", "15m", "1h"\]/SignalInterval = Literal["1d", "1m", "5m", "15m"]/' src/schemas/trade_signal.py
@@ -1560,7 +1564,7 @@ cp /tmp/tsb_backup.py src/services/trade_signal_builder.py
 # 全部还原后确认干净
 python -m pytest tests/test_trade_signal_contract_locks.py -q
 git status --porcelain
-rm -f /tmp/ts_backup.py /tmp/tsb_backup.py
+rm -f /tmp/ts_backup.py /tmp/tsb_backup.py /tmp/locks_backup.py
 ```
 
 Expected:五个变异各自让对应 lock 变红;还原后 4 项全过,`git status --porcelain` 只显示新测试文件未跟踪。
